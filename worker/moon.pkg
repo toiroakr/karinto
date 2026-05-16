@@ -1,0 +1,10 @@
+import {
+  "toiroakr/curllint" @curllint,
+  "moonbitlang/core/json",
+}
+
+supported_targets = "js"
+
+options(
+  link: { "js": { "exports": [ "lint_string" ], "format": "esm" } },
+)

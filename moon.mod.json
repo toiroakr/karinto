@@ -1,0 +1,12 @@
+{
+  "name": "toiroakr/curllint",
+  "version": "0.1.0",
+  "deps": {
+    "moonbit-community/yaml": "0.0.4"
+  },
+  "readme": "README.mbt.md",
+  "repository": "",
+  "license": "Apache-2.0",
+  "keywords": [],
+  "description": ""
+}

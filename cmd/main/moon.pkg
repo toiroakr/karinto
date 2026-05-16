@@ -1,0 +1,8 @@
+import {
+  "toiroakr/curllint" @curllint,
+  "moonbitlang/core/json",
+}
+
+options(
+  "is-main": true,
+)

@@ -1,0 +1,68 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "toiroakr/curllint"
+
+import {
+  "moonbit-community/yaml",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn all_rules() -> Array[Rule]
+
+pub fn lint(String, kind? : FileKind, disabled? : Array[String]) -> LintResult
+
+// Errors
+
+// Types and methods
+pub(all) struct Diagnostic {
+  rule : String
+  severity : Severity
+  message : String
+  pos : Position?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for Diagnostic
+
+pub(all) enum FileKind {
+  Workflow
+  Action
+  Unknown
+} derive(Eq, @debug.Debug)
+pub impl ToJson for FileKind
+
+pub(all) struct LintResult {
+  kind : FileKind
+  stats : Stats
+  diagnostics : Array[Diagnostic]
+  parse_error : String?
+}
+pub impl ToJson for LintResult
+
+pub(all) struct Position {
+  line : Int
+  col : Int
+} derive(Eq, ToJson, @debug.Debug)
+
+pub(all) struct Rule {
+  id : String
+  title : String
+  applies : (FileKind) -> Bool
+  check : (@yaml.Yaml, Array[Diagnostic]) -> Unit
+}
+
+pub(all) enum Severity {
+  Error
+  Warning
+  Info
+} derive(Eq, @debug.Debug)
+pub impl ToJson for Severity
+
+pub(all) struct Stats {
+  jobs : Int
+  steps : Int
+  lines : Int
+} derive(Eq, ToJson, @debug.Debug)
+
+// Type aliases
+
+// Traits
+
