@@ -16,31 +16,60 @@ Implemented:
 
 | ID | Severity | Summary |
 | --- | --- | --- |
-| `act-id-unique` | error | Job and step IDs must be unique (case-insensitive) |
-| `ghl-001` | warning | Jobs must declare `permissions:` |
-| `ghl-003` | error | `permissions: write-all` is forbidden |
+| `duplicate-job-step-ids` | error | Job and step IDs must be unique (case-insensitive) |
+| `permissions-write-all-forbidden` | error | `permissions: write-all` is forbidden |
+| `job-permissions-required` | warning | Jobs must declare `permissions:` |
+| `job-timeout-minutes-required` | warning | Jobs must declare `timeout-minutes:` |
+| `checkout-persist-credentials-false` | error | `actions/checkout` must set `persist-credentials: false` |
+| `unpinned-uses` | warning | `uses:` must pin to a full-length commit SHA |
+| `artipacked` | error | Checkout-then-upload-artifact leaks persisted credentials |
+| `bot-conditions` | error | `github.actor` bot check is spoofable |
+| `excessive-permissions` | warning | Job grants ≥3 `write` permissions |
+| `use-trusted-publishing` | info | Prefer OIDC trusted publishing over long-lived tokens |
+| `dependabot-cooldown` | info | Dependabot updates should configure `cooldown` |
 
-The remaining ~40 medium-and-higher-priority rules are listed in
-`curllint_test.mbt` as `#skip(...)`-attributed test cases. They describe the
-expected behaviour so they can be filled in one-by-one.
+The catalogue in `rules_catalog.mbt` enumerates **82 rules** — every
+distinct check actionlint, zizmor, and ghalint perform. **11 are
+implemented**; the remaining 71 are scaffolded as `#skip`-attributed
+fixtures. Five rules are deliberate consolidations of overlapping
+upstream checks; each one records every upstream identifier it absorbs
+in its `origins` field, so the lineage is preserved:
+
+| Consolidated rule | Absorbed upstreams |
+| --- | --- |
+| `unpinned-uses` | `zizmor:unpinned-uses` + `ghalint:ghl-008 (action_ref_should_be_full_length_commit_sha)` |
+| `secrets-inherit` | `zizmor:secrets-inherit` + `ghalint:ghl-004 (deny_inherit_secrets)` |
+| `unpinned-images` | `zizmor:unpinned-images` + `ghalint:ghl-007 (deny_job_container_latest_image)` |
+| `hardcoded-container-credentials` | `zizmor:hardcoded-container-credentials` + `actionlint:hardcoded-credentials` |
+| `template-injection` | `zizmor:template-injection` + `actionlint:script-injection` |
+
+The 71 unimplemented rules are scaffolded in the per-source
+`*_rules_test.mbt` files as `#skip(...)`-attributed test cases with
+fixture YAML + expected JSON, so each rule has a precise behavioural spec
+ready to be filled in.
 
 ## Layout
 
 ```
-.                        # MoonBit library package — the lint engine
-├── curllint.mbt         # public API: types, lint(), helpers
-├── rules.mbt            # rule registry + currently-implemented rules
-├── curllint_test.mbt    # blackbox tests + skipped specs for unimplemented rules
-├── curllint_wbtest.mbt  # whitebox tests (internal helpers)
-├── cmd/main             # demo CLI (`moon run cmd/main`)
-├── worker               # MoonBit → JS export package for Cloudflare Workers
-└── cf                   # Cloudflare Worker (`index.js` + `wrangler.jsonc`)
+.                             # MoonBit library package — the lint engine
+├── curllint.mbt              # public API: types, lint(), helpers
+├── rules.mbt                 # rule registry + implemented rules
+├── rules_catalog.mbt         # full catalogue (82 rules, metadata + origins)
+├── curllint_test.mbt         # blackbox tests for implemented rules + engine
+├── actionlint_rules_test.mbt # 35 #skip fixtures for actionlint-derived rules
+├── zizmor_rules_test.mbt     # 30 #skip + 6 active fixtures for zizmor audits
+├── ghalint_rules_test.mbt    #  6 #skip + 2 active fixtures for ghalint policies
+├── coverage_test.mbt         # asserts catalogue ↔ tests + origins stay in sync
+├── curllint_wbtest.mbt       # whitebox tests (internal helpers)
+├── cmd/main                  # demo CLI (`moon run cmd/main`)
+├── worker                    # MoonBit → JS export package for the Worker
+└── cf                        # Cloudflare Worker (`index.js` + `wrangler.jsonc`)
 ```
 
 ## Develop
 
 ```sh
-# Tests (11 impl + 45 skipped)
+# Tests (23 active + 71 skipped fixtures)
 moon test
 
 # WASM-gc build (default backend, used by `moon run`)
@@ -83,7 +112,7 @@ or both — body values win.
 | `content` | string | The YAML source |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `targets` | string | Comma-separated path globs (used with `repo`). Default `.github/workflows/*.yml,.github/workflows/*.yaml` |
+| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. |
 
 ### Examples
 
@@ -99,7 +128,7 @@ curl -X POST --data-binary @.github/workflows/ci.yml \
 ```sh
 curl https://curllint.example.workers.dev \
      --data-urlencode "content@.github/workflows/ci.yml" \
-     --data "disable=ghl-*"
+     --data "disable=permissions-*"
 ```
 
 `GET` with query parameters (small payloads only):
@@ -126,7 +155,7 @@ curl "https://curllint.example.workers.dev?repo=actions/checkout&targets=action.
     "stats": { "jobs": 2, "steps": 2, "lines": 11 },
     "diagnostics": [
       {
-        "rule": "act-id-unique",
+        "rule": "duplicate-job-step-ids",
         "severity": "error",
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)"
       }
@@ -153,7 +182,7 @@ captured by `wrangler tail`:
 
 ```json
 { "event": "request", "method": "POST", "type": "(auto)",
-  "disable": "ghl-*", "repo": "", "targets": "",
+  "disable": "permissions-*", "repo": "", "targets": "",
   "content_lines": 42, "files": 1, "elapsed_ms": 4 }
 ```
 

@@ -8,8 +8,8 @@
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
-//   - repo      "owner/name" — fetch workflow files from a public GitHub repo
-//   - targets   comma-separated path globs (used with `repo`)
+//   - repo      "owner/name" — fetch files from a public GitHub repo
+//   - targets   comma-separated literal paths (required with `repo`)
 //
 // The handler logs a one-line JSON record per request to stdout.
 
@@ -26,8 +26,6 @@ function getLintString() {
   }
   return _lintStringPromise;
 }
-
-const DEFAULT_TARGETS = [".github/workflows/*.yml", ".github/workflows/*.yaml"];
 
 export default {
   async fetch(request, env, ctx) {
@@ -130,28 +128,27 @@ async function handle(params, env) {
 
 async function handleRepo(params, disable, type, lint_string) {
   const repo = params.repo;
-  const targets = (params.targets || DEFAULT_TARGETS.join(","))
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
   if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw new Error(`invalid repo: ${repo}`);
   }
-  // Discover files via the GitHub Trees API (public repos, no token).
-  const tree = await ghFetch(
-    `https://api.github.com/repos/${repo}/git/trees/HEAD?recursive=1`,
-  );
-  if (!tree.tree) throw new Error(`failed to fetch tree for ${repo}`);
-  const matched = tree.tree
-    .filter((node) => node.type === "blob")
-    .filter((node) => targets.some((g) => globMatch(g, node.path)));
+  const targets = (params.targets || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (targets.length === 0) {
+    throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
+  }
 
   const files = [];
-  for (const node of matched.slice(0, 50)) {
-    const raw = await ghFetchText(
-      `https://raw.githubusercontent.com/${repo}/HEAD/${node.path}`,
-    );
-    const guessKind = type || guessKindFromPath(node.path);
+  for (const path of targets.slice(0, 50)) {
+    const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
+    const res = await fetch(url, { headers: { "user-agent": "curllint-worker" } });
+    if (!res.ok) {
+      files.push({ path, ok: false, error: `GET raw → ${res.status}` });
+      continue;
+    }
+    const raw = await res.text();
+    const guessKind = type || guessKindFromPath(path);
     let body;
     try {
       jsYaml.loadAll(raw);
@@ -159,7 +156,7 @@ async function handleRepo(params, disable, type, lint_string) {
     } catch (e) {
       body = { ok: false, parse_error: `yaml parse error: ${e.message}` };
     }
-    files.push({ path: node.path, ...body });
+    files.push({ path, ...body });
   }
   return {
     ok: files.every((f) => f.ok !== false),
@@ -173,41 +170,6 @@ function guessKindFromPath(path) {
   if (path.endsWith("action.yml") || path.endsWith("action.yaml")) return "action";
   if (path.startsWith(".github/workflows/")) return "workflow";
   return "";
-}
-
-async function ghFetch(url) {
-  const res = await fetch(url, {
-    headers: {
-      "user-agent": "curllint-worker",
-      accept: "application/vnd.github+json",
-    },
-  });
-  if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
-  return await res.json();
-}
-
-async function ghFetchText(url) {
-  const res = await fetch(url, { headers: { "user-agent": "curllint-worker" } });
-  if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
-  return await res.text();
-}
-
-function globMatch(pattern, str) {
-  // Convert simple glob (`*`, `?`) to RegExp.
-  const re = new RegExp(
-    "^" +
-      pattern
-        .split(/(\*\*|\*|\?)/)
-        .map((part) => {
-          if (part === "**") return ".*";
-          if (part === "*") return "[^/]*";
-          if (part === "?") return "[^/]";
-          return part.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-        })
-        .join("") +
-      "$",
-  );
-  return re.test(str);
 }
 
 function json(body, status = 200) {
