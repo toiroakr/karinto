@@ -14,13 +14,13 @@ pub fn lint_string(
   vuln_uses_str : String,
 ) -> String {
   let kind = match kind_str {
-    "workflow" => @curllint.FileKind::Workflow
-    "action" => @curllint.FileKind::Action
-    _ => @curllint.FileKind::Unknown
+    "workflow" => @karinto.FileKind::Workflow
+    "action" => @karinto.FileKind::Action
+    _ => @karinto.FileKind::Unknown
   }
   let disabled = split_csv(disable_str)
   let vuln_uses = split_csv(vuln_uses_str)
-  let result = @curllint.lint(content, kind~, disabled~, vuln_uses~)
+  let result = @karinto.lint(content, kind~, disabled~, vuln_uses~)
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),
     "result": result.to_json(),

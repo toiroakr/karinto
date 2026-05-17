@@ -1,5 +1,5 @@
 import {
-  "toiroakr/curllint" @curllint,
+  "toiroakr/karinto" @karinto,
   "moonbitlang/core/json",
 }
 

@@ -1,4 +1,4 @@
-// Blackbox tests for the curllint library.
+// Blackbox tests for the karinto library.
 //
 // This file holds tests for currently-implemented rules and the engine's
 // general behaviour (parse errors, the `disable` glob, etc.). Per-rule
@@ -8,8 +8,8 @@
 // `coverage_test.mbt` asserts the two stay in sync.
 
 ///|
-fn lint_json(content : String, kind? : @curllint.FileKind = Unknown) -> Json {
-  @curllint.lint(content, kind~).to_json()
+fn lint_json(content : String, kind? : @karinto.FileKind = Unknown) -> Json {
+  @karinto.lint(content, kind~).to_json()
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ test "disable: skip a rule with a glob pattern" {
     #|    timeout-minutes: 5
     #|    steps:
     #|      - run: echo hi
-  let res = @curllint.lint(yaml, disabled=["permissions-*"])
+  let res = @karinto.lint(yaml, disabled=["permissions-*"])
   json_inspect(res.to_json(), content={
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
@@ -168,7 +168,7 @@ test "disable: skip a rule with a glob pattern" {
 ///|
 test "parse error: malformed YAML is surfaced" {
   let yaml = "on: [push\njobs:\n  build:\n    steps: []"
-  let res = @curllint.lint(yaml)
+  let res = @karinto.lint(yaml)
   json_inspect(res.parse_error is Some(_), content=true)
   json_inspect(res.diagnostics.length(), content=0)
 }

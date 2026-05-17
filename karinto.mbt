@@ -1,5 +1,5 @@
 ///|
-/// curllint — GitHub Actions linter library.
+/// karinto — GitHub Actions linter library.
 ///
 /// Lints a YAML workflow or action file. Rules are inspired by actionlint,
 /// zizmor, and ghalint (all MIT). See THIRD_PARTY_LICENSES.md for attribution.

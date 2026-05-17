@@ -1,5 +1,5 @@
 {
-  "name": "curllint-worker",
+  "name": "karinto-worker",
   "version": "0.1.0",
   "type": "module",
   "private": true,

@@ -1,5 +1,5 @@
 {
-  "name": "toiroakr/curllint",
+  "name": "toiroakr/karinto",
   "version": "0.1.0",
   "deps": {
     "moonbit-community/yaml": "0.0.4"

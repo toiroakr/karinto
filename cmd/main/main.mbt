@@ -17,6 +17,6 @@ fn main {
     #|    runs-on: ubuntu-latest
     #|    steps:
     #|      - run: echo hi
-  let result = @curllint.lint(sample)
+  let result = @karinto.lint(sample)
   println(result.to_json().stringify(indent=2))
 }

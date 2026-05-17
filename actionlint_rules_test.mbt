@@ -1,6 +1,6 @@
 // Fixture + expected-JSON tests for the actionlint-derived rule family.
 //
-// `duplicate-job-step-ids` is already implemented in `curllint_test.mbt`; every
+// `duplicate-job-step-ids` is already implemented in `karinto_test.mbt`; every
 // other entry below is `#skip("not implemented yet")` until the matching
 // check ships.
 

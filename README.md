@@ -1,4 +1,4 @@
-# curllint
+# karinto
 
 `curl`-able GitHub Actions linter. The lint engine is written in
 [MoonBit](https://www.moonbitlang.com/) and runs on Cloudflare Workers. Rules
@@ -52,15 +52,15 @@ ready to be filled in.
 
 ```
 .                             # MoonBit library package — the lint engine
-├── curllint.mbt              # public API: types, lint(), helpers
+├── karinto.mbt               # public API: types, lint(), helpers
 ├── rules.mbt                 # rule registry + implemented rules
 ├── rules_catalog.mbt         # full catalogue (82 rules, metadata + origins)
-├── curllint_test.mbt         # blackbox tests for implemented rules + engine
+├── karinto_test.mbt          # blackbox tests for implemented rules + engine
 ├── actionlint_rules_test.mbt # 35 #skip fixtures for actionlint-derived rules
 ├── zizmor_rules_test.mbt     # 30 #skip + 6 active fixtures for zizmor audits
 ├── ghalint_rules_test.mbt    #  6 #skip + 2 active fixtures for ghalint policies
 ├── coverage_test.mbt         # asserts catalogue ↔ tests + origins stay in sync
-├── curllint_wbtest.mbt       # whitebox tests (internal helpers)
+├── karinto_wbtest.mbt        # whitebox tests (internal helpers)
 ├── cmd/main                  # demo CLI (`moon run cmd/main`)
 ├── worker                    # MoonBit → JS export package for the Worker
 └── cf                        # Cloudflare Worker (`index.js` + `wrangler.jsonc`)
@@ -120,13 +120,13 @@ or both — body values win.
 
 ```sh
 curl -X POST --data-binary @.github/workflows/ci.yml \
-     https://curllint.example.workers.dev
+     https://karinto.example.workers.dev
 ```
 
 `POST` with form data:
 
 ```sh
-curl https://curllint.example.workers.dev \
+curl https://karinto.example.workers.dev \
      --data-urlencode "content@.github/workflows/ci.yml" \
      --data "disable=permissions-*"
 ```
@@ -134,7 +134,7 @@ curl https://curllint.example.workers.dev \
 `GET` with query parameters (small payloads only):
 
 ```sh
-curl -G https://curllint.example.workers.dev \
+curl -G https://karinto.example.workers.dev \
      --data-urlencode "content=$(cat workflow.yml)" \
      --data "type=workflow"
 ```
@@ -142,7 +142,7 @@ curl -G https://curllint.example.workers.dev \
 `GET`/`POST` over a public repo:
 
 ```sh
-curl "https://curllint.example.workers.dev?repo=actions/checkout&targets=action.yml"
+curl "https://karinto.example.workers.dev?repo=actions/checkout&targets=action.yml"
 ```
 
 ### Response

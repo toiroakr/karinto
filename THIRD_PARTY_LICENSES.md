@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-curllint is licensed under Apache-2.0 (see `LICENSE`).
+karinto is licensed under Apache-2.0 (see `LICENSE`).
 
 This project is **inspired by**, and in a handful of cases ports algorithms
 from, the following projects. Their rule taxonomy, behaviour expectations, and
@@ -14,14 +14,14 @@ distributed under the MIT License; their license texts are reproduced below.
 | ghalint | <https://github.com/suzuki-shunsuke/ghalint> | MIT |
 | moonbit-community/yaml | <https://github.com/moonbit-community/yaml.mbt> | MIT |
 
-Rule IDs in curllint are prefixed with `act-`, `ziz-`, or `ghl-` to indicate
-which upstream linter the rule originated from. `cl-*` IDs are curllint-only.
+Rule IDs in karinto are prefixed with `act-`, `ziz-`, or `ghl-` to indicate
+which upstream linter the rule originated from. `cl-*` IDs are karinto-only.
 
 If you only use rule **ideas / specifications**, MIT imposes no attribution
-obligation. Once a curllint rule is implemented by translating upstream code
+obligation. Once a karinto rule is implemented by translating upstream code
 (e.g. the expression parser or shell-injection taint analysis), the
 corresponding NOTICE block below applies and must be retained in any
-redistribution of curllint.
+redistribution of karinto.
 
 ---
 
@@ -105,7 +105,7 @@ SOFTWARE.
 
 ## moonbit-community/yaml
 
-curllint depends on this MIT-licensed MoonBit package at runtime; its license
+karinto depends on this MIT-licensed MoonBit package at runtime; its license
 file is shipped in `.mooncakes/moonbit-community/yaml/` after `moon` resolves
 dependencies. The package itself is a MoonBit port of
 [yaml-rust2](https://github.com/Ethiraric/yaml-rust2) (also MIT).

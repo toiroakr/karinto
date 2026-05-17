@@ -501,7 +501,7 @@ test "known-vulnerable-actions: OSV-supplied via context list" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@v3
-  let res = @curllint.lint(
+  let res = @karinto.lint(
     yaml,
     vuln_uses=["actions/checkout@v3"],
     disabled=["unpinned-uses", "checkout-persist-credentials-false"],

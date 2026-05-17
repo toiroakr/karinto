@@ -1,4 +1,4 @@
-// Cloudflare Workers entry point for curllint.
+// Cloudflare Workers entry point for karinto.
 //
 // Accepts GET or POST. Parameters can come from the URL query string,
 // the request body (raw `key=value&...`, JSON, or a YAML blob as the whole
@@ -135,7 +135,7 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   const files = [];
   for (const path of targets.slice(0, 50)) {
     const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
-    const res = await fetch(url, { headers: { "user-agent": "curllint-worker" } });
+    const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
       continue;

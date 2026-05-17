@@ -1,15 +1,15 @@
 // Apples-to-apples: lint the same YAML via MoonBit and via the TS version.
 //
 // Setup (once):
-//   git worktree add /tmp/curllint-ts origin/claude/github-actions-linter-worker-pkfwM
-//   cd /tmp/curllint-ts && npm install
-//   npx tsc -p . --outDir /tmp/curllint-ts-build --noEmit false \
+//   git worktree add /tmp/karinto-ts origin/claude/github-actions-linter-worker-pkfwM
+//   cd /tmp/karinto-ts && npm install
+//   npx tsc -p . --outDir /tmp/karinto-ts-build --noEmit false \
 //     --allowImportingTsExtensions false --rewriteRelativeImportExtensions
-//   ln -sf /tmp/curllint-ts/node_modules /tmp/curllint-ts-build/src/node_modules
+//   ln -sf /tmp/karinto-ts/node_modules /tmp/karinto-ts-build/src/node_modules
 //
 // Run: node compare-ts.mjs
 import { lint_string } from "../_build/js/release/build/worker/worker.js";
-import { lint as tsLint } from "/tmp/curllint-ts-build/src/linter.js";
+import { lint as tsLint } from "/tmp/karinto-ts-build/src/linter.js";
 
 function buildWorkflow(jobs, steps) {
   const lines = ["name: ci", "on: push", "permissions:", "  contents: read", "jobs:"];

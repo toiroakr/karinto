@@ -100,7 +100,7 @@ fn tested_rule_ids() -> Array[String] {
 
 ///|
 test "coverage: every catalogue entry has a fixture test" {
-  let catalog : Array[String] = @curllint.all_rule_specs().map(fn(s) { s.id })
+  let catalog : Array[String] = @karinto.all_rule_specs().map(fn(s) { s.id })
   let tested = tested_rule_ids()
   let missing : Array[String] = []
   for id in catalog {
@@ -127,9 +127,9 @@ test "coverage: every catalogue entry has a fixture test" {
 
 ///|
 test "coverage: every implemented rule appears in the catalogue" {
-  let catalog : Array[String] = @curllint.all_rule_specs().map(fn(s) { s.id })
+  let catalog : Array[String] = @karinto.all_rule_specs().map(fn(s) { s.id })
   let missing : Array[String] = []
-  for r in @curllint.all_rules() {
+  for r in @karinto.all_rules() {
     if !catalog.contains(r.id) {
       missing.push(r.id)
     }
@@ -140,7 +140,7 @@ test "coverage: every implemented rule appears in the catalogue" {
 ///|
 test "coverage: every spec records at least one upstream origin" {
   let missing : Array[String] = []
-  for s in @curllint.all_rule_specs() {
+  for s in @karinto.all_rule_specs() {
     if s.origins.length() == 0 {
       missing.push(s.id)
     }
@@ -152,26 +152,26 @@ test "coverage: every spec records at least one upstream origin" {
 test "coverage: consolidated rules list every upstream they absorb" {
   // The five intentional consolidations — each one must keep both upstream
   // identifiers in `origins` so the lineage is never lost.
-  json_inspect(@curllint.rule_spec("unpinned-uses").origins, content=[
+  json_inspect(@karinto.rule_spec("unpinned-uses").origins, content=[
     "zizmor:unpinned-uses",
     "ghalint:ghl-008 (action_ref_should_be_full_length_commit_sha)",
   ])
-  json_inspect(@curllint.rule_spec("secrets-inherit").origins, content=[
+  json_inspect(@karinto.rule_spec("secrets-inherit").origins, content=[
     "zizmor:secrets-inherit",
     "ghalint:ghl-004 (deny_inherit_secrets)",
   ])
-  json_inspect(@curllint.rule_spec("unpinned-images").origins, content=[
+  json_inspect(@karinto.rule_spec("unpinned-images").origins, content=[
     "zizmor:unpinned-images",
     "ghalint:ghl-007 (deny_job_container_latest_image)",
   ])
   json_inspect(
-    @curllint.rule_spec("hardcoded-container-credentials").origins,
+    @karinto.rule_spec("hardcoded-container-credentials").origins,
     content=[
       "zizmor:hardcoded-container-credentials",
       "actionlint:hardcoded-credentials",
     ],
   )
-  json_inspect(@curllint.rule_spec("template-injection").origins, content=[
+  json_inspect(@karinto.rule_spec("template-injection").origins, content=[
     "zizmor:template-injection",
     "actionlint:script-injection",
   ])

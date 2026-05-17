@@ -1,5 +1,5 @@
 ///|
-/// Catalogue of every rule curllint is aware of — implemented or planned.
+/// Catalogue of every rule karinto is aware of — implemented or planned.
 ///
 /// This is the single source of truth for rule metadata. Tests assert that
 /// every entry here has a corresponding fixture, and the JSON returned by
@@ -7,7 +7,7 @@
 ///
 /// `origins` records the upstream provenance verbatim. When two upstreams
 /// cover the same ground (e.g. zizmor's `unpinned-uses` and ghalint's
-/// `ghl-008`), curllint merges them into a single rule and lists every
+/// `ghl-008`), karinto merges them into a single rule and lists every
 /// origin in this array, so the lineage is never lost.
 
 ///|
