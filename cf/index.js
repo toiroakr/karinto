@@ -22,13 +22,12 @@
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
 // the import until the first request so it runs inside a handler.
-let _lintStringPromise;
-function getLintString() {
-  if (!_lintStringPromise) {
-    _lintStringPromise = import("../_build/js/release/build/worker/worker.js")
-      .then((m) => m.lint_string);
+let _workerPromise;
+function getWorker() {
+  if (!_workerPromise) {
+    _workerPromise = import("../_build/js/release/build/worker/worker.js");
   }
-  return _lintStringPromise;
+  return _workerPromise;
 }
 
 export default {
@@ -108,19 +107,19 @@ async function handle(params, env) {
   const disable = params.disable || "";
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
-  const lint_string = await getLintString();
+  const worker = await getWorker();
 
   if (params.repo) {
-    return await handleRepo(params, disable, type, useOsv, lint_string);
+    return await handleRepo(params, disable, type, useOsv, worker);
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
   }
-  const vuln = useOsv ? await fetchVulnUses(params.content) : "";
-  return JSON.parse(lint_string(params.content, type, disable, vuln));
+  const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
+  return JSON.parse(worker.lint_string(params.content, type, disable, vuln));
 }
 
-async function handleRepo(params, disable, type, useOsv, lint_string) {
+async function handleRepo(params, disable, type, useOsv, worker) {
   const repo = params.repo;
   if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw new Error(`invalid repo: ${repo}`);
@@ -143,8 +142,8 @@ async function handleRepo(params, disable, type, useOsv, lint_string) {
     }
     const raw = await res.text();
     const guessKind = type || guessKindFromPath(path);
-    const vuln = useOsv ? await fetchVulnUses(raw) : "";
-    files.push({ path, ...JSON.parse(lint_string(raw, guessKind, disable, vuln)) });
+    const vuln = useOsv ? await fetchVulnUses(raw, worker) : "";
+    files.push({ path, ...JSON.parse(worker.lint_string(raw, guessKind, disable, vuln)) });
   }
   return {
     ok: files.every((f) => f.ok !== false),
@@ -163,12 +162,12 @@ function isTrue(v) {
 // Extract every `uses: owner/repo[/subpath]@ref` reference (excluding local
 // `./` and `docker://` forms) and ask OSV.dev whether any are listed in a
 // security advisory. OSV's GitHub Actions ecosystem doesn't filter by version
-// server-side, so we fetch the per-action advisory list and apply each
-// `affected.ranges[].events` against the user's tag ourselves.
-// Fails open: a network/schema error returns "" so linting still works.
+// server-side, so we collect the advisory ranges here and let MoonBit's
+// `osv_match` apply them against the user's tags. Fails open: a network or
+// schema error yields "" so linting still works.
 const USES_RE = /^\s*-?\s*uses:\s*["']?([^"'\s#]+)["']?\s*(?:#.*)?$/gm;
 
-async function fetchVulnUses(yaml) {
+async function fetchVulnUses(yaml, worker) {
   const refs = collectUsesRefs(yaml);
   if (refs.length === 0) return "";
 
@@ -191,88 +190,37 @@ async function fetchVulnUses(yaml) {
     const data = await res.json();
     if (!Array.isArray(data?.results)) return "";
 
-    // Resolve each advisory ID stub to its full record (querybatch returns
-    // only IDs; vuln details ship via `/v1/vulns/{id}`).
-    const vulnIds = new Set();
-    const actionToIds = new Map();
+    // Build action → advisory ranges map. `querybatch` returns only IDs;
+    // each advisory's `affected.ranges` ship via `/v1/vulns/{id}`.
+    const advisories = {};
+    const idActions = new Map();
     for (let i = 0; i < uniqueActions.length; i++) {
       const ids = (data.results[i]?.vulns ?? []).map((v) => v.id).filter(Boolean);
-      actionToIds.set(uniqueActions[i], ids);
-      for (const id of ids) vulnIds.add(id);
+      for (const id of ids) idActions.set(id, uniqueActions[i]);
     }
-    if (vulnIds.size === 0) return "";
+    if (idActions.size === 0) return "";
 
-    const idToRanges = new Map();
     await Promise.all(
-      [...vulnIds].map(async (id) => {
+      [...idActions.entries()].map(async ([id, _]) => {
         const r = await fetch(`https://api.osv.dev/v1/vulns/${id}`);
         if (!r.ok) return;
         const v = await r.json();
-        const ranges = [];
         for (const a of v.affected ?? []) {
           if (a.package?.ecosystem !== "GitHub Actions") continue;
-          for (const rg of a.ranges ?? []) ranges.push(rg);
+          const name = a.package.name;
+          for (const rg of a.ranges ?? []) {
+            if (rg.type !== "ECOSYSTEM") continue;
+            (advisories[name] ??= []).push({ events: rg.events ?? [] });
+          }
         }
-        idToRanges.set(id, ranges);
       }),
     );
 
-    const hits = [];
-    for (const { name, version, original } of refs) {
-      const ids = actionToIds.get(name) ?? [];
-      for (const id of ids) {
-        const ranges = idToRanges.get(id) ?? [];
-        if (ranges.some((rg) => versionInRange(version, rg))) {
-          hits.push(original);
-          break;
-        }
-      }
-    }
-    return [...new Set(hits)].join(",");
+    const usesCsv = refs.map((r) => r.original).join(",");
+    return worker.osv_match(usesCsv, JSON.stringify(advisories));
   } catch {
     return "";
   }
-}
-
-// Compare an OSV ECOSYSTEM range against a user-supplied tag/version.
-// GitHub Actions tags are typically `v1`, `v1.2.3`, or a 40-hex SHA. We
-// strip a leading `v` and compare lexicographically by numeric components;
-// SHAs and other non-numeric refs cannot be ordered, so we conservatively
-// treat them as in-range (the advisory itself is the evidence of badness).
-function versionInRange(tag, rg) {
-  if (rg.type !== "ECOSYSTEM") return false;
-  const ver = normalizeVer(tag);
-  if (ver === null) return true; // unknown tag form → flag conservatively
-  let introduced = null;
-  let fixed = null;
-  let lastAffected = null;
-  for (const e of rg.events ?? []) {
-    if (e.introduced !== undefined) introduced = normalizeVer(e.introduced);
-    if (e.fixed !== undefined) fixed = normalizeVer(e.fixed);
-    if (e.last_affected !== undefined) lastAffected = normalizeVer(e.last_affected);
-  }
-  if (introduced && cmpVer(ver, introduced) < 0) return false;
-  if (fixed && cmpVer(ver, fixed) >= 0) return false;
-  if (lastAffected && cmpVer(ver, lastAffected) > 0) return false;
-  return true;
-}
-
-function normalizeVer(s) {
-  if (typeof s !== "string") return null;
-  let v = s.startsWith("v") ? s.slice(1) : s;
-  if (v === "0") return [0];
-  if (!/^\d+(\.\d+)*$/.test(v)) return null;
-  return v.split(".").map(Number);
-}
-
-function cmpVer(a, b) {
-  const n = Math.max(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return 0;
 }
 
 function collectUsesRefs(yaml) {
