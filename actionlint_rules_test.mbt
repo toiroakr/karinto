@@ -5,13 +5,13 @@
 // check ships.
 
 ///|
-#skip("not implemented yet")
 test "unexpected-keys: unknown key under job" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    typo: oops
@@ -19,12 +19,12 @@ test "unexpected-keys: unknown key under job" {
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "unexpected-keys",
         "severity": "error",
-        "message": "job `build`: unexpected key `typo`",
+        "message": "job `build`: unknown key `typo`",
       },
     ],
   })
@@ -55,7 +55,6 @@ test "missing-required-keys: workflow missing `on`" {
 }
 
 ///|
-#skip("not implemented yet")
 test "empty-mappings: empty jobs block" {
   let yaml =
     #|on: push
@@ -67,7 +66,7 @@ test "empty-mappings: empty jobs block" {
       {
         "rule": "empty-mappings",
         "severity": "warning",
-        "message": "`jobs` is empty",
+        "message": "workflow: `jobs:` is an empty mapping",
       },
     ],
   })
@@ -513,7 +512,6 @@ test "glob-patterns: invalid glob pattern in paths filter" {
 }
 
 ///|
-#skip("not implemented yet")
 test "cron-and-timezone: out-of-range minute value" {
   let yaml =
     #|on:
@@ -522,18 +520,19 @@ test "cron-and-timezone: out-of-range minute value" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "cron-and-timezone",
         "severity": "error",
-        "message": "invalid cron `60 * * * *`: minute 60 out of range",
+        "message": "schedule.cron `60 * * * *`: minute: value `60` out of bounds [0-59]",
       },
     ],
   })
@@ -722,7 +721,6 @@ test "invalid-env-var-name: env name starts with digit" {
 }
 
 ///|
-#skip("not implemented yet")
 test "permissions-syntax: unknown permission scope" {
   let yaml =
     #|on: push
@@ -731,16 +729,19 @@ test "permissions-syntax: unknown permission scope" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "permissions-syntax",
         "severity": "error",
-        "message": "unknown permission scope `conents` (did you mean `contents`?)",
+        "message": "workflow: unknown permission scope `conents` — did you mean `contents`?",
       },
     ],
   })
@@ -825,13 +826,13 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
 }
 
 ///|
-#skip("not implemented yet")
 test "constant-if-condition: `if: true` always-on" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    if: true
@@ -839,12 +840,12 @@ test "constant-if-condition: `if: true` always-on" {
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "constant-if-condition",
         "severity": "warning",
-        "message": "job `build` `if:` is constant `true`; remove it",
+        "message": "job `build` `if:` is constant `true` — remove or replace the condition",
       },
     ],
   })

@@ -63,7 +63,7 @@ for (const { yaml } of sizes) {
 
 console.log(`iters=${ITERS} rounds=${ROUNDS} (best of)`);
 console.log();
-console.log(`# Full lint (TS: 34 rules / MoonBit: 45 rules)`);
+console.log(`# Full lint (TS: 34 rules / MoonBit: 51 rules)`);
 console.log(`${"size".padEnd(30)} ${"bytes".padStart(7)} ${"TS".padStart(10)} ${"MoonBit".padStart(10)}  speed-up`);
 for (const { label, yaml } of sizes) {
   const ts = bench(() => tsLint(yaml));

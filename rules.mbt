@@ -632,6 +632,46 @@ pub fn all_rules() -> Array[Rule] {
       on_job: Some(check_shell_name_per_os),
       on_step: no_step(),
     },
+    Rule::{
+      id: "empty-mappings",
+      title: "Empty mapping has no effect",
+      applies: workflow_or_action,
+      on_doc: Some(check_empty_mappings_doc),
+      on_job: Some(check_empty_mappings_job),
+      on_step: Some(check_empty_mappings_step),
+    },
+    Rule::{
+      id: "constant-if-condition",
+      title: "`if:` always evaluates to the same value",
+      applies: workflow_only,
+      on_doc: no_doc(),
+      on_job: Some(check_constant_if_job),
+      on_step: Some(check_constant_if_step),
+    },
+    Rule::{
+      id: "permissions-syntax",
+      title: "Invalid permissions scope or value",
+      applies: workflow_only,
+      on_doc: Some(check_permissions_syntax_doc),
+      on_job: Some(check_permissions_syntax_job),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "unexpected-keys",
+      title: "Unknown key at this level",
+      applies: workflow_or_action,
+      on_doc: Some(check_unexpected_keys_doc),
+      on_job: Some(check_unexpected_keys_job),
+      on_step: Some(check_unexpected_keys_step),
+    },
+    Rule::{
+      id: "cron-and-timezone",
+      title: "Invalid cron expression",
+      applies: workflow_only,
+      on_doc: Some(check_cron),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
   ]
 }
 
@@ -2688,5 +2728,518 @@ fn check_shell_name_per_os(
         }
       None => ()
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: empty-mappings (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Flag a Map field that exists but has zero entries. Skips `permissions: {}`
+/// (which intentionally means "deny all") because that is a recognized
+/// lockdown idiom.
+fn flag_empty_map(
+  parent : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match parent.get(key) {
+    Some(Map(m)) =>
+      if m.size() == 0 && key != "permissions" {
+        add_diag(
+          out,
+          "empty-mappings",
+          Warning,
+          "\{location}: `\{key}:` is an empty mapping",
+        )
+      }
+    _ => ()
+  }
+}
+
+///|
+fn check_empty_mappings_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      for k in ["jobs", "env", "defaults", "concurrency", "outputs"] {
+        flag_empty_map(m, k, "workflow", out)
+      }
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_empty_mappings_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let loc = "job `\{job.name}`"
+  for k in ["env", "defaults", "with", "outputs", "concurrency", "secrets"] {
+    flag_empty_map(job.raw, k, loc, out)
+  }
+}
+
+///|
+fn check_empty_mappings_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let id = match step.raw.get("id") {
+    Some(String(s)) => s
+    _ =>
+      match step.raw.get("name") {
+        Some(String(s)) => s
+        _ => "step"
+      }
+  }
+  let loc = "step `\{id}`"
+  for k in ["env", "with", "defaults"] {
+    flag_empty_map(step.raw, k, loc, out)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: constant-if-condition (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Detect a literal-constant `if:` expression — `true`, `false`, or
+/// `${{ true }}` / `${{ false }}` / `${{ 'x' }}` after trimming. These
+/// always evaluate to the same value, so the condition is dead code.
+fn is_constant_if(s : String) -> String? {
+  let trimmed = s.trim(chars=" \t").to_string()
+  if trimmed == "true" || trimmed == "false" {
+    return Some(trimmed)
+  }
+  if trimmed.has_prefix("${{") && trimmed.has_suffix("}}") {
+    let inner = trimmed
+      .substring(start=3, end=trimmed.length() - 2)
+      .trim(chars=" \t")
+      .to_string()
+    if inner == "true" || inner == "false" {
+      return Some(inner)
+    }
+    // Quoted literal `${{ 'x' }}` — also constant.
+    if inner.length() >= 2 {
+      let c0 = inner.get_char(0)
+      let cn = inner.get_char(inner.length() - 1)
+      if (c0 == Some('\'') && cn == Some('\'')) ||
+         (c0 == Some('"') && cn == Some('"')) {
+        return Some(inner)
+      }
+    }
+  }
+  None
+}
+
+///|
+fn constant_if_value(m : Map[String, @yaml.Yaml]) -> String? {
+  match m.get("if") {
+    Some(String(s)) => is_constant_if(s)
+    Some(Boolean(b)) => Some(if b { "true" } else { "false" })
+    _ => None
+  }
+}
+
+///|
+fn check_constant_if_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match constant_if_value(job.raw) {
+    Some(v) =>
+      add_diag(
+        out,
+        "constant-if-condition",
+        Warning,
+        "job `\{job.name}` `if:` is constant `\{v}` — remove or replace the condition",
+      )
+    None => ()
+  }
+}
+
+///|
+fn check_constant_if_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match constant_if_value(step.raw) {
+    Some(v) =>
+      add_diag(
+        out,
+        "constant-if-condition",
+        Warning,
+        "step `if:` is constant `\{v}` — remove or replace the condition",
+      )
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: permissions-syntax (actionlint:permissions-scope-and-value)
+// ---------------------------------------------------------------------------
+
+///|
+fn valid_perm_scopes() -> Array[String] {
+  [
+    "actions", "attestations", "checks", "contents", "deployments",
+    "discussions", "id-token", "issues", "models", "packages", "pages",
+    "pull-requests", "repository-projects", "security-events", "statuses",
+  ]
+}
+
+///|
+fn validate_permissions_map(
+  m : Map[String, @yaml.Yaml],
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  let scopes = valid_perm_scopes()
+  m.each(fn(k, v) {
+    if !array_contains_string(scopes, k) {
+      let hint = match suggest(k, scopes) {
+        Some(s) => " — did you mean `\{s}`?"
+        None => ""
+      }
+      add_diag(
+        out,
+        "permissions-syntax",
+        Error,
+        "\{location}: unknown permission scope `\{k}`\{hint}",
+      )
+    }
+    match v {
+      String(s) => {
+        let sv = s.trim(chars=" \t").to_string()
+        if sv != "read" && sv != "write" && sv != "none" {
+          add_diag(
+            out,
+            "permissions-syntax",
+            Error,
+            "\{location}: permission `\{k}` has invalid value `\{sv}` (expected `read`, `write`, or `none`)",
+          )
+        }
+      }
+      _ =>
+        add_diag(
+          out,
+          "permissions-syntax",
+          Error,
+          "\{location}: permission `\{k}` value must be a string",
+        )
+    }
+  })
+}
+
+///|
+fn check_permissions_syntax_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("permissions") {
+        Some(Map(pm)) => validate_permissions_map(pm, "workflow", out)
+        _ => ()
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_permissions_syntax_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.raw.get("permissions") {
+    Some(Map(pm)) => validate_permissions_map(pm, "job `\{job.name}`", out)
+    _ => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unexpected-keys (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn workflow_top_keys() -> Array[String] {
+  ["name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs"]
+}
+
+///|
+fn action_top_keys() -> Array[String] {
+  ["name", "description", "author", "inputs", "outputs", "runs", "branding"]
+}
+
+///|
+fn job_keys() -> Array[String] {
+  [
+    "name", "needs", "if", "runs-on", "environment", "concurrency",
+    "outputs", "env", "defaults", "steps", "strategy", "container",
+    "services", "secrets", "uses", "with", "permissions",
+    "continue-on-error", "timeout-minutes",
+  ]
+}
+
+///|
+fn step_keys() -> Array[String] {
+  [
+    "id", "name", "if", "run", "uses", "shell", "working-directory",
+    "env", "with", "continue-on-error", "timeout-minutes",
+  ]
+}
+
+///|
+fn validate_keys(
+  m : Map[String, @yaml.Yaml],
+  allowed : Array[String],
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  m.each(fn(k, _v) {
+    if !array_contains_string(allowed, k) {
+      let hint = match suggest(k, allowed) {
+        Some(s) => " — did you mean `\{s}`?"
+        None => ""
+      }
+      add_diag(
+        out,
+        "unexpected-keys",
+        Error,
+        "\{location}: unknown key `\{k}`\{hint}",
+      )
+    }
+  })
+}
+
+///|
+fn check_unexpected_keys_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      // Decide top-level allowlist by which kind of file this looks like.
+      let allowed = if m.contains("runs") {
+        action_top_keys()
+      } else {
+        workflow_top_keys()
+      }
+      validate_keys(m, allowed, "workflow", out)
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_unexpected_keys_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  validate_keys(job.raw, job_keys(), "job `\{job.name}`", out)
+}
+
+///|
+fn check_unexpected_keys_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let id = match step.raw.get("id") {
+    Some(String(s)) => s
+    _ =>
+      match step.raw.get("name") {
+        Some(String(s)) => s
+        _ => "step"
+      }
+  }
+  validate_keys(step.raw, step_keys(), "step `\{id}`", out)
+}
+
+// ---------------------------------------------------------------------------
+// Rule: cron-and-timezone (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Validate a single POSIX-style cron expression: 5 fields separated by
+/// whitespace; each field is `*`, a number, range, list, or step within
+/// the conventional bounds (m 0-59, h 0-23, dom 1-31, month 1-12, dow 0-7).
+/// Returns `None` on success or `Some(reason)` on failure.
+fn validate_cron(s : String) -> String? {
+  let trimmed = s.trim(chars=" \t").to_string()
+  if trimmed == "" {
+    return Some("empty cron expression")
+  }
+  let fields : Array[String] = []
+  let buf = StringBuilder::new()
+  for ch in trimmed {
+    if ch == ' ' || ch == '\t' {
+      let piece = buf.to_string()
+      if piece != "" {
+        fields.push(piece)
+        buf.reset()
+      }
+    } else {
+      buf.write_char(ch)
+    }
+  }
+  let tail = buf.to_string()
+  if tail != "" {
+    fields.push(tail)
+  }
+  if fields.length() != 5 {
+    return Some("expected 5 cron fields, got \{fields.length()}")
+  }
+  let bounds = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)]
+  let names = ["minute", "hour", "day-of-month", "month", "day-of-week"]
+  let mut i = 0
+  while i < 5 {
+    let (lo, hi) = bounds[i]
+    match validate_cron_field(fields[i], lo, hi) {
+      Some(why) => return Some("\{names[i]}: \{why}")
+      None => ()
+    }
+    i = i + 1
+  }
+  None
+}
+
+///|
+fn validate_cron_field(field : String, lo : Int, hi : Int) -> String? {
+  // Split on `,` then check each piece for `*` / `N` / `N-M` / `*/N` / `N-M/N`.
+  let parts : Array[String] = []
+  let buf = StringBuilder::new()
+  for ch in field {
+    if ch == ',' {
+      parts.push(buf.to_string())
+      buf.reset()
+    } else {
+      buf.write_char(ch)
+    }
+  }
+  parts.push(buf.to_string())
+  for p in parts {
+    if p == "" {
+      return Some("empty subfield in `\{field}`")
+    }
+    match validate_cron_piece(p, lo, hi) {
+      Some(why) => return Some(why)
+      None => ()
+    }
+  }
+  None
+}
+
+///|
+fn validate_cron_piece(piece : String, lo : Int, hi : Int) -> String? {
+  // Split off `/step` suffix.
+  let slash = index_of_char(piece, '/')
+  let (range_part, step_part) = if slash >= 0 {
+    (piece.substring(start=0, end=slash), Some(piece.substring(start=slash + 1)))
+  } else {
+    (piece, None)
+  }
+  // Validate step if present.
+  match step_part {
+    Some(sp) => {
+      let n = parse_uint(sp.to_string())
+      if n <= 0 {
+        return Some("invalid step `\{sp}` in `\{piece}`")
+      }
+    }
+    None => ()
+  }
+  let r = range_part.to_string()
+  if r == "*" {
+    return None
+  }
+  let dash = index_of_char(r, '-')
+  if dash >= 0 {
+    let a = parse_uint(r.substring(start=0, end=dash).to_string())
+    let b = parse_uint(r.substring(start=dash + 1).to_string())
+    if a < 0 || b < 0 {
+      return Some("invalid range `\{r}`")
+    }
+    if a < lo || b > hi || a > b {
+      return Some("range `\{r}` out of bounds [\{lo}-\{hi}]")
+    }
+    return None
+  }
+  let n = parse_uint(r)
+  if n < 0 {
+    return Some("invalid value `\{r}`")
+  }
+  if n < lo || n > hi {
+    return Some("value `\{r}` out of bounds [\{lo}-\{hi}]")
+  }
+  None
+}
+
+///|
+fn index_of_char(s : String, c : Char) -> Int {
+  let mut i = 0
+  let n = s.length()
+  while i < n {
+    match s.get_char(i) {
+      Some(ch) => if ch == c { return i }
+      None => return -1
+    }
+    i = i + 1
+  }
+  -1
+}
+
+///|
+fn parse_uint(s : String) -> Int {
+  if s == "" {
+    return -1
+  }
+  let mut n = 0
+  for ch in s {
+    if ch < '0' || ch > '9' {
+      return -1
+    }
+    n = n * 10 + (ch.to_int() - '0'.to_int())
+  }
+  n
+}
+
+///|
+fn check_cron(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("on") {
+        Some(Map(on)) =>
+          match on.get("schedule") {
+            Some(Array(arr)) => {
+              for entry in arr {
+                match entry {
+                  Map(em) =>
+                    match em.get("cron") {
+                      Some(String(c)) =>
+                        match validate_cron(c) {
+                          Some(why) =>
+                            add_diag(
+                              out,
+                              "cron-and-timezone",
+                              Error,
+                              "schedule.cron `\{c}`: \{why}",
+                            )
+                          None => ()
+                        }
+                      _ => ()
+                    }
+                  _ => ()
+                }
+              }
+            }
+            _ => ()
+          }
+        _ => ()
+      }
+    None => ()
   }
 }
