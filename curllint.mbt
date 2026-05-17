@@ -103,6 +103,7 @@ pub fn lint(
   content : String,
   kind? : FileKind = Unknown,
   disabled? : Array[String] = [],
+  vuln_uses? : Array[String] = [],
 ) -> LintResult {
   let lines = count_lines(content)
   let docs = try? @yaml.Yaml::load_from_string(content)
@@ -121,7 +122,7 @@ pub fn lint(
         _ => kind
       }
       let stats = compute_stats(doc, lines)
-      let diagnostics = run_rules(doc, resolved_kind, disabled)
+      let diagnostics = run_rules(doc, resolved_kind, disabled, vuln_uses)
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
   }
@@ -185,8 +186,9 @@ fn run_rules(
   doc : @yaml.Yaml,
   kind : FileKind,
   disabled : Array[String],
+  vuln_uses : Array[String],
 ) -> Array[Diagnostic] {
-  let ctx = prewalk(doc)
+  let ctx = prewalk(doc, vuln_uses~)
   let out : Array[Diagnostic] = []
 
   // Filter once. Each scope iterates pre-built callback arrays — no per-step

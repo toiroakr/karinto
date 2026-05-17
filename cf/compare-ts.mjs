@@ -57,7 +57,7 @@ function bench(fn) {
 
 // Warm up
 for (const { yaml } of sizes) {
-  lint_string(yaml, "", "");
+  lint_string(yaml, "", "", "");
   tsLint(yaml);
 }
 
@@ -67,7 +67,7 @@ console.log(`# Full lint (TS: 34 rules / MoonBit: 45 rules)`);
 console.log(`${"size".padEnd(30)} ${"bytes".padStart(7)} ${"TS".padStart(10)} ${"MoonBit".padStart(10)}  speed-up`);
 for (const { label, yaml } of sizes) {
   const ts = bench(() => tsLint(yaml));
-  const mb = bench(() => lint_string(yaml, "", ""));
+  const mb = bench(() => lint_string(yaml, "", "", ""));
   const ratio = ts / mb;
   console.log(
     `${label.padEnd(30)} ${String(yaml.length).padStart(7)} ${(ts).toFixed(3).padStart(7)} ms  ${(mb).toFixed(3).padStart(7)} ms  ${ratio >= 1 ? "x" + ratio.toFixed(2) + " (MoonBit faster)" : "x" + (mb/ts).toFixed(2) + " (TS faster)"}`,
@@ -80,7 +80,7 @@ console.log(`${"size".padEnd(30)} ${"bytes".padStart(7)} ${"TS".padStart(10)} ${
 for (const { label, yaml } of sizes) {
   // TS: all rules disabled via glob
   const ts = bench(() => tsLint(yaml, { disable: ["actionlint/*", "ghalint/*", "zizmor/*"] }));
-  const mb = bench(() => lint_string(yaml, "", "*"));
+  const mb = bench(() => lint_string(yaml, "", "*", ""));
   const ratio = ts / mb;
   console.log(
     `${label.padEnd(30)} ${String(yaml.length).padStart(7)} ${(ts).toFixed(3).padStart(7)} ms  ${(mb).toFixed(3).padStart(7)} ms  ${ratio >= 1 ? "x" + ratio.toFixed(2) + " (MoonBit faster)" : "x" + (mb/ts).toFixed(2) + " (TS faster)"}`,
@@ -92,7 +92,7 @@ console.log();
 console.log("diagnostic counts:");
 for (const { label, yaml } of sizes) {
   const tsRes = tsLint(yaml);
-  const mbRes = JSON.parse(lint_string(yaml, "", ""));
+  const mbRes = JSON.parse(lint_string(yaml, "", "", ""));
   console.log(
     `${label.padEnd(30)} TS=${tsRes.diagnostics.length}  MoonBit=${mbRes.result.diagnostics.length}`,
   );

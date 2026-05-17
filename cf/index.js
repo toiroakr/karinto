@@ -10,6 +10,8 @@
 //   - disable   comma-separated rule-ID glob patterns to skip
 //   - repo      "owner/name" — fetch files from a public GitHub repo
 //   - targets   comma-separated literal paths (required with `repo`)
+//   - osv       "1" / "true" → query OSV.dev for known-vulnerable actions
+//               (adds ~50-300ms latency depending on action count)
 //
 // The handler logs a one-line JSON record per request to stdout.
 //
@@ -71,7 +73,7 @@ async function readParams(request) {
   return params;
 }
 
-const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets"]);
+const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv"]);
 
 function mergeBody(params, raw, ct) {
   if (ct.includes("application/json") || raw.trimStart().startsWith("{")) {
@@ -100,23 +102,25 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
 
 async function handle(params, env) {
   const disable = params.disable || "";
   const type = params.type || "";
+  const useOsv = isTrue(params.osv);
   const lint_string = await getLintString();
 
   if (params.repo) {
-    return await handleRepo(params, disable, type, lint_string);
+    return await handleRepo(params, disable, type, useOsv, lint_string);
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
   }
-  return JSON.parse(lint_string(params.content, type, disable));
+  const vuln = useOsv ? await fetchVulnUses(params.content) : "";
+  return JSON.parse(lint_string(params.content, type, disable, vuln));
 }
 
-async function handleRepo(params, disable, type, lint_string) {
+async function handleRepo(params, disable, type, useOsv, lint_string) {
   const repo = params.repo;
   if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw new Error(`invalid repo: ${repo}`);
@@ -139,7 +143,8 @@ async function handleRepo(params, disable, type, lint_string) {
     }
     const raw = await res.text();
     const guessKind = type || guessKindFromPath(path);
-    files.push({ path, ...JSON.parse(lint_string(raw, guessKind, disable)) });
+    const vuln = useOsv ? await fetchVulnUses(raw) : "";
+    files.push({ path, ...JSON.parse(lint_string(raw, guessKind, disable, vuln)) });
   }
   return {
     ok: files.every((f) => f.ok !== false),
@@ -147,6 +152,149 @@ async function handleRepo(params, disable, type, lint_string) {
     targets,
     files,
   };
+}
+
+function isTrue(v) {
+  if (!v) return false;
+  const s = String(v).toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+// Extract every `uses: owner/repo[/subpath]@ref` reference (excluding local
+// `./` and `docker://` forms) and ask OSV.dev whether any are listed in a
+// security advisory. OSV's GitHub Actions ecosystem doesn't filter by version
+// server-side, so we fetch the per-action advisory list and apply each
+// `affected.ranges[].events` against the user's tag ourselves.
+// Fails open: a network/schema error returns "" so linting still works.
+const USES_RE = /^\s*-?\s*uses:\s*["']?([^"'\s#]+)["']?\s*(?:#.*)?$/gm;
+
+async function fetchVulnUses(yaml) {
+  const refs = collectUsesRefs(yaml);
+  if (refs.length === 0) return "";
+
+  const uniqueActions = [...new Set(refs.map((r) => r.name))];
+  const queries = uniqueActions.map((name) => ({
+    package: { ecosystem: "GitHub Actions", name },
+  }));
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    const res = await fetch("https://api.osv.dev/v1/querybatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ queries }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (!Array.isArray(data?.results)) return "";
+
+    // Resolve each advisory ID stub to its full record (querybatch returns
+    // only IDs; vuln details ship via `/v1/vulns/{id}`).
+    const vulnIds = new Set();
+    const actionToIds = new Map();
+    for (let i = 0; i < uniqueActions.length; i++) {
+      const ids = (data.results[i]?.vulns ?? []).map((v) => v.id).filter(Boolean);
+      actionToIds.set(uniqueActions[i], ids);
+      for (const id of ids) vulnIds.add(id);
+    }
+    if (vulnIds.size === 0) return "";
+
+    const idToRanges = new Map();
+    await Promise.all(
+      [...vulnIds].map(async (id) => {
+        const r = await fetch(`https://api.osv.dev/v1/vulns/${id}`);
+        if (!r.ok) return;
+        const v = await r.json();
+        const ranges = [];
+        for (const a of v.affected ?? []) {
+          if (a.package?.ecosystem !== "GitHub Actions") continue;
+          for (const rg of a.ranges ?? []) ranges.push(rg);
+        }
+        idToRanges.set(id, ranges);
+      }),
+    );
+
+    const hits = [];
+    for (const { name, version, original } of refs) {
+      const ids = actionToIds.get(name) ?? [];
+      for (const id of ids) {
+        const ranges = idToRanges.get(id) ?? [];
+        if (ranges.some((rg) => versionInRange(version, rg))) {
+          hits.push(original);
+          break;
+        }
+      }
+    }
+    return [...new Set(hits)].join(",");
+  } catch {
+    return "";
+  }
+}
+
+// Compare an OSV ECOSYSTEM range against a user-supplied tag/version.
+// GitHub Actions tags are typically `v1`, `v1.2.3`, or a 40-hex SHA. We
+// strip a leading `v` and compare lexicographically by numeric components;
+// SHAs and other non-numeric refs cannot be ordered, so we conservatively
+// treat them as in-range (the advisory itself is the evidence of badness).
+function versionInRange(tag, rg) {
+  if (rg.type !== "ECOSYSTEM") return false;
+  const ver = normalizeVer(tag);
+  if (ver === null) return true; // unknown tag form → flag conservatively
+  let introduced = null;
+  let fixed = null;
+  let lastAffected = null;
+  for (const e of rg.events ?? []) {
+    if (e.introduced !== undefined) introduced = normalizeVer(e.introduced);
+    if (e.fixed !== undefined) fixed = normalizeVer(e.fixed);
+    if (e.last_affected !== undefined) lastAffected = normalizeVer(e.last_affected);
+  }
+  if (introduced && cmpVer(ver, introduced) < 0) return false;
+  if (fixed && cmpVer(ver, fixed) >= 0) return false;
+  if (lastAffected && cmpVer(ver, lastAffected) > 0) return false;
+  return true;
+}
+
+function normalizeVer(s) {
+  if (typeof s !== "string") return null;
+  let v = s.startsWith("v") ? s.slice(1) : s;
+  if (v === "0") return [0];
+  if (!/^\d+(\.\d+)*$/.test(v)) return null;
+  return v.split(".").map(Number);
+}
+
+function cmpVer(a, b) {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+function collectUsesRefs(yaml) {
+  const out = [];
+  const seen = new Set();
+  for (const match of yaml.matchAll(USES_RE)) {
+    const ref = match[1];
+    if (!ref || ref.startsWith("./") || ref.startsWith("docker://")) continue;
+    const at = ref.lastIndexOf("@");
+    if (at < 0) continue;
+    const fullName = ref.slice(0, at);
+    const version = ref.slice(at + 1);
+    if (!fullName || !version) continue;
+    // OSV uses the action repo (owner/name), strip any reusable-workflow path.
+    const slash = fullName.indexOf("/", fullName.indexOf("/") + 1);
+    const name = slash > 0 ? fullName.slice(0, slash) : fullName;
+    const key = `${ref}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, version, original: ref });
+  }
+  return out;
 }
 
 function guessKindFromPath(path) {

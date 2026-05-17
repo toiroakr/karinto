@@ -52,6 +52,9 @@ pub(all) struct WalkCtx {
   action_steps : Array[StepInfo]
   action_is_composite : Bool
   updates : Array[Map[String, @yaml.Yaml]]
+  // Optional caller-supplied context: `uses:` refs known to be vulnerable
+  // (typically populated from OSV.dev queries by the worker before linting).
+  vuln_uses : Array[String]
 }
 
 ///|
@@ -126,7 +129,10 @@ fn build_steps(arr : Array[@yaml.Yaml]) -> Array[StepInfo] {
 }
 
 ///|
-pub fn prewalk(doc : @yaml.Yaml) -> WalkCtx {
+pub fn prewalk(
+  doc : @yaml.Yaml,
+  vuln_uses? : Array[String] = [],
+) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
   let action_steps : Array[StepInfo] = []
@@ -211,6 +217,7 @@ pub fn prewalk(doc : @yaml.Yaml) -> WalkCtx {
     action_steps,
     action_is_composite,
     updates,
+    vuln_uses,
   }
 }
 
@@ -1651,21 +1658,24 @@ fn check_obfuscation(
 
 ///|
 fn check_known_vulnerable_actions(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.uses {
     Some(u) => {
+      // Static fallback list for offline / no-context runs.
       // tj-actions/* was retroactively compromised in March 2025.
-      if u.has_prefix("tj-actions/changed-files@") ||
-         u.has_prefix("tj-actions/branch-names@") ||
-         u.has_prefix("tj-actions/eslint-changed-files@") ||
-         u.has_prefix("reviewdog/action-setup@v1.0.0") ||
-         u.has_prefix("reviewdog/action-setup@v1.0.1") ||
-         u.has_prefix("reviewdog/action-setup@v1.0.2") ||
-         u.has_prefix("reviewdog/action-setup@v1.0.3") ||
-         u.has_prefix("reviewdog/action-setup@v1.1.0") {
+      let static_hit = u.has_prefix("tj-actions/changed-files@") ||
+        u.has_prefix("tj-actions/branch-names@") ||
+        u.has_prefix("tj-actions/eslint-changed-files@") ||
+        u.has_prefix("reviewdog/action-setup@v1.0.0") ||
+        u.has_prefix("reviewdog/action-setup@v1.0.1") ||
+        u.has_prefix("reviewdog/action-setup@v1.0.2") ||
+        u.has_prefix("reviewdog/action-setup@v1.0.3") ||
+        u.has_prefix("reviewdog/action-setup@v1.1.0")
+      let osv_hit = array_contains_string(ctx.vuln_uses, u)
+      if static_hit || osv_hit {
         add_diag(
           out,
           "known-vulnerable-actions",

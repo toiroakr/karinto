@@ -483,6 +483,29 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
 }
 
 ///|
+test "known-vulnerable-actions: OSV-supplied via context list" {
+  // actions/checkout@v3 is not in the hardcoded list — only the caller
+  // (worker → OSV.dev) decides whether it is vulnerable today.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@v3
+  let res = @curllint.lint(
+    yaml,
+    vuln_uses=["actions/checkout@v3"],
+    disabled=["unpinned-uses", "checkout-persist-credentials-false"],
+  )
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "known-vulnerable-actions" })
+  inspect(hits.length(), content="1")
+}
+
+///|
 test "misfeature: continue-on-error masks real failures" {
   let yaml =
     #|on: push
