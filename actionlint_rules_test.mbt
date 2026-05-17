@@ -31,19 +31,19 @@ test "unexpected-keys: unknown key under job" {
 }
 
 ///|
-#skip("not implemented yet")
 test "missing-required-keys: workflow missing `on`" {
   let yaml =
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
         "rule": "missing-required-keys",
@@ -99,13 +99,13 @@ test "invalid-mapping-values: runs-on must be string or array" {
 }
 
 ///|
-#skip("not implemented yet")
 test "expression-syntax: malformed `${{` expression" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -113,7 +113,7 @@ test "expression-syntax: malformed `${{` expression" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "expression-syntax",
@@ -151,13 +151,13 @@ test "expression-type-mismatch: arithmetic on string literal" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unknown-context-or-function: unknown context name" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -165,7 +165,7 @@ test "unknown-context-or-function: unknown context name" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "unknown-context-or-function",
@@ -375,7 +375,6 @@ test "pyflakes: undefined variable in python run" {
 // (see rules_catalog.mbt). Its fixture lives in zizmor_rules_test.mbt.
 
 ///|
-#skip("not implemented yet")
 test "job-needs-graph: dependency on undefined job" {
   let yaml =
     #|on: push
@@ -383,13 +382,14 @@ test "job-needs-graph: dependency on undefined job" {
     #|  build:
     #|    needs: missing
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "job-needs-graph",
@@ -429,7 +429,6 @@ test "matrix-values: duplicate matrix values" {
 }
 
 ///|
-#skip("not implemented yet")
 test "webhook-events: unknown event filter" {
   let yaml =
     #|on:
@@ -438,13 +437,14 @@ test "webhook-events: unknown event filter" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "webhook-events",
@@ -665,13 +665,13 @@ test "outdated-action-version: node12 runtime" {
 }
 
 ///|
-#skip("not implemented yet")
 test "shell-name-per-os: pwsh on linux runner" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -679,7 +679,7 @@ test "shell-name-per-os: pwsh on linux runner" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "shell-name-per-os",

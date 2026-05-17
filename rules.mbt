@@ -561,6 +561,70 @@ pub fn all_rules() -> Array[Rule] {
       on_job: no_job(),
       on_step: no_step(),
     },
+    Rule::{
+      id: "missing-required-keys",
+      title: "Missing required keys",
+      applies: workflow_or_action,
+      on_doc: Some(check_missing_required_keys),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "webhook-events",
+      title: "Unknown webhook event",
+      applies: workflow_only,
+      on_doc: Some(check_webhook_events),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "job-needs-graph",
+      title: "Invalid job needs graph",
+      applies: workflow_only,
+      on_doc: Some(check_job_needs_graph),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "expression-syntax",
+      title: "Expression syntax error",
+      applies: workflow_or_action,
+      on_doc: Some(check_expression_syntax),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "unknown-context-or-function",
+      title: "Unknown context or function",
+      applies: workflow_or_action,
+      on_doc: Some(check_unknown_context),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "github-env",
+      title: "Untrusted write to $GITHUB_ENV/$GITHUB_PATH",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_github_env),
+    },
+    Rule::{
+      id: "unredacted-secrets",
+      title: "Secret transformed before logging",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_unredacted_secrets),
+    },
+    Rule::{
+      id: "shell-name-per-os",
+      title: "Bad shell for runner OS",
+      applies: workflow_only,
+      on_doc: no_doc(),
+      on_job: Some(check_shell_name_per_os),
+      on_step: no_step(),
+    },
   ]
 }
 
@@ -1490,12 +1554,8 @@ fn flag_creds_password(
       match creds.get("password") {
         Some(String(s)) =>
           if !s.contains("${{") {
-            add_diag(
-              out,
-              "hardcoded-container-credentials",
-              Error,
-              "\{loc} `credentials.password` is a literal; reference `${{ secrets.* }}` instead",
-            )
+            let suffix = "`credentials.password` is a literal; reference `${{ secrets.* }}` instead"
+            add_diag(out, "hardcoded-container-credentials", Error, "\{loc} \{suffix}")
           }
         _ => ()
       }
@@ -2101,6 +2161,522 @@ fn check_job_step_id_naming(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           }
         _ => ()
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers shared across the HIGH/MEDIUM rule batch
+// ---------------------------------------------------------------------------
+
+///|
+/// Visit every String leaf in a YAML tree.
+fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
+  match y {
+    String(s) => f(s)
+    Array(arr) => for v in arr { walk_strings(v, f) }
+    Map(m) => m.each(fn(_k, v) { walk_strings(v, f) })
+    _ => ()
+  }
+}
+
+///|
+/// Count non-overlapping substring occurrences.
+fn count_substr(s : String, sub : String) -> Int {
+  let sl = s.length()
+  let subl = sub.length()
+  if subl == 0 || sl < subl { return 0 }
+  let sa = s.to_array()
+  let ba = sub.to_array()
+  let mut count = 0
+  let mut i = 0
+  while i <= sl - subl {
+    let mut j = 0
+    let mut ok = true
+    while j < subl {
+      if sa[i + j] != ba[j] {
+        ok = false
+        break
+      }
+      j = j + 1
+    }
+    if ok {
+      count = count + 1
+      i = i + subl
+    } else {
+      i = i + 1
+    }
+  }
+  count
+}
+
+///|
+/// Levenshtein distance, capped early.
+fn edit_distance(a : String, b : String) -> Int {
+  let la = a.length()
+  let lb = b.length()
+  if la == 0 { return lb }
+  if lb == 0 { return la }
+  let aa = a.to_array()
+  let bb = b.to_array()
+  let prev : Array[Int] = []
+  let mut idx = 0
+  while idx <= lb {
+    prev.push(idx)
+    idx = idx + 1
+  }
+  let curr : Array[Int] = []
+  idx = 0
+  while idx <= lb {
+    curr.push(0)
+    idx = idx + 1
+  }
+  let mut i = 1
+  while i <= la {
+    curr[0] = i
+    let mut row_min = i
+    let mut j = 1
+    while j <= lb {
+      let cost = if aa[i - 1] == bb[j - 1] { 0 } else { 1 }
+      let del = prev[j] + 1
+      let ins = curr[j - 1] + 1
+      let sub_cost = prev[j - 1] + cost
+      let m1 = if del < ins { del } else { ins }
+      let best = if m1 < sub_cost { m1 } else { sub_cost }
+      curr[j] = best
+      if best < row_min { row_min = best }
+      j = j + 1
+    }
+    if row_min > 4 { return 5 }
+    let mut k = 0
+    while k <= lb {
+      prev[k] = curr[k]
+      k = k + 1
+    }
+    i = i + 1
+  }
+  prev[lb]
+}
+
+///|
+fn suggest(word : String, candidates : Array[String]) -> String? {
+  let mut best : String? = None
+  let mut best_d = 3
+  for c in candidates {
+    let d = edit_distance(word, c)
+    if d < best_d {
+      best_d = d
+      best = Some(c)
+    }
+  }
+  best
+}
+
+///|
+fn array_contains_string(arr : Array[String], target : String) -> Bool {
+  for s in arr {
+    if s == target { return true }
+  }
+  false
+}
+
+// ---------------------------------------------------------------------------
+// Rule: missing-required-keys (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_missing_required_keys(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      let is_action = m.contains("runs")
+      if is_action {
+        match m.get("runs") {
+          Some(Map(runs)) =>
+            if !runs.contains("using") {
+              add_diag(
+                out,
+                "missing-required-keys",
+                Error,
+                "action is missing required key `runs.using`",
+              )
+            }
+          _ =>
+            add_diag(
+              out,
+              "missing-required-keys",
+              Error,
+              "action is missing required key `runs`",
+            )
+        }
+      } else {
+        if !m.contains("on") {
+          add_diag(
+            out,
+            "missing-required-keys",
+            Error,
+            "workflow is missing required key `on`",
+          )
+        }
+        if !m.contains("jobs") {
+          add_diag(
+            out,
+            "missing-required-keys",
+            Error,
+            "workflow is missing required key `jobs`",
+          )
+        }
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: webhook-events (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn known_events() -> Array[String] {
+  [
+    "branch_protection_rule", "check_run", "check_suite", "create", "delete",
+    "deployment", "deployment_status", "discussion", "discussion_comment",
+    "fork", "gollum", "issue_comment", "issues", "label", "merge_group",
+    "milestone", "page_build", "project", "project_card", "project_column",
+    "public", "pull_request", "pull_request_review",
+    "pull_request_review_comment", "pull_request_target", "push",
+    "registry_package", "release", "repository_dispatch", "schedule", "status",
+    "watch", "workflow_call", "workflow_dispatch", "workflow_run",
+  ]
+}
+
+///|
+fn emit_unknown_event(
+  e : String,
+  events : Array[String],
+  out : Array[Diagnostic],
+) -> Unit {
+  let msg = match suggest(e, events) {
+    Some(s) => "unknown webhook event `\{e}` (did you mean `\{s}`?)"
+    None => "unknown webhook event `\{e}`"
+  }
+  add_diag(out, "webhook-events", Error, msg)
+}
+
+///|
+fn check_webhook_events(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  let events = known_events()
+  match m.get("on") {
+    Some(String(e)) =>
+      if !array_contains_string(events, e) {
+        emit_unknown_event(e, events, out)
+      }
+    Some(Array(arr)) =>
+      for v in arr {
+        match v {
+          String(e) =>
+            if !array_contains_string(events, e) {
+              emit_unknown_event(e, events, out)
+            }
+          _ => ()
+        }
+      }
+    Some(Map(om)) =>
+      om.each(fn(k, _) {
+        if !array_contains_string(events, k) {
+          emit_unknown_event(k, events, out)
+        }
+      })
+    _ => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: job-needs-graph (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let names : Map[String, Bool] = {}
+  for j in ctx.jobs {
+    names[j.name] = true
+  }
+  for j in ctx.jobs {
+    match j.raw.get("needs") {
+      Some(String(n)) =>
+        if !names.contains(n) {
+          add_diag(
+            out,
+            "job-needs-graph",
+            Error,
+            "job `\{j.name}` needs undefined job `\{n}`",
+          )
+        }
+      Some(Array(arr)) =>
+        for v in arr {
+          match v {
+            String(n) =>
+              if !names.contains(n) {
+                add_diag(
+                  out,
+                  "job-needs-graph",
+                  Error,
+                  "job `\{j.name}` needs undefined job `\{n}`",
+                )
+              }
+            _ => ()
+          }
+        }
+      _ => ()
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: expression-syntax (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let reported = { "unterminated": false, "stray": false }
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") && !s.contains("}}") { return }
+    let opens = count_substr(s, "${{")
+    let closes = count_substr(s, "}}")
+    if opens > closes && !reported.get("unterminated").unwrap() {
+      reported["unterminated"] = true
+      add_diag(
+        out,
+        "expression-syntax",
+        Error,
+        "expression syntax error: unterminated `${{`",
+      )
+    } else if closes > opens && !reported.get("stray").unwrap() {
+      reported["stray"] = true
+      add_diag(
+        out,
+        "expression-syntax",
+        Error,
+        "expression syntax error: stray `}}`",
+      )
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unknown-context-or-function (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn known_contexts() -> Array[String] {
+  [
+    "github", "env", "vars", "secrets", "inputs", "needs", "steps", "job",
+    "jobs", "runner", "matrix", "strategy",
+  ]
+}
+
+///|
+fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let contexts = known_contexts()
+  let seen : Map[String, Bool] = {}
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") { return }
+    let chars = s.to_array()
+    let n = chars.length()
+    let mut i = 0
+    while i + 2 < n {
+      if chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == '{' {
+        i = i + 3
+        let mut prev_dot = false
+        while i + 1 < n && !(chars[i] == '}' && chars[i + 1] == '}') {
+          let c = chars[i]
+          if c == '.' {
+            prev_dot = true
+            i = i + 1
+          } else if c == ' ' || c == '\t' || c == '\n' {
+            i = i + 1
+          } else if is_ident_start(c) {
+            let start = i
+            while i < n && is_ident_cont(chars[i]) {
+              i = i + 1
+            }
+            if !prev_dot {
+              let buf = StringBuilder::new()
+              let mut k = start
+              while k < i {
+                buf.write_char(chars[k])
+                k = k + 1
+              }
+              let ident = buf.to_string()
+              let mut j = i
+              while j < n && chars[j] == ' ' {
+                j = j + 1
+              }
+              if j < n && chars[j] == '.' {
+                if !array_contains_string(contexts, ident) &&
+                   !seen.contains(ident) {
+                  seen[ident] = true
+                  let msg = match suggest(ident, contexts) {
+                    Some(c2) => "unknown context `\{ident}` (did you mean `\{c2}`?)"
+                    None => "unknown context `\{ident}`"
+                  }
+                  add_diag(out, "unknown-context-or-function", Error, msg)
+                }
+              }
+            }
+            prev_dot = false
+          } else {
+            prev_dot = false
+            i = i + 1
+          }
+        }
+        if i + 1 < n {
+          i = i + 2
+        } else {
+          i = n
+        }
+      } else {
+        i = i + 1
+      }
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Rule: github-env (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_github_env(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.run {
+    Some(r) => {
+      let to_env = r.contains("$GITHUB_ENV") || r.contains("${GITHUB_ENV}")
+      let to_path = r.contains("$GITHUB_PATH") || r.contains("${GITHUB_PATH}")
+      if !to_env && !to_path { return }
+      match find_untrusted_in_text(r) {
+        Some(p) => {
+          let target = if to_path { "$GITHUB_PATH" } else { "$GITHUB_ENV" }
+          add_diag(
+            out,
+            "github-env",
+            Error,
+            "untrusted `\{p}` written to `\{target}`",
+          )
+        }
+        None => ()
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unredacted-secrets (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_unredacted_secrets(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.run {
+    Some(r) => {
+      if !contains_secrets_ref(r) { return }
+      let transforms = [
+        ("base64", "base64"),
+        ("xxd", "xxd"),
+        ("| tr ", "tr"),
+        ("| cut ", "cut"),
+        ("| sed ", "sed"),
+        ("| awk ", "awk"),
+        ("fromJSON(secrets", "fromJSON"),
+      ]
+      for entry in transforms {
+        let (pat, name) = entry
+        if r.contains(pat) {
+          add_diag(
+            out,
+            "unredacted-secrets",
+            Error,
+            "secret is transformed (\{name}) before logging; redaction will fail",
+          )
+          return
+        }
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: shell-name-per-os (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn runner_os_of(s : String) -> String {
+  let lo = s.to_lower()
+  if lo.contains("windows") { return "windows" }
+  if lo.contains("macos") || lo.contains("mac-") || lo.contains("darwin") {
+    return "macos"
+  }
+  "linux"
+}
+
+///|
+fn shell_valid_for(shell : String, os : String) -> Bool {
+  match os {
+    "windows" =>
+      shell == "bash" ||
+      shell == "pwsh" ||
+      shell == "python" ||
+      shell == "cmd" ||
+      shell == "powershell"
+    _ =>
+      shell == "bash" || shell == "pwsh" || shell == "python" || shell == "sh"
+  }
+}
+
+///|
+fn check_shell_name_per_os(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let runs = match get_string_field(job.raw, "runs-on") {
+    Some(s) => s
+    None => return
+  }
+  let os = runner_os_of(runs)
+  for s in job.steps {
+    match get_string_field(s.raw, "shell") {
+      Some(sh) =>
+        if !shell_valid_for(sh, os) {
+          let scope = if sh == "cmd" || sh == "powershell" {
+            "Windows"
+          } else if sh == "sh" {
+            "Linux/macOS"
+          } else {
+            "this OS"
+          }
+          add_diag(
+            out,
+            "shell-name-per-os",
+            Error,
+            "shell `\{sh}` is only available on \{scope} runners",
+          )
+        }
+      None => ()
     }
   }
 }

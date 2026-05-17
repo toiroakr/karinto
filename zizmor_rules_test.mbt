@@ -331,21 +331,31 @@ test "github-app: GitHub App token exchanged at workflow scope" {
 }
 
 ///|
-#skip("not implemented yet")
 test "github-env: write to $GITHUB_ENV from untrusted input" {
   let yaml =
     #|on: pull_request_target
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo "TITLE=${{ github.event.pull_request.title }}" >> $GITHUB_ENV
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "dangerous-triggers",
+        "severity": "error",
+        "message": "trigger `pull_request_target` runs with write access to the base repo",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "error",
+        "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
+      },
       {
         "rule": "github-env",
         "severity": "error",
@@ -867,21 +877,22 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unredacted-secrets: secret length manipulated before logging" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
+    #|    environment: prod
     #|    steps:
     #|      - run: |
     #|          echo "${{ secrets.TOKEN }}" | base64
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "unredacted-secrets",
