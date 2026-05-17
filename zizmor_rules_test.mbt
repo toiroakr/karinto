@@ -141,12 +141,16 @@ test "cache-poisoning: cache restore in publish flow" {
         "severity": "error",
         "message": "release-publishing job restores from cache; risk of cache poisoning",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "concurrency-limits: no concurrency on deploy workflow" {
   let yaml =
     #|on:
@@ -155,13 +159,14 @@ test "concurrency-limits: no concurrency on deploy workflow" {
     #|jobs:
     #|  deploy:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: ./deploy.sh
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "concurrency-limits",
@@ -927,13 +932,13 @@ test "unredacted-secrets: secret length manipulated before logging" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unsound-condition: `always() && success()` is always true" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -941,7 +946,7 @@ test "unsound-condition: `always() && success()` is always true" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "unsound-condition",
@@ -953,13 +958,13 @@ test "unsound-condition: `always() && success()` is always true" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unsound-contains: contains() with literal arg order swapped" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -967,7 +972,7 @@ test "unsound-contains: contains() with literal arg order swapped" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "unsound-contains",
@@ -999,6 +1004,11 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "use-trusted-publishing",
         "severity": "info",

@@ -55,6 +55,10 @@ pub(all) struct WalkCtx {
   // Optional caller-supplied context: `uses:` refs known to be vulnerable
   // (typically populated from OSV.dev queries by the worker before linting).
   vuln_uses : Array[String]
+  // Resolved file kind, so rules can disambiguate workflow vs action when
+  // structural cues alone aren't reliable (e.g. action.yml that's missing
+  // its `runs:` key entirely).
+  kind : FileKind
 }
 
 ///|
@@ -132,6 +136,7 @@ fn build_steps(arr : Array[@yaml.Yaml]) -> Array[StepInfo] {
 pub fn prewalk(
   doc : @yaml.Yaml,
   vuln_uses? : Array[String] = [],
+  kind? : FileKind = Unknown,
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -218,6 +223,7 @@ pub fn prewalk(
     action_is_composite,
     updates,
     vuln_uses,
+    kind,
   }
 }
 
@@ -669,6 +675,94 @@ pub fn all_rules() -> Array[Rule] {
       title: "Invalid cron expression",
       applies: workflow_only,
       on_doc: Some(check_cron),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "invalid-mapping-values",
+      title: "Mapping value has wrong type",
+      applies: workflow_or_action,
+      on_doc: Some(check_invalid_mapping_values_doc),
+      on_job: Some(check_invalid_mapping_values_job),
+      on_step: Some(check_invalid_mapping_values_step),
+    },
+    Rule::{
+      id: "unknown-runner-label",
+      title: "Unknown runner label",
+      applies: workflow_only,
+      on_doc: no_doc(),
+      on_job: Some(check_unknown_runner_label),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "concurrency-limits",
+      title: "Workflow has no concurrency control",
+      applies: workflow_only,
+      on_doc: Some(check_concurrency_limits),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "meaningless-comparison",
+      title: "Comparison whose result is always constant",
+      applies: workflow_or_action,
+      on_doc: Some(check_meaningless_comparison),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "glob-patterns",
+      title: "Bad glob pattern",
+      applies: workflow_only,
+      on_doc: Some(check_glob_patterns),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "workflow-dispatch-inputs",
+      title: "Invalid workflow_dispatch input definition",
+      applies: workflow_only,
+      on_doc: Some(check_workflow_dispatch_inputs),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "context-availability",
+      title: "Context used where it is not available",
+      applies: workflow_or_action,
+      on_doc: Some(check_context_availability),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "action-yml-metadata",
+      title: "Invalid action.yml metadata",
+      applies: action_only,
+      on_doc: Some(check_action_yml_metadata),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "reusable-workflow-definition",
+      title: "Invalid reusable workflow definition",
+      applies: workflow_only,
+      on_doc: Some(check_reusable_workflow_definition),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "unsound-condition",
+      title: "Unsound boolean expression",
+      applies: workflow_or_action,
+      on_doc: Some(check_unsound_condition),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "unsound-contains",
+      title: "`contains()` arguments look swapped",
+      applies: workflow_or_action,
+      on_doc: Some(check_unsound_contains),
       on_job: no_job(),
       on_step: no_step(),
     },
@@ -2341,8 +2435,16 @@ fn check_missing_required_keys(
 ) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
-      let is_action = m.contains("runs")
+      // Trust the resolved file kind when caller supplied one; otherwise
+      // fall back to the structural cue (presence of `runs:`).
+      let is_action = match ctx.kind {
+        Action => true
+        Workflow => false
+        _ => m.contains("runs")
+      }
       if is_action {
+        // `runs:` itself is covered by `action-yml-metadata`; here we only
+        // check the nested `runs.using` requirement when `runs:` exists.
         match m.get("runs") {
           Some(Map(runs)) =>
             if !runs.contains("using") {
@@ -2353,13 +2455,7 @@ fn check_missing_required_keys(
                 "action is missing required key `runs.using`",
               )
             }
-          _ =>
-            add_diag(
-              out,
-              "missing-required-keys",
-              Error,
-              "action is missing required key `runs`",
-            )
+          _ => ()
         }
       } else {
         if !m.contains("on") {
@@ -3021,13 +3117,15 @@ fn validate_keys(
 fn check_unexpected_keys_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
-      // Decide top-level allowlist by which kind of file this looks like.
-      let allowed = if m.contains("runs") {
-        action_top_keys()
-      } else {
-        workflow_top_keys()
+      // Trust the resolved file kind; fall back to a structural cue otherwise.
+      let is_action = match ctx.kind {
+        Action => true
+        Workflow => false
+        _ => m.contains("runs")
       }
-      validate_keys(m, allowed, "workflow", out)
+      let allowed = if is_action { action_top_keys() } else { workflow_top_keys() }
+      let location = if is_action { "action" } else { "workflow" }
+      validate_keys(m, allowed, location, out)
     }
     None => ()
   }
@@ -3241,5 +3339,1288 @@ fn check_cron(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         _ => ()
       }
     None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: invalid-mapping-values (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Per-scope type expectations for well-known YAML keys. We only flag the
+/// fields whose runtime semantics are well-defined; obscure / optional fields
+/// stay out of the allowlist to keep false-positive risk low.
+fn type_name(y : @yaml.Yaml) -> String {
+  match y {
+    String(_) => "string"
+    Boolean(_) => "boolean"
+    Integer(_) => "number"
+    Real(_, ..) => "number"
+    Map(_) => "mapping"
+    Array(_) => "array"
+    Null => "null"
+    BadValue => "invalid"
+  }
+}
+
+///|
+fn expect_string(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(String(_)) => ()
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be a string (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+fn expect_string_or_array(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(String(_)) => ()
+    Some(Array(_)) => ()
+    Some(_) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be a string or array",
+      )
+    None => ()
+  }
+}
+
+///|
+fn expect_mapping(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(Map(_)) => ()
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be a mapping (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+fn expect_array(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(Array(_)) => ()
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be an array (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+fn expect_bool_or_string_bool(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(Boolean(_)) => ()
+    Some(String("true")) => ()
+    Some(String("false")) => ()
+    Some(String(s)) =>
+      if !s.has_prefix("${{") {
+        add_diag(
+          out,
+          "invalid-mapping-values",
+          Error,
+          "\{location}: `\{key}` must be a boolean (got string `\{s}`)",
+        )
+      }
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be a boolean (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+/// GHA accepts `permissions:` as either a mapping or one of the string
+/// shorthands `read-all` / `write-all`.
+fn expect_permissions(
+  m : Map[String, @yaml.Yaml],
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get("permissions") {
+    Some(Map(_)) => ()
+    Some(String("read-all")) => ()
+    Some(String("write-all")) => ()
+    Some(String(s)) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `permissions` must be a mapping or `read-all`/`write-all` (got string `\{s}`)",
+      )
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `permissions` must be a mapping or `read-all`/`write-all` (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+/// `if:` is a GHA expression, which may be a string or coerced to a boolean
+/// (`if: true` / `if: false` parses as boolean in YAML).
+fn expect_if(
+  m : Map[String, @yaml.Yaml],
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get("if") {
+    Some(String(_)) => ()
+    Some(Boolean(_)) => ()
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `if` must be a string or boolean (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
+fn check_invalid_mapping_values_doc(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      expect_mapping(m, "env", "workflow", out)
+      expect_mapping(m, "defaults", "workflow", out)
+      expect_mapping(m, "concurrency", "workflow", out)
+      expect_permissions(m, "workflow", out)
+      expect_mapping(m, "jobs", "workflow", out)
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_invalid_mapping_values_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let loc = "job `\{job.name}`"
+  let m = job.raw
+  // `runs-on` may be a string or an array.
+  expect_string_or_array(m, "runs-on", loc, out)
+  expect_array(m, "steps", loc, out)
+  expect_mapping(m, "env", loc, out)
+  expect_permissions(m, loc, out)
+  expect_mapping(m, "with", loc, out)
+  expect_mapping(m, "outputs", loc, out)
+  expect_mapping(m, "strategy", loc, out)
+  expect_bool_or_string_bool(m, "continue-on-error", loc, out)
+  expect_string(m, "uses", loc, out)
+  expect_if(m, loc, out)
+}
+
+///|
+fn check_invalid_mapping_values_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let id = match step.raw.get("id") {
+    Some(String(s)) => s
+    _ =>
+      match step.raw.get("name") {
+        Some(String(s)) => s
+        _ => "step"
+      }
+  }
+  let loc = "step `\{id}`"
+  let m = step.raw
+  expect_string(m, "uses", loc, out)
+  expect_string(m, "run", loc, out)
+  expect_string(m, "shell", loc, out)
+  expect_string(m, "working-directory", loc, out)
+  expect_mapping(m, "env", loc, out)
+  expect_mapping(m, "with", loc, out)
+  expect_bool_or_string_bool(m, "continue-on-error", loc, out)
+  expect_if(m, loc, out)
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unknown-runner-label (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn known_runner_labels() -> Array[String] {
+  [
+    // GitHub-hosted x64 Linux
+    "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04",
+    // Arm Linux (preview)
+    "ubuntu-22.04-arm", "ubuntu-24.04-arm",
+    // macOS
+    "macos-latest", "macos-15", "macos-14", "macos-13", "macos-12",
+    "macos-latest-large", "macos-latest-xlarge",
+    "macos-14-large", "macos-14-xlarge",
+    "macos-15-large", "macos-15-xlarge",
+    // Windows
+    "windows-latest", "windows-2025", "windows-2022", "windows-2019",
+    "windows-11-arm",
+    // Common meta labels
+    "self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm",
+  ]
+}
+
+///|
+fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
+  // Skip GHA expression labels (`${{ ... }}`) and the empty string.
+  if label == "" || label.contains("${{") {
+    return
+  }
+  let labels = known_runner_labels()
+  if array_contains_string(labels, label) {
+    return
+  }
+  let hint = suggest(label, labels)
+  // Group labels (e.g. `gpu`, `org/runner-pool`) are user-defined. Flag a
+  // label only if it looks like a GitHub-hosted runner family OR there is a
+  // close known-label suggestion (catches typos like `ubunto-latest`).
+  let looks_hosted = label.has_prefix("ubuntu-") ||
+                     label.has_prefix("macos-") ||
+                     label.has_prefix("windows-")
+  if !looks_hosted && hint is None {
+    return
+  }
+  let msg = match hint {
+    Some(c) => "unknown runner label `\{label}` (did you mean `\{c}`?)"
+    None => "unknown runner label `\{label}`"
+  }
+  add_diag(out, "unknown-runner-label", Warning, msg)
+}
+
+///|
+fn check_unknown_runner_label(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.raw.get("runs-on") {
+    Some(String(s)) => flag_runner_label(s, out)
+    Some(Array(arr)) =>
+      for item in arr {
+        match item {
+          String(s) => flag_runner_label(s, out)
+          _ => ()
+        }
+      }
+    _ => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: concurrency-limits (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Fire only on workflows whose triggers suggest external-state mutation
+/// (deploys, releases, scheduled jobs, manual runs), where running concurrent
+/// copies is most likely to cause harm. PR-style triggers are ignored.
+fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      if m.contains("concurrency") { return }
+      if !triggers_warrant_concurrency(m) { return }
+      let mut any_job = false
+      let mut missing = false
+      for j in ctx.jobs {
+        any_job = true
+        if !j.raw.contains("concurrency") {
+          missing = true
+          break
+        }
+      }
+      if any_job && missing {
+        add_diag(
+          out,
+          "concurrency-limits",
+          Info,
+          "workflow has no `concurrency:` block",
+        )
+      }
+    }
+    None => ()
+  }
+}
+
+///|
+fn triggers_warrant_concurrency(m : Map[String, @yaml.Yaml]) -> Bool {
+  match m.get("on") {
+    Some(@yaml.Yaml::Map(on_map)) => {
+      let push_qualifies = match on_map.get("push") {
+        Some(@yaml.Yaml::Map(push_map)) =>
+          push_map.contains("branches") ||
+          push_map.contains("branches-ignore") ||
+          push_map.contains("tags") ||
+          push_map.contains("tags-ignore")
+        _ => false
+      }
+      push_qualifies ||
+      on_map.contains("release") ||
+      on_map.contains("schedule") ||
+      on_map.contains("workflow_dispatch")
+    }
+    _ => false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: meaningless-comparison (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Walk every `${{ ... }}` interpolation and report obvious always-true /
+/// always-false comparisons (literal == literal, identifier == itself).
+fn check_meaningless_comparison(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  let seen : Map[String, Bool] = {}
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") {
+      return
+    }
+    for expr in extract_expr_bodies(s) {
+      match find_meaningless_compare(expr) {
+        Some((text, verdict)) =>
+          if !seen.contains(text) {
+            seen[text] = true
+            add_diag(
+              out,
+              "meaningless-comparison",
+              Warning,
+              "comparison `\{text}` is always \{verdict}",
+            )
+          }
+        None => ()
+      }
+    }
+  })
+}
+
+///|
+/// Return the inside of every `${{ ... }}` chunk in `s` as a separate string.
+fn extract_expr_bodies(s : String) -> Array[String] {
+  let out : Array[String] = []
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut i = 0
+  while i + 2 < n {
+    if chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == '{' {
+      let start = i + 3
+      let mut j = start
+      while j + 1 < n && !(chars[j] == '}' && chars[j + 1] == '}') {
+        j = j + 1
+      }
+      if j + 1 < n {
+        let buf = StringBuilder::new()
+        let mut k = start
+        while k < j {
+          buf.write_char(chars[k])
+          k = k + 1
+        }
+        out.push(buf.to_string())
+        i = j + 2
+      } else {
+        i = n
+      }
+    } else {
+      i = i + 1
+    }
+  }
+  out
+}
+
+///|
+/// Detect `LHS == RHS` / `LHS != RHS` where LHS and RHS are textually
+/// identical literals after trimming. Returns `(text, "true"|"false")`.
+fn find_meaningless_compare(expr : String) -> (String, String)? {
+  // Try `==` first, then `!=`.
+  match split_once(expr, "==") {
+    Some((lhs, rhs)) => {
+      let l = lhs.trim(chars=" \t").to_string()
+      let r = rhs.trim(chars=" \t").to_string()
+      if l != "" && l == r {
+        return Some(("\{l} == \{r}", "true"))
+      }
+    }
+    None => ()
+  }
+  match split_once(expr, "!=") {
+    Some((lhs, rhs)) => {
+      let l = lhs.trim(chars=" \t").to_string()
+      let r = rhs.trim(chars=" \t").to_string()
+      if l != "" && l == r {
+        return Some(("\{l} != \{r}", "false"))
+      }
+    }
+    None => ()
+  }
+  None
+}
+
+///|
+fn split_once(s : String, sep : String) -> (String, String)? {
+  let n = s.length()
+  let m = sep.length()
+  if m == 0 || n < m {
+    return None
+  }
+  let chars = s.to_array()
+  let sep_chars = sep.to_array()
+  let mut i = 0
+  while i + m <= n {
+    let mut matched = true
+    let mut k = 0
+    while k < m {
+      if chars[i + k] != sep_chars[k] {
+        matched = false
+        break
+      }
+      k = k + 1
+    }
+    if matched {
+      let lhs = StringBuilder::new()
+      let mut p = 0
+      while p < i {
+        lhs.write_char(chars[p])
+        p = p + 1
+      }
+      let rhs = StringBuilder::new()
+      let mut q = i + m
+      while q < n {
+        rhs.write_char(chars[q])
+        q = q + 1
+      }
+      return Some((lhs.to_string(), rhs.to_string()))
+    }
+    i = i + 1
+  }
+  None
+}
+
+// ---------------------------------------------------------------------------
+// Rule: glob-patterns (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Validate every `branches:`/`paths:`/`tags:` (and `*-ignore` variants)
+/// glob list under `on:`. We only catch obvious structural bugs:
+///   - unterminated `[...]` character class,
+///   - unterminated `{...}` brace group.
+/// More elaborate glob semantics belong to a real glob compiler.
+fn check_glob_patterns(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("on") {
+        Some(Map(on)) =>
+          on.each(fn(_event, ev) {
+            match ev {
+              Map(filter) => check_glob_filter(filter, out)
+              _ => ()
+            }
+          })
+        _ => ()
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_glob_filter(
+  filter : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  let keys = [
+    "branches", "branches-ignore", "tags", "tags-ignore",
+    "paths", "paths-ignore",
+  ]
+  for k in keys {
+    match filter.get(k) {
+      Some(Array(arr)) =>
+        for item in arr {
+          match item {
+            String(p) =>
+              match glob_pattern_error(p) {
+                Some(why) =>
+                  add_diag(
+                    out,
+                    "glob-patterns",
+                    Error,
+                    "invalid glob `\{p}`: \{why}",
+                  )
+                None => ()
+              }
+            _ => ()
+          }
+        }
+      _ => ()
+    }
+  }
+}
+
+///|
+fn glob_pattern_error(p : String) -> String? {
+  let chars = p.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_class = false
+  let mut in_brace = false
+  while i < n {
+    let c = chars[i]
+    if c == '\\' {
+      // Skip the escaped character (if any).
+      i = i + 2
+      continue
+    }
+    if in_class {
+      if c == ']' {
+        in_class = false
+      }
+    } else if in_brace {
+      if c == '}' {
+        in_brace = false
+      }
+    } else {
+      if c == '[' {
+        in_class = true
+      } else if c == '{' {
+        in_brace = true
+      }
+    }
+    i = i + 1
+  }
+  if in_class {
+    return Some("unterminated character class")
+  }
+  if in_brace {
+    return Some("unterminated brace group")
+  }
+  None
+}
+
+// ---------------------------------------------------------------------------
+// Rule: workflow-dispatch-inputs (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_workflow_dispatch_inputs(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("on") {
+        Some(Map(on)) =>
+          match on.get("workflow_dispatch") {
+            Some(Map(wd)) => check_dispatch_inputs_map(wd, out)
+            _ => ()
+          }
+        _ => ()
+      }
+    None => ()
+  }
+}
+
+///|
+fn allowed_dispatch_input_types() -> Array[String] {
+  ["choice", "boolean", "string", "environment", "number"]
+}
+
+///|
+fn check_dispatch_inputs_map(
+  wd : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  match wd.get("inputs") {
+    Some(Map(inputs)) =>
+      inputs.each(fn(name, def) {
+        match def {
+          Map(d) => check_dispatch_input(name, d, out)
+          _ =>
+            add_diag(
+              out,
+              "workflow-dispatch-inputs",
+              Error,
+              "workflow_dispatch input `\{name}` must be a mapping",
+            )
+        }
+      })
+    _ => ()
+  }
+}
+
+///|
+fn check_dispatch_input(
+  name : String,
+  d : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  let types = allowed_dispatch_input_types()
+  match d.get("type") {
+    Some(String(t)) =>
+      if !array_contains_string(types, t) {
+        add_diag(
+          out,
+          "workflow-dispatch-inputs",
+          Error,
+          "workflow_dispatch input `\{name}.type` must be one of choice/boolean/string/environment/number",
+        )
+      }
+    Some(other) =>
+      add_diag(
+        out,
+        "workflow-dispatch-inputs",
+        Error,
+        "workflow_dispatch input `\{name}.type` must be a string (got \{type_name(other)})",
+      )
+    None => ()
+  }
+  // `choice` inputs need an `options:` array.
+  match d.get("type") {
+    Some(String("choice")) =>
+      match d.get("options") {
+        Some(Array(_)) => ()
+        _ =>
+          add_diag(
+            out,
+            "workflow-dispatch-inputs",
+            Error,
+            "workflow_dispatch input `\{name}` is `type: choice` but is missing `options:`",
+          )
+      }
+    _ => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: context-availability (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Pre-walk every `${{ ... }}` interpolation and emit a diagnostic when a
+/// reserved context (currently `needs`, `steps`, `matrix`, `strategy`,
+/// `runner`, `job`) is referenced at a location where GitHub forbids it.
+///
+/// Locations we check:
+///   - workflow-level `env:` / `concurrency:` (no needs/steps/matrix/job)
+///   - job-level `env:` (no steps)
+///   - job-level `if:` (no steps; needs allowed iff the job declares needs)
+///
+/// Anything beyond this list is conservatively accepted to avoid noise.
+fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let seen : Map[String, Bool] = {}
+  match ctx.workflow_map {
+    Some(m) => {
+      // Workflow scope: `env` / `concurrency` cannot read job-scoped context.
+      let workflow_forbidden = [
+        "needs", "steps", "matrix", "strategy", "runner", "job", "inputs",
+      ]
+      check_avail_in_node(
+        m.get("env"),
+        "workflow-level `env`",
+        workflow_forbidden,
+        seen,
+        out,
+      )
+      check_avail_in_node(
+        m.get("concurrency"),
+        "workflow-level `concurrency`",
+        workflow_forbidden,
+        seen,
+        out,
+      )
+    }
+    None => ()
+  }
+  for j in ctx.jobs {
+    // Job scope: env/`if:` cannot reference per-step context.
+    check_avail_in_node(
+      j.raw.get("env"),
+      "job `\{j.name}` `env`",
+      ["steps"],
+      seen,
+      out,
+    )
+    check_avail_in_node(
+      j.raw.get("if"),
+      "job `\{j.name}` `if`",
+      ["steps"],
+      seen,
+      out,
+    )
+  }
+}
+
+///|
+fn check_avail_in_node(
+  node : @yaml.Yaml?,
+  location : String,
+  forbidden : Array[String],
+  seen : Map[String, Bool],
+  out : Array[Diagnostic],
+) -> Unit {
+  match node {
+    Some(y) => walk_strings(y, fn(s) {
+      check_avail_in_string(s, location, forbidden, seen, out)
+    })
+    None => ()
+  }
+}
+
+///|
+fn check_avail_in_string(
+  s : String,
+  location : String,
+  forbidden : Array[String],
+  seen : Map[String, Bool],
+  out : Array[Diagnostic],
+) -> Unit {
+  if !s.contains("${{") {
+    return
+  }
+  for body in extract_expr_bodies(s) {
+    for ctx_name in forbidden {
+      if expr_uses_context(body, ctx_name) {
+        let key = "\{location}|\{ctx_name}"
+        if !seen.contains(key) {
+          seen[key] = true
+          add_diag(
+            out,
+            "context-availability",
+            Error,
+            "context `\{ctx_name}` is not available in \{location}",
+          )
+        }
+      }
+    }
+  }
+}
+
+///|
+fn expr_uses_context(expr : String, name : String) -> Bool {
+  // Look for `<name>.` as a standalone identifier (after non-ident char).
+  let chars = expr.to_array()
+  let nm = name.to_array()
+  let n = chars.length()
+  let m = nm.length()
+  let mut i = 0
+  while i + m < n {
+    let mut matched = true
+    let mut k = 0
+    while k < m {
+      if chars[i + k] != nm[k] {
+        matched = false
+        break
+      }
+      k = k + 1
+    }
+    if matched && chars[i + m] == '.' {
+      // Make sure the char before `name` isn't an identifier char.
+      if i == 0 || !is_ident_cont(chars[i - 1]) {
+        return true
+      }
+    }
+    i = i + 1
+  }
+  false
+}
+
+// ---------------------------------------------------------------------------
+// Rule: action-yml-metadata (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_action_yml_metadata(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      // Every action.yml needs `name` and `runs`. Description is conventional
+      // but only `runs` is strictly required by the runtime.
+      if !m.contains("runs") {
+        add_diag(
+          out,
+          "action-yml-metadata",
+          Error,
+          "action.yml is missing required key `runs`",
+        )
+      }
+      match m.get("runs") {
+        Some(Map(runs)) => check_action_runs(runs, out)
+        Some(other) =>
+          add_diag(
+            out,
+            "action-yml-metadata",
+            Error,
+            "action.yml `runs` must be a mapping (got \{type_name(other)})",
+          )
+        None => ()
+      }
+      match m.get("inputs") {
+        Some(Map(inputs)) =>
+          inputs.each(fn(name, def) {
+            match def {
+              Map(d) => {
+                match d.get("description") {
+                  Some(String(_)) => ()
+                  _ =>
+                    add_diag(
+                      out,
+                      "action-yml-metadata",
+                      Warning,
+                      "action.yml input `\{name}` is missing `description:`",
+                    )
+                }
+              }
+              _ =>
+                add_diag(
+                  out,
+                  "action-yml-metadata",
+                  Error,
+                  "action.yml input `\{name}` must be a mapping",
+                )
+            }
+          })
+        Some(other) =>
+          add_diag(
+            out,
+            "action-yml-metadata",
+            Error,
+            "action.yml `inputs` must be a mapping (got \{type_name(other)})",
+          )
+        None => ()
+      }
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_action_runs(
+  runs : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  match runs.get("using") {
+    Some(String(u)) => {
+      let known = [
+        "composite", "docker",
+        "node12", "node16", "node20", "node22", "node24",
+      ]
+      if !array_contains_string(known, u) {
+        let hint = match suggest(u, known) {
+          Some(c) => " (did you mean `\{c}`?)"
+          None => ""
+        }
+        add_diag(
+          out,
+          "action-yml-metadata",
+          Error,
+          "action.yml `runs.using` `\{u}` is not a recognized runtime\{hint}",
+        )
+      }
+      // composite actions need `steps:`, JS actions need `main:`.
+      if u == "composite" && !runs.contains("steps") {
+        add_diag(
+          out,
+          "action-yml-metadata",
+          Error,
+          "composite action is missing `runs.steps`",
+        )
+      }
+      if (u.has_prefix("node") || u == "node12") && !runs.contains("main") {
+        add_diag(
+          out,
+          "action-yml-metadata",
+          Error,
+          "JavaScript action is missing `runs.main`",
+        )
+      }
+    }
+    Some(other) =>
+      add_diag(
+        out,
+        "action-yml-metadata",
+        Error,
+        "action.yml `runs.using` must be a string (got \{type_name(other)})",
+      )
+    None =>
+      add_diag(
+        out,
+        "action-yml-metadata",
+        Error,
+        "action.yml `runs` is missing required key `using`",
+      )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: reusable-workflow-definition (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+fn check_reusable_workflow_definition(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("on") {
+        Some(Map(on)) =>
+          match on.get("workflow_call") {
+            Some(Map(wc)) => check_workflow_call_def(wc, out)
+            Some(other) =>
+              add_diag(
+                out,
+                "reusable-workflow-definition",
+                Error,
+                "`on.workflow_call` must be a mapping (got \{type_name(other)})",
+              )
+            None => ()
+          }
+        _ => ()
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_workflow_call_def(
+  wc : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  match wc.get("outputs") {
+    Some(Map(outputs)) =>
+      outputs.each(fn(name, def) {
+        match def {
+          Map(d) =>
+            match d.get("value") {
+              Some(_) => ()
+              None =>
+                add_diag(
+                  out,
+                  "reusable-workflow-definition",
+                  Error,
+                  "workflow_call output `\{name}` is missing `value:`",
+                )
+            }
+          _ =>
+            add_diag(
+              out,
+              "reusable-workflow-definition",
+              Error,
+              "workflow_call output `\{name}` must be a mapping",
+            )
+        }
+      })
+    Some(other) =>
+      add_diag(
+        out,
+        "reusable-workflow-definition",
+        Error,
+        "`on.workflow_call.outputs` must be a mapping (got \{type_name(other)})",
+      )
+    None => ()
+  }
+  match wc.get("inputs") {
+    Some(Map(inputs)) =>
+      inputs.each(fn(name, def) {
+        match def {
+          Map(d) =>
+            match d.get("type") {
+              Some(String(t)) => {
+                let allowed = ["boolean", "number", "string"]
+                if !array_contains_string(allowed, t) {
+                  add_diag(
+                    out,
+                    "reusable-workflow-definition",
+                    Error,
+                    "workflow_call input `\{name}.type` must be boolean/number/string (got `\{t}`)",
+                  )
+                }
+              }
+              Some(_) =>
+                add_diag(
+                  out,
+                  "reusable-workflow-definition",
+                  Error,
+                  "workflow_call input `\{name}.type` must be a string",
+                )
+              None => ()
+            }
+          _ =>
+            add_diag(
+              out,
+              "reusable-workflow-definition",
+              Error,
+              "workflow_call input `\{name}` must be a mapping",
+            )
+        }
+      })
+    Some(other) =>
+      add_diag(
+        out,
+        "reusable-workflow-definition",
+        Error,
+        "`on.workflow_call.inputs` must be a mapping (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unsound-condition (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Catch trivially-unsound boolean expressions that almost always indicate a
+/// misunderstanding of GHA's `always()` / `success()` / `failure()` /
+/// `cancelled()` semantics.
+fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let seen : Map[String, Bool] = {}
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") {
+      return
+    }
+    for body in extract_expr_bodies(s) {
+      let norm = normalize_ws(body)
+      let patterns = [
+        ("always() && success()", "`always() && success()` is always equivalent to `always()`"),
+        ("success() && always()", "`success() && always()` is always equivalent to `always()`"),
+        ("always() && !cancelled()", "`always() && !cancelled()` simplifies to `!cancelled()`"),
+        ("!cancelled() && always()", "`!cancelled() && always()` simplifies to `!cancelled()`"),
+        ("success() || failure()", "`success() || failure()` ignores cancellation; prefer `!cancelled()`"),
+        ("failure() || success()", "`failure() || success()` ignores cancellation; prefer `!cancelled()`"),
+        ("always() || success()", "`always() || X` is always true"),
+        ("success() || always()", "`X || always()` is always true"),
+      ]
+      for p in patterns {
+        let (needle, msg) = p
+        if norm.contains(needle) && !seen.contains(needle) {
+          seen[needle] = true
+          add_diag(out, "unsound-condition", Warning, msg)
+        }
+      }
+    }
+  })
+}
+
+///|
+fn normalize_ws(s : String) -> String {
+  // Collapse runs of whitespace to a single space; mainly to make pattern
+  // matching robust to `always()  &&  success()` etc.
+  let buf = StringBuilder::new()
+  let mut last_space = false
+  for ch in s {
+    if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+      if !last_space {
+        buf.write_char(' ')
+        last_space = true
+      }
+    } else {
+      buf.write_char(ch)
+      last_space = false
+    }
+  }
+  buf.to_string().trim(chars=" ").to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unsound-contains (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// `contains(search, item)` — searches `search` for `item`. A literal as
+/// first arg with an expression second strongly suggests the caller meant
+/// `contains(expr, literal)`.
+fn check_unsound_contains(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let seen : Map[String, Bool] = {}
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") || !s.contains("contains(") {
+      return
+    }
+    for body in extract_expr_bodies(s) {
+      for swap in find_unsound_contains_calls(body) {
+        if !seen.contains(swap) {
+          seen[swap] = true
+          add_diag(
+            out,
+            "unsound-contains",
+            Warning,
+            "`\{swap}` arguments look swapped",
+          )
+        }
+      }
+    }
+  })
+}
+
+///|
+fn find_unsound_contains_calls(expr : String) -> Array[String] {
+  let out : Array[String] = []
+  let chars = expr.to_array()
+  let n = chars.length()
+  let mut i = 0
+  while i + 9 < n {
+    // Look for the literal substring `contains(` (case-sensitive).
+    if chars[i] == 'c' && chars[i + 1] == 'o' && chars[i + 2] == 'n' &&
+       chars[i + 3] == 't' && chars[i + 4] == 'a' && chars[i + 5] == 'i' &&
+       chars[i + 6] == 'n' && chars[i + 7] == 's' && chars[i + 8] == '(' {
+      let arg_start = i + 9
+      // Find the matching `)` while honoring nested parens / quotes.
+      let mut depth = 1
+      let mut j = arg_start
+      let mut in_single = false
+      let mut in_double = false
+      while j < n && depth > 0 {
+        let c = chars[j]
+        if in_single {
+          if c == '\'' && (j + 1 >= n || chars[j + 1] != '\'') {
+            in_single = false
+          } else if c == '\'' && j + 1 < n && chars[j + 1] == '\'' {
+            j = j + 1
+          }
+        } else if in_double {
+          if c == '"' { in_double = false }
+        } else {
+          if c == '\'' {
+            in_single = true
+          } else if c == '"' {
+            in_double = true
+          } else if c == '(' {
+            depth = depth + 1
+          } else if c == ')' {
+            depth = depth - 1
+            if depth == 0 { break }
+          }
+        }
+        j = j + 1
+      }
+      if depth == 0 && j > arg_start {
+        let buf = StringBuilder::new()
+        let mut k = arg_start
+        while k < j {
+          buf.write_char(chars[k])
+          k = k + 1
+        }
+        let args = buf.to_string()
+        match split_top_level_comma(args) {
+          Some((lhs, rhs)) => {
+            let l = lhs.trim(chars=" \t").to_string()
+            let r = rhs.trim(chars=" \t").to_string()
+            if looks_like_literal(l) && !looks_like_literal(r) && r != "" {
+              let buf2 = StringBuilder::new()
+              buf2.write_string("contains(")
+              buf2.write_string(l)
+              buf2.write_string(", ")
+              buf2.write_string(r)
+              buf2.write_string(")")
+              out.push(buf2.to_string())
+            }
+          }
+          None => ()
+        }
+        i = j + 1
+        continue
+      }
+    }
+    i = i + 1
+  }
+  out
+}
+
+///|
+fn split_top_level_comma(s : String) -> (String, String)? {
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut depth = 0
+  let mut in_single = false
+  let mut in_double = false
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if in_single {
+      if c == '\'' { in_single = false }
+    } else if in_double {
+      if c == '"' { in_double = false }
+    } else {
+      if c == '\'' { in_single = true }
+      else if c == '"' { in_double = true }
+      else if c == '(' { depth = depth + 1 }
+      else if c == ')' { depth = depth - 1 }
+      else if c == ',' && depth == 0 {
+        let lhs = StringBuilder::new()
+        let mut p = 0
+        while p < i { lhs.write_char(chars[p]); p = p + 1 }
+        let rhs = StringBuilder::new()
+        let mut q = i + 1
+        while q < n { rhs.write_char(chars[q]); q = q + 1 }
+        return Some((lhs.to_string(), rhs.to_string()))
+      }
+    }
+    i = i + 1
+  }
+  None
+}
+
+///|
+fn looks_like_literal(s : String) -> Bool {
+  if s == "" { return false }
+  match s.get_char(0) {
+    Some('\'') => true
+    Some('"') => true
+    Some(c) if c >= '0' && c <= '9' => true
+    _ => false
   }
 }

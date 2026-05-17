@@ -73,20 +73,20 @@ test "empty-mappings: empty jobs block" {
 }
 
 ///|
-#skip("not implemented yet")
 test "invalid-mapping-values: runs-on must be string or array" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: 123
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "invalid-mapping-values",
@@ -176,7 +176,6 @@ test "unknown-context-or-function: unknown context name" {
 }
 
 ///|
-#skip("not implemented yet")
 test "context-availability: `needs` referenced at workflow level" {
   let yaml =
     #|on: push
@@ -185,13 +184,14 @@ test "context-availability: `needs` referenced at workflow level" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo "$CHAIN"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "context-availability",
@@ -294,13 +294,13 @@ test "expression-needs-type: needs.<id>.outputs type mismatch" {
 }
 
 ///|
-#skip("not implemented yet")
 test "meaningless-comparison: meaningless comparison `1 == 1`" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
@@ -308,7 +308,7 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
     #|        run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "meaningless-comparison",
@@ -455,7 +455,6 @@ test "webhook-events: unknown event filter" {
 }
 
 ///|
-#skip("not implemented yet")
 test "workflow-dispatch-inputs: input type must be one of the allowed set" {
   let yaml =
     #|on:
@@ -466,14 +465,20 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
     #|jobs:
     #|  noop:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "workflow-dispatch-inputs",
         "severity": "error",
@@ -484,7 +489,6 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
 }
 
 ///|
-#skip("not implemented yet")
 test "glob-patterns: invalid glob pattern in paths filter" {
   let yaml =
     #|on:
@@ -494,13 +498,14 @@ test "glob-patterns: invalid glob pattern in paths filter" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
         "rule": "glob-patterns",
@@ -534,25 +539,30 @@ test "cron-and-timezone: out-of-range minute value" {
         "severity": "error",
         "message": "schedule.cron `60 * * * *`: minute: value `60` out of bounds [0-59]",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "unknown-runner-label: unknown runner label" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubunto-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "unknown-runner-label",
@@ -748,7 +758,6 @@ test "permissions-syntax: unknown permission scope" {
 }
 
 ///|
-#skip("not implemented yet")
 test "reusable-workflow-definition: reusable workflow output not exposed" {
   let yaml =
     #|on:
@@ -758,13 +767,14 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
         "rule": "reusable-workflow-definition",
@@ -852,7 +862,6 @@ test "constant-if-condition: `if: true` always-on" {
 }
 
 ///|
-#skip("not implemented yet")
 test "action-yml-metadata: action.yml missing `runs`" {
   let yaml =
     #|name: missing-runs

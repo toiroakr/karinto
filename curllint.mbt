@@ -188,7 +188,7 @@ fn run_rules(
   disabled : Array[String],
   vuln_uses : Array[String],
 ) -> Array[Diagnostic] {
-  let ctx = prewalk(doc, vuln_uses~)
+  let ctx = prewalk(doc, vuln_uses~, kind~)
   let out : Array[Diagnostic] = []
 
   // Filter once. Each scope iterates pre-built callback arrays — no per-step
