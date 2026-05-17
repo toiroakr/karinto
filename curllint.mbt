@@ -186,7 +186,14 @@ fn run_rules(
   kind : FileKind,
   disabled : Array[String],
 ) -> Array[Diagnostic] {
+  let ctx = prewalk(doc)
   let out : Array[Diagnostic] = []
+
+  // Filter once. Each scope iterates pre-built callback arrays — no per-step
+  // option-match overhead.
+  let doc_cbs : Array[(WalkCtx, Array[Diagnostic]) -> Unit] = []
+  let job_cbs : Array[(WalkCtx, JobInfo, Array[Diagnostic]) -> Unit] = []
+  let step_cbs : Array[(WalkCtx, StepInfo, Array[Diagnostic]) -> Unit] = []
   for rule in all_rules() {
     if is_disabled(rule.id, disabled) {
       continue
@@ -194,7 +201,46 @@ fn run_rules(
     if !(rule.applies)(kind) {
       continue
     }
-    (rule.check)(doc, out)
+    match rule.on_doc {
+      Some(f) => doc_cbs.push(f)
+      None => ()
+    }
+    match rule.on_job {
+      Some(f) => job_cbs.push(f)
+      None => ()
+    }
+    match rule.on_step {
+      Some(f) => step_cbs.push(f)
+      None => ()
+    }
+  }
+
+  // Doc scope.
+  for f in doc_cbs {
+    f(ctx, out)
+  }
+  // Step scope (workflow + action steps). Run before job scope so step-level
+  // findings precede the job-level conclusions they may inform (e.g. checkout
+  // persist-credentials-false before artipacked).
+  if step_cbs.length() > 0 {
+    for s in ctx.workflow_steps {
+      for f in step_cbs {
+        f(ctx, s, out)
+      }
+    }
+    for s in ctx.action_steps {
+      for f in step_cbs {
+        f(ctx, s, out)
+      }
+    }
+  }
+  // Job scope.
+  if job_cbs.length() > 0 {
+    for j in ctx.jobs {
+      for f in job_cbs {
+        f(ctx, j, out)
+      }
+    }
   }
   out
 }

@@ -8,10 +8,8 @@
     "dev": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy"
   },
-  "dependencies": {
-    "js-yaml": "^4.1.0"
-  },
   "devDependencies": {
+    "js-yaml": "^4.1.1",
     "wrangler": "^4.0.0"
   }
 }

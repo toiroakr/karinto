@@ -10,11 +10,206 @@
 /// are listed for testing purposes with skipped fixtures.
 
 ///|
+/// Per-step view with hot fields pre-extracted so rules don't repeat
+/// `m.get("uses")` / `String.has_prefix(...)` for each rule.
+pub(all) struct StepInfo {
+  raw : Map[String, @yaml.Yaml]
+  uses : String?
+  run : String?
+  if_cond : String?
+  with_ : Map[String, @yaml.Yaml]?
+  // semantic flags pre-computed during prewalk
+  is_actions_checkout : Bool
+  is_upload_artifact : Bool
+  is_pypi_publish : Bool
+  is_local_or_docker : Bool
+  has_persist_creds_false : Bool
+  at_idx : Int // -1 if no `@`
+  has_full_sha : Bool
+}
+
+///|
+pub(all) struct JobInfo {
+  name : String
+  raw : Map[String, @yaml.Yaml]
+  if_cond : String?
+  uses : String?
+  has_permissions : Bool
+  has_timeout : Bool
+  steps : Array[StepInfo]
+}
+
+///|
+/// Pre-extracted view of a YAML doc — built once in `prewalk` and
+/// passed to every rule.
+pub(all) struct WalkCtx {
+  doc : @yaml.Yaml
+  workflow_map : Map[String, @yaml.Yaml]?
+  workflow_has_permissions : Bool
+  jobs : Array[JobInfo]
+  workflow_steps : Array[StepInfo]
+  action_steps : Array[StepInfo]
+  updates : Array[Map[String, @yaml.Yaml]]
+}
+
+///|
+fn build_step_info(sm : Map[String, @yaml.Yaml]) -> StepInfo {
+  let uses = get_string_field(sm, "uses")
+  let run = get_string_field(sm, "run")
+  let if_cond = get_string_field(sm, "if")
+  let with_ : Map[String, @yaml.Yaml]? = match sm.get("with") {
+    Some(Map(w)) => Some(w)
+    _ => None
+  }
+  let mut is_actions_checkout = false
+  let mut is_upload_artifact = false
+  let mut is_pypi_publish = false
+  let mut is_local_or_docker = false
+  let mut at_idx = -1
+  let mut has_full_sha = false
+  match uses {
+    Some(u) => {
+      if u.has_prefix("./") || u.has_prefix("docker://") {
+        is_local_or_docker = true
+      } else if u.has_prefix("actions/checkout@") {
+        is_actions_checkout = true
+      } else if u.has_prefix("actions/upload-artifact@") {
+        is_upload_artifact = true
+      } else if u.has_prefix("pypa/gh-action-pypi-publish@") {
+        is_pypi_publish = true
+      }
+      at_idx = last_at_index(u)
+      if at_idx >= 0 {
+        has_full_sha = is_full_sha_after(u, at_idx)
+      }
+    }
+    None => ()
+  }
+  let has_persist_creds_false = match with_ {
+    Some(w) =>
+      match get_bool_field(w, "persist-credentials") {
+        Some(false) => true
+        _ => false
+      }
+    None => false
+  }
+  StepInfo::{
+    raw: sm,
+    uses,
+    run,
+    if_cond,
+    with_,
+    is_actions_checkout,
+    is_upload_artifact,
+    is_pypi_publish,
+    is_local_or_docker,
+    has_persist_creds_false,
+    at_idx,
+    has_full_sha,
+  }
+}
+
+///|
+fn build_steps(arr : Array[@yaml.Yaml]) -> Array[StepInfo] {
+  let out : Array[StepInfo] = []
+  for step in arr {
+    match step {
+      Map(sm) => out.push(build_step_info(sm))
+      _ => ()
+    }
+  }
+  out
+}
+
+///|
+pub fn prewalk(doc : @yaml.Yaml) -> WalkCtx {
+  let jobs : Array[JobInfo] = []
+  let workflow_steps : Array[StepInfo] = []
+  let action_steps : Array[StepInfo] = []
+  let updates : Array[Map[String, @yaml.Yaml]] = []
+  let workflow_map : Map[String, @yaml.Yaml]? = match doc {
+    Map(m) => Some(m)
+    _ => None
+  }
+  match workflow_map {
+    Some(m) => {
+      match m.get("jobs") {
+        Some(Map(jm)) =>
+          jm.each(fn(name, body) {
+            match body {
+              Map(jb) => {
+                let steps : Array[StepInfo] = match jb.get("steps") {
+                  Some(Array(arr)) => build_steps(arr)
+                  _ => []
+                }
+                for s in steps {
+                  workflow_steps.push(s)
+                }
+                let job = JobInfo::{
+                  name,
+                  raw: jb,
+                  if_cond: get_string_field(jb, "if"),
+                  uses: get_string_field(jb, "uses"),
+                  has_permissions: jb.contains("permissions"),
+                  has_timeout: jb.contains("timeout-minutes"),
+                  steps,
+                }
+                jobs.push(job)
+              }
+              _ => ()
+            }
+          })
+        _ => ()
+      }
+      match m.get("runs") {
+        Some(Map(runs)) =>
+          match runs.get("steps") {
+            Some(Array(arr)) =>
+              for s in build_steps(arr) {
+                action_steps.push(s)
+              }
+            _ => ()
+          }
+        _ => ()
+      }
+      match m.get("updates") {
+        Some(Array(arr)) =>
+          for u in arr {
+            match u {
+              Map(um) => updates.push(um)
+              _ => ()
+            }
+          }
+        _ => ()
+      }
+    }
+    None => ()
+  }
+  let workflow_has_permissions = match workflow_map {
+    Some(m) => m.contains("permissions")
+    None => false
+  }
+  WalkCtx::{
+    doc,
+    workflow_map,
+    workflow_has_permissions,
+    jobs,
+    workflow_steps,
+    action_steps,
+    updates,
+  }
+}
+
+///|
+/// A rule may register zero or more scoped callbacks. `run_rules` walks the
+/// pre-parsed doc once and dispatches every active rule at each scope.
 pub(all) struct Rule {
   id : String
   title : String
   applies : (FileKind) -> Bool
-  check : (@yaml.Yaml, Array[Diagnostic]) -> Unit
+  on_doc : ((WalkCtx, Array[Diagnostic]) -> Unit)?
+  on_job : ((WalkCtx, JobInfo, Array[Diagnostic]) -> Unit)?
+  on_step : ((WalkCtx, StepInfo, Array[Diagnostic]) -> Unit)?
 }
 
 ///|
@@ -33,6 +228,21 @@ fn unknown_only(kind : FileKind) -> Bool {
 }
 
 ///|
+fn no_doc() -> ((WalkCtx, Array[Diagnostic]) -> Unit)? {
+  None
+}
+
+///|
+fn no_job() -> ((WalkCtx, JobInfo, Array[Diagnostic]) -> Unit)? {
+  None
+}
+
+///|
+fn no_step() -> ((WalkCtx, StepInfo, Array[Diagnostic]) -> Unit)? {
+  None
+}
+
+///|
 /// Registry of currently-implemented rules.
 pub fn all_rules() -> Array[Rule] {
   [
@@ -40,67 +250,89 @@ pub fn all_rules() -> Array[Rule] {
       id: "duplicate-job-step-ids",
       title: "Job and step IDs must be unique",
       applies: workflow_only,
-      check: check_id_unique,
+      on_doc: Some(check_id_unique),
+      on_job: no_job(),
+      on_step: no_step(),
     },
     Rule::{
       id: "permissions-write-all-forbidden",
       title: "Forbid `permissions: write-all`",
       applies: workflow_only,
-      check: check_write_all_permission,
+      on_doc: Some(check_write_all_workflow),
+      on_job: Some(check_write_all_job),
+      on_step: no_step(),
     },
     Rule::{
       id: "job-permissions-required",
       title: "Jobs must declare `permissions`",
       applies: workflow_only,
-      check: check_job_permissions,
+      on_doc: no_doc(),
+      on_job: Some(check_job_permissions),
+      on_step: no_step(),
     },
     Rule::{
       id: "job-timeout-minutes-required",
       title: "Jobs must declare `timeout-minutes`",
       applies: workflow_only,
-      check: check_job_timeout,
+      on_doc: no_doc(),
+      on_job: Some(check_job_timeout),
+      on_step: no_step(),
     },
     Rule::{
       id: "checkout-persist-credentials-false",
       title: "actions/checkout must set `persist-credentials: false`",
       applies: workflow_only,
-      check: check_checkout_persist_credentials,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_checkout_persist_credentials),
     },
     Rule::{
       id: "unpinned-uses",
       title: "uses must pin to a full-length SHA",
       applies: workflow_or_action,
-      check: check_unpinned_uses,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_unpinned_uses),
     },
     Rule::{
       id: "artipacked",
       title: "Checkout-then-upload-artifact leaks credentials",
       applies: workflow_only,
-      check: check_artipacked,
+      on_doc: no_doc(),
+      on_job: Some(check_artipacked),
+      on_step: no_step(),
     },
     Rule::{
       id: "bot-conditions",
       title: "Spoofable `github.actor` bot check",
       applies: workflow_only,
-      check: check_bot_conditions,
+      on_doc: no_doc(),
+      on_job: Some(check_bot_conditions),
+      on_step: no_step(),
     },
     Rule::{
       id: "excessive-permissions",
       title: "Job grants many `write` permissions",
       applies: workflow_only,
-      check: check_excessive_permissions,
+      on_doc: no_doc(),
+      on_job: Some(check_excessive_permissions),
+      on_step: no_step(),
     },
     Rule::{
       id: "use-trusted-publishing",
       title: "Prefer OIDC trusted publishing over long-lived tokens",
       applies: workflow_only,
-      check: check_trusted_publishing,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_trusted_publishing),
     },
     Rule::{
       id: "dependabot-cooldown",
       title: "Dependabot updates should configure `cooldown`",
       applies: unknown_only,
-      check: check_dependabot_cooldown,
+      on_doc: Some(check_dependabot_cooldown),
+      on_job: no_job(),
+      on_step: no_step(),
     },
   ]
 }
@@ -120,97 +352,72 @@ fn add_diag(
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_id_unique(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  match doc {
-    Map(m) =>
-      match m.get("jobs") {
-        Some(Map(jobs)) => {
-          let lowered : Map[String, String] = {}
-          jobs.each(fn(name, body) {
-            let lower = name.to_lower()
-            match lowered.get(lower) {
-              Some(prev) =>
-                add_diag(
-                  out,
-                  "duplicate-job-step-ids",
-                  Error,
-                  "duplicate job ID `\{name}` (conflicts with `\{prev}` case-insensitively)",
-                )
-              None => lowered[lower] = name
-            }
-            match body {
-              Map(jm) => check_steps_id_unique(jm, out)
-              _ => ()
-            }
-          })
-        }
-        _ => ()
-      }
-    _ => ()
+fn check_id_unique(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let lowered : Map[String, String] = {}
+  for j in ctx.jobs {
+    let name = j.name
+    let lower = name.to_lower()
+    match lowered.get(lower) {
+      Some(prev) =>
+        add_diag(
+          out,
+          "duplicate-job-step-ids",
+          Error,
+          "duplicate job ID `\{name}` (conflicts with `\{prev}` case-insensitively)",
+        )
+      None => lowered[lower] = name
+    }
+    check_steps_id_unique_pre(j.steps, out)
   }
 }
 
 ///|
-fn check_steps_id_unique(
-  job : Map[String, @yaml.Yaml],
+fn check_steps_id_unique_pre(
+  steps : Array[StepInfo],
   out : Array[Diagnostic],
 ) -> Unit {
-  match job.get("steps") {
-    Some(Array(steps)) => {
-      let seen : Map[String, String] = {}
-      for step in steps {
-        match step {
-          Map(sm) =>
-            match sm.get("id") {
-              Some(String(id)) => {
-                let lower = id.to_lower()
-                match seen.get(lower) {
-                  Some(prev) =>
-                    add_diag(
-                      out,
-                      "duplicate-job-step-ids",
-                      Error,
-                      "duplicate step ID `\{id}` (conflicts with `\{prev}` case-insensitively)",
-                    )
-                  None => seen[lower] = id
-                }
-              }
-              _ => ()
-            }
-          _ => ()
+  let seen : Map[String, String] = {}
+  for s in steps {
+    match s.raw.get("id") {
+      Some(String(id)) => {
+        let lower = id.to_lower()
+        match seen.get(lower) {
+          Some(prev) =>
+            add_diag(
+              out,
+              "duplicate-job-step-ids",
+              Error,
+              "duplicate step ID `\{id}` (conflicts with `\{prev}` case-insensitively)",
+            )
+          None => seen[lower] = id
         }
       }
+      _ => ()
     }
-    _ => ()
   }
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Rule: permissions-write-all-forbidden deny_write_all_permission
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_write_all_permission(
-  doc : @yaml.Yaml,
+fn check_write_all_workflow(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => check_perm_string(m.get("permissions"), "workflow", out)
+    None => ()
+  }
+}
+
+///|
+fn check_write_all_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  match doc {
-    Map(m) => {
-      check_perm_string(m.get("permissions"), "workflow", out)
-      match m.get("jobs") {
-        Some(Map(jobs)) =>
-          jobs.each(fn(name, body) {
-            match body {
-              Map(jm) =>
-                check_perm_string(jm.get("permissions"), "job `\{name}`", out)
-              _ => ()
-            }
-          })
-        _ => ()
-      }
-    }
-    _ => ()
-  }
+  check_perm_string(job.raw.get("permissions"), "job `\{job.name}`", out)
 }
 
 ///|
@@ -236,112 +443,24 @@ fn check_perm_string(
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_job_permissions(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  match doc {
-    Map(m) => {
-      let workflow_has_perm = m.contains("permissions")
-      match m.get("jobs") {
-        Some(Map(jobs)) =>
-          jobs.each(fn(name, body) {
-            match body {
-              Map(jm) =>
-                if !jm.contains("permissions") && !workflow_has_perm {
-                  add_diag(
-                    out,
-                    "job-permissions-required",
-                    Warning,
-                    "job `\{name}` does not declare `permissions:`",
-                  )
-                }
-              _ => ()
-            }
-          })
-        _ => ()
-      }
-    }
-    _ => ()
+fn check_job_permissions(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if !job.has_permissions && !ctx.workflow_has_permissions {
+    add_diag(
+      out,
+      "job-permissions-required",
+      Warning,
+      "job `\{job.name}` does not declare `permissions:`",
+    )
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers shared by the new ghalint/zizmor rules.
 // ---------------------------------------------------------------------------
-
-///|
-fn each_job(
-  doc : @yaml.Yaml,
-  f : (String, Map[String, @yaml.Yaml]) -> Unit,
-) -> Unit {
-  match doc {
-    Map(m) =>
-      match m.get("jobs") {
-        Some(Map(jobs)) =>
-          jobs.each(fn(name, body) {
-            match body {
-              Map(jm) => f(name, jm)
-              _ => ()
-            }
-          })
-        _ => ()
-      }
-    _ => ()
-  }
-}
-
-///|
-fn each_step(
-  job : Map[String, @yaml.Yaml],
-  f : (Map[String, @yaml.Yaml]) -> Unit,
-) -> Unit {
-  match job.get("steps") {
-    Some(Array(steps)) =>
-      for step in steps {
-        match step {
-          Map(sm) => f(sm)
-          _ => ()
-        }
-      }
-    _ => ()
-  }
-}
-
-///|
-/// Iterate over steps in either workflow (`jobs.<id>.steps`) or
-/// composite/JS action (`runs.steps`) shape.
-fn each_step_in_doc(
-  doc : @yaml.Yaml,
-  f : (Map[String, @yaml.Yaml]) -> Unit,
-) -> Unit {
-  match doc {
-    Map(m) => {
-      match m.get("jobs") {
-        Some(Map(jobs)) =>
-          jobs.each(fn(_name, body) {
-            match body {
-              Map(jm) => each_step(jm, f)
-              _ => ()
-            }
-          })
-        _ => ()
-      }
-      match m.get("runs") {
-        Some(Map(runs)) =>
-          match runs.get("steps") {
-            Some(Array(steps)) =>
-              for step in steps {
-                match step {
-                  Map(sm) => f(sm)
-                  _ => ()
-                }
-              }
-            _ => ()
-          }
-        _ => ()
-      }
-    }
-    _ => ()
-  }
-}
 
 ///|
 fn get_string_field(m : Map[String, @yaml.Yaml], key : String) -> String? {
@@ -403,21 +522,24 @@ fn is_full_sha_after(s : String, at_idx : Int) -> Bool {
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_job_timeout(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  each_job(doc, fn(name, jm) {
-    // Reusable workflow calls (`uses:` at job level) don't take timeout-minutes.
-    if jm.contains("uses") {
-      return
-    }
-    if !jm.contains("timeout-minutes") {
-      add_diag(
-        out,
-        "job-timeout-minutes-required",
-        Warning,
-        "job `\{name}` does not declare `timeout-minutes:`",
-      )
-    }
-  })
+fn check_job_timeout(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  // Reusable workflow calls (`uses:` at job level) don't take timeout-minutes.
+  match job.uses {
+    Some(_) => return
+    None => ()
+  }
+  if !job.has_timeout {
+    add_diag(
+      out,
+      "job-timeout-minutes-required",
+      Warning,
+      "job `\{job.name}` does not declare `timeout-minutes:`",
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -426,33 +548,18 @@ fn check_job_timeout(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
 
 ///|
 fn check_checkout_persist_credentials(
-  doc : @yaml.Yaml,
+  _ctx : WalkCtx,
+  step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  each_job(doc, fn(_name, jm) {
-    each_step(jm, fn(sm) {
-      match get_string_field(sm, "uses") {
-        Some(u) =>
-          if u.has_prefix("actions/checkout@") {
-            let persist = match sm.get("with") {
-              Some(Map(w)) => get_bool_field(w, "persist-credentials")
-              _ => None
-            }
-            match persist {
-              Some(false) => () // explicit opt-out, satisfies the policy
-              _ =>
-                add_diag(
-                  out,
-                  "checkout-persist-credentials-false",
-                  Error,
-                  "actions/checkout requires `persist-credentials: false` to avoid token leakage",
-                )
-            }
-          }
-        None => ()
-      }
-    })
-  })
+  if step.is_actions_checkout && !step.has_persist_creds_false {
+    add_diag(
+      out,
+      "checkout-persist-credentials-false",
+      Error,
+      "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,30 +567,23 @@ fn check_checkout_persist_credentials(
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_unpinned_uses(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  each_step_in_doc(doc, fn(sm) {
-    match get_string_field(sm, "uses") {
-      Some(u) => {
-        // Local actions and docker:// references aren't third-party action refs.
-        if u.has_prefix("./") || u.has_prefix("docker://") {
-          return
-        }
-        let at = last_at_index(u)
-        if at < 0 {
-          return
-        }
-        if !is_full_sha_after(u, at) {
-          add_diag(
-            out,
-            "unpinned-uses",
-            Warning,
-            "uses `\{u}` is not pinned to a full-length SHA",
-          )
-        }
+fn check_unpinned_uses(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) =>
+      if !step.is_local_or_docker && step.at_idx >= 0 && !step.has_full_sha {
+        add_diag(
+          out,
+          "unpinned-uses",
+          Warning,
+          "uses `\{u}` is not pinned to a full-length SHA",
+        )
       }
-      None => ()
-    }
-  })
+    None => ()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,38 +591,27 @@ fn check_unpinned_uses(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_artipacked(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  each_job(doc, fn(_name, jm) {
-    let mut checkout_unsafe = false
-    let mut fired = false
-    each_step(jm, fn(sm) {
-      if fired {
-        return
+fn check_artipacked(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let mut checkout_unsafe = false
+  for s in job.steps {
+    if s.is_actions_checkout {
+      if !s.has_persist_creds_false {
+        checkout_unsafe = true
       }
-      match get_string_field(sm, "uses") {
-        Some(u) =>
-          if u.has_prefix("actions/checkout@") {
-            let persist = match sm.get("with") {
-              Some(Map(w)) => get_bool_field(w, "persist-credentials")
-              _ => None
-            }
-            match persist {
-              Some(false) => ()
-              _ => checkout_unsafe = true
-            }
-          } else if checkout_unsafe && u.has_prefix("actions/upload-artifact@") {
-            add_diag(
-              out,
-              "artipacked",
-              Error,
-              "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
-            )
-            fired = true
-          }
-        None => ()
-      }
-    })
-  })
+    } else if checkout_unsafe && s.is_upload_artifact {
+      add_diag(
+        out,
+        "artipacked",
+        Error,
+        "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
+      )
+      return
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -535,44 +624,39 @@ fn looks_spoofable_bot(s : String) -> Bool {
 }
 
 ///|
-fn check_bot_conditions(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
-  each_job(doc, fn(_name, jm) {
-    let mut fired = false
-    match get_string_field(jm, "if") {
-      Some(s) =>
-        if looks_spoofable_bot(s) {
+fn check_bot_conditions(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.if_cond {
+    Some(s) =>
+      if looks_spoofable_bot(s) {
+        add_diag(
+          out,
+          "bot-conditions",
+          Error,
+          "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
+        )
+        return
+      }
+    None => ()
+  }
+  for s in job.steps {
+    match s.if_cond {
+      Some(c) =>
+        if looks_spoofable_bot(c) {
           add_diag(
             out,
             "bot-conditions",
             Error,
             "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
           )
-          fired = true
+          return
         }
       None => ()
     }
-    if fired {
-      return
-    }
-    each_step(jm, fn(sm) {
-      if fired {
-        return
-      }
-      match get_string_field(sm, "if") {
-        Some(s) =>
-          if looks_spoofable_bot(s) {
-            add_diag(
-              out,
-              "bot-conditions",
-              Error,
-              "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
-            )
-            fired = true
-          }
-        None => ()
-      }
-    })
-  })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -581,31 +665,30 @@ fn check_bot_conditions(doc : @yaml.Yaml, out : Array[Diagnostic]) -> Unit {
 
 ///|
 fn check_excessive_permissions(
-  doc : @yaml.Yaml,
+  _ctx : WalkCtx,
+  job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  each_job(doc, fn(name, jm) {
-    match jm.get("permissions") {
-      Some(Map(perms)) => {
-        let mut writes = 0
-        perms.each(fn(_k, v) {
-          match v {
-            String("write") => writes = writes + 1
-            _ => ()
-          }
-        })
-        if writes >= 3 {
-          add_diag(
-            out,
-            "excessive-permissions",
-            Warning,
-            "job `\{name}` grants \{writes} write permissions; consider narrowing the scope",
-          )
+  match job.raw.get("permissions") {
+    Some(Map(perms)) => {
+      let mut writes = 0
+      perms.each(fn(_k, v) {
+        match v {
+          String("write") => writes = writes + 1
+          _ => ()
         }
+      })
+      if writes >= 3 {
+        add_diag(
+          out,
+          "excessive-permissions",
+          Warning,
+          "job `\{job.name}` grants \{writes} write permissions; consider narrowing the scope",
+        )
       }
-      _ => ()
     }
-  })
+    _ => ()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -614,43 +697,38 @@ fn check_excessive_permissions(
 
 ///|
 fn check_trusted_publishing(
-  doc : @yaml.Yaml,
+  _ctx : WalkCtx,
+  step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  each_step_in_doc(doc, fn(sm) {
-    match get_string_field(sm, "uses") {
-      Some(u) =>
-        if u.has_prefix("pypa/gh-action-pypi-publish@") {
-          let has_password = match sm.get("with") {
-            Some(Map(w)) => w.contains("password")
-            _ => false
-          }
-          if has_password {
-            add_diag(
-              out,
-              "use-trusted-publishing",
-              Info,
-              "PyPI publish uses an API token; prefer OIDC trusted publishing",
-            )
-          }
-        }
-      None => ()
+  if step.is_pypi_publish {
+    let has_password = match step.with_ {
+      Some(w) => w.contains("password")
+      None => false
     }
-    match get_string_field(sm, "run") {
-      Some(r) =>
-        if r.contains("pkg-pr-new publish") ||
-          r.contains("npm publish") ||
-          r.contains("pnpm publish") {
-          add_diag(
-            out,
-            "use-trusted-publishing",
-            Info,
-            "publish command uses a long-lived token; prefer OIDC trusted publishing",
-          )
-        }
-      None => ()
+    if has_password {
+      add_diag(
+        out,
+        "use-trusted-publishing",
+        Info,
+        "PyPI publish uses an API token; prefer OIDC trusted publishing",
+      )
     }
-  })
+  }
+  match step.run {
+    Some(r) =>
+      if r.contains("pkg-pr-new publish") ||
+        r.contains("npm publish") ||
+        r.contains("pnpm publish") {
+        add_diag(
+          out,
+          "use-trusted-publishing",
+          Info,
+          "publish command uses a long-lived token; prefer OIDC trusted publishing",
+        )
+      }
+    None => ()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -659,29 +737,17 @@ fn check_trusted_publishing(
 
 ///|
 fn check_dependabot_cooldown(
-  doc : @yaml.Yaml,
+  ctx : WalkCtx,
   out : Array[Diagnostic],
 ) -> Unit {
-  match doc {
-    Map(m) =>
-      match m.get("updates") {
-        Some(Array(updates)) =>
-          for u in updates {
-            match u {
-              Map(um) =>
-                if !um.contains("cooldown") {
-                  add_diag(
-                    out,
-                    "dependabot-cooldown",
-                    Info,
-                    "dependabot update has no `cooldown:` configured",
-                  )
-                }
-              _ => ()
-            }
-          }
-        _ => ()
-      }
-    _ => ()
+  for um in ctx.updates {
+    if !um.contains("cooldown") {
+      add_diag(
+        out,
+        "dependabot-cooldown",
+        Info,
+        "dependabot update has no `cooldown:` configured",
+      )
+    }
   }
 }

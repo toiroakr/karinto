@@ -12,8 +12,10 @@
 //   - targets   comma-separated literal paths (required with `repo`)
 //
 // The handler logs a one-line JSON record per request to stdout.
-
-import jsYaml from "js-yaml";
+//
+// YAML parsing is delegated to the MoonBit engine (`@moonbit-community/yaml`).
+// When the YAML is malformed the engine returns a `parse_error` field which
+// the handler propagates verbatim.
 
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
@@ -111,19 +113,7 @@ async function handle(params, env) {
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
   }
-  // Validate YAML up-front via js-yaml so we can return better errors,
-  // but pass the *original* text to MoonBit so positions stay meaningful.
-  try {
-    jsYaml.loadAll(params.content);
-  } catch (e) {
-    return {
-      ok: false,
-      parse_error: `yaml parse error: ${e.message}`,
-      result: null,
-    };
-  }
-  const text = lint_string(params.content, type, disable);
-  return JSON.parse(text);
+  return JSON.parse(lint_string(params.content, type, disable));
 }
 
 async function handleRepo(params, disable, type, lint_string) {
@@ -149,14 +139,7 @@ async function handleRepo(params, disable, type, lint_string) {
     }
     const raw = await res.text();
     const guessKind = type || guessKindFromPath(path);
-    let body;
-    try {
-      jsYaml.loadAll(raw);
-      body = JSON.parse(lint_string(raw, guessKind, disable));
-    } catch (e) {
-      body = { ok: false, parse_error: `yaml parse error: ${e.message}` };
-    }
-    files.push({ path, ...body });
+    files.push({ path, ...JSON.parse(lint_string(raw, guessKind, disable)) });
   }
   return {
     ok: files.every((f) => f.ok !== false),
