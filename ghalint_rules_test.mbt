@@ -7,7 +7,6 @@
 //   * expected: single diagnostic, error/warning per the catalogue.
 
 ///|
-#skip("not implemented yet")
 test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbidden" {
   let yaml =
     #|on: push
@@ -15,11 +14,12 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
         "rule": "permissions-read-all-forbidden",
@@ -34,7 +34,6 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
 // (see rules_catalog.mbt). Its fixture lives in zizmor_rules_test.mbt.
 
 ///|
-#skip("not implemented yet")
 test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
   let yaml =
     #|on: push
@@ -43,13 +42,14 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo $TOKEN
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "workflow-env-no-secrets",
@@ -61,13 +61,13 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
 }
 
 ///|
-#skip("not implemented yet")
 test "job-env-no-secrets: secrets referenced in job-level env" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    env:
@@ -76,7 +76,7 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
     #|      - run: echo $TOKEN
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "job-env-no-secrets",
@@ -93,52 +93,59 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
 // merged origins; fixtures live in zizmor_rules_test.mbt.
 
 ///|
-#skip("not implemented yet")
 test "github-app-limit-repositories: GitHub App token scoped to whole org" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
+    #|    environment: prod
     #|    steps:
-    #|      - uses: tibdex/github-app-token@v2
+    #|      - uses: tibdex/github-app-token@aaaabbbbccccddddeeeeffff0000111122223333
     #|        with:
     #|          app_id: 1
     #|          private_key: ${{ secrets.APP_PK }}
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
       {
         "rule": "github-app-limit-repositories",
         "severity": "warning",
         "message": "GitHub App token request is missing `repositories:` scope",
       },
+      {
+        "rule": "github-app-limit-permissions",
+        "severity": "warning",
+        "message": "GitHub App token request is missing `permissions:` scope",
+      },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "github-app-limit-permissions: GitHub App token requests no permissions" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
+    #|    environment: prod
     #|    steps:
-    #|      - uses: tibdex/github-app-token@v2
+    #|      - uses: tibdex/github-app-token@aaaabbbbccccddddeeeeffff0000111122223333
     #|        with:
     #|          app_id: 1
     #|          private_key: ${{ secrets.APP_PK }}
     #|          repositories: my-repo
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
       {
         "rule": "github-app-limit-permissions",
@@ -150,7 +157,6 @@ test "github-app-limit-permissions: GitHub App token requests no permissions" {
 }
 
 ///|
-#skip("not implemented yet")
 test "composite-step-shell-required: composite action step is missing `shell`" {
   let yaml =
     #|name: composite

@@ -12,13 +12,14 @@ test "anonymous-definition: workflow has no top-level `name`" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "anonymous-definition",
@@ -114,7 +115,6 @@ test "bot-conditions: spoofable github.actor bot check" {
 }
 
 ///|
-#skip("not implemented yet")
 test "cache-poisoning: cache restore in publish flow" {
   let yaml =
     #|on:
@@ -123,17 +123,18 @@ test "cache-poisoning: cache restore in publish flow" {
     #|jobs:
     #|  release:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: write
     #|    steps:
-    #|      - uses: actions/cache@v4
+    #|      - uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2
     #|        with:
     #|          path: dist
     #|          key: build
     #|      - run: ./publish.sh
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
+    "stats": { "jobs": 1, "steps": 2, "lines": 15 },
     "diagnostics": [
       {
         "rule": "cache-poisoning",
@@ -172,20 +173,20 @@ test "concurrency-limits: no concurrency on deploy workflow" {
 }
 
 ///|
-#skip("not implemented yet")
 test "dangerous-triggers: workflow uses pull_request_target" {
   let yaml =
     #|on: pull_request_target
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "dangerous-triggers",
@@ -355,17 +356,17 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
 }
 
 ///|
-#skip("not implemented yet")
 test "hardcoded-container-credentials: plain password in container" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    container:
-    #|      image: ghcr.io/org/private:1
+    #|      image: ghcr.io/org/private@sha256:abc
     #|      credentials:
     #|        username: bot
     #|        password: hunter2
@@ -373,7 +374,7 @@ test "hardcoded-container-credentials: plain password in container" {
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
       {
         "rule": "hardcoded-container-credentials",
@@ -410,7 +411,6 @@ test "impostor-commit: SHA pin not present in claimed repo" {
 }
 
 ///|
-#skip("not implemented yet")
 test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
   let yaml =
     #|on: push
@@ -419,39 +419,50 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo "::set-env name=X::1"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "insecure-commands",
         "severity": "warning",
         "message": "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
       },
+      {
+        "rule": "deprecated-workflow-commands",
+        "severity": "warning",
+        "message": "deprecated workflow command `::set-env`; use `$GITHUB_ENV` instead",
+      },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "known-vulnerable-actions: CVE-listed action version pinned" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - uses: tj-actions/changed-files@v35
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "unpinned-uses",
+        "severity": "warning",
+        "message": "uses `tj-actions/changed-files@v35` is not pinned to a full-length SHA",
+      },
       {
         "rule": "known-vulnerable-actions",
         "severity": "error",
@@ -462,13 +473,13 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
 }
 
 ///|
-#skip("not implemented yet")
 test "misfeature: continue-on-error masks real failures" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    continue-on-error: true
@@ -476,7 +487,7 @@ test "misfeature: continue-on-error masks real failures" {
     #|      - run: ./tests.sh
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "misfeature",
@@ -488,21 +499,31 @@ test "misfeature: continue-on-error masks real failures" {
 }
 
 ///|
-#skip("not implemented yet")
 test "obfuscation: hex-encoded uses ref" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@%76%34
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "checkout-persist-credentials-false",
+        "severity": "error",
+        "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+      },
+      {
+        "rule": "unpinned-uses",
+        "severity": "warning",
+        "message": "uses `actions/checkout@%76%34` is not pinned to a full-length SHA",
+      },
       {
         "rule": "obfuscation",
         "severity": "warning",
@@ -513,13 +534,13 @@ test "obfuscation: hex-encoded uses ref" {
 }
 
 ///|
-#skip("not implemented yet")
 test "overprovisioned-secrets: whole `secrets` context injected" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    env:
@@ -528,7 +549,7 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
     #|      - run: echo "$SECRETS"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "overprovisioned-secrets",
@@ -590,17 +611,18 @@ test "ref-version-mismatch: comment claims v5 but SHA is from v4" {
 }
 
 ///|
-#skip("not implemented yet")
 test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
   let yaml =
     #|on: push
+    #|permissions:
+    #|  contents: read
     #|jobs:
     #|  call:
     #|    uses: org/repo/.github/workflows/build.yml@v1
     #|    secrets: inherit
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 0, "lines": 5 },
+    "stats": { "jobs": 1, "steps": 0, "lines": 7 },
     "diagnostics": [
       {
         "rule": "secrets-inherit",
@@ -612,20 +634,20 @@ test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
 }
 
 ///|
-#skip("not implemented yet")
 test "secrets-outside-env: secrets accessed without an environment" {
   let yaml =
     #|on: push
     #|jobs:
     #|  deploy:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: ./deploy.sh "${{ secrets.PROD_TOKEN }}"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "secrets-outside-env",
@@ -637,20 +659,20 @@ test "secrets-outside-env: secrets accessed without an environment" {
 }
 
 ///|
-#skip("not implemented yet")
 test "self-hosted-runner: job runs on self-hosted runner" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: [self-hosted, linux]
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "self-hosted-runner",
@@ -687,25 +709,25 @@ test "stale-action-refs: SHA pin has no matching tag" {
 }
 
 ///|
-#skip("not implemented yet")
 test "superfluous-actions: setup-node duplicated across steps" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - uses: actions/setup-node@v4
+    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
     #|        with:
     #|          node-version: 20
-    #|      - uses: actions/setup-node@v4
+    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
     #|        with:
     #|          node-version: 22
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 12 },
+    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
     "diagnostics": [
       {
         "rule": "superfluous-actions",
@@ -717,20 +739,20 @@ test "superfluous-actions: setup-node duplicated across steps" {
 }
 
 ///|
-#skip("not implemented yet")
 test "template-injection: untrusted input in run script" {
   let yaml =
-    #|on: pull_request_target
+    #|on: pull_request
     #|jobs:
     #|  echo:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo "${{ github.event.pull_request.body }}"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "template-injection",
@@ -767,13 +789,13 @@ test "undocumented-permissions: permissions block has no comment" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unpinned-images: container image uses a floating tag" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    container: node:20
@@ -781,7 +803,7 @@ test "unpinned-images: container image uses a floating tag" {
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
         "rule": "unpinned-images",
@@ -793,20 +815,20 @@ test "unpinned-images: container image uses a floating tag" {
 }
 
 ///|
-#skip("not implemented yet")
 test "unpinned-tools: pipe-to-shell installer in run" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: curl -fsSL https://example.com/install.sh | bash
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "unpinned-tools",
@@ -934,13 +956,14 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
     #|    timeout-minutes: 5
     #|    permissions:
     #|      id-token: write
+    #|    environment: pypi
     #|    steps:
     #|      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
     #|        with:
     #|          password: ${{ secrets.PYPI_TOKEN }}
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 13 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
       {
         "rule": "use-trusted-publishing",

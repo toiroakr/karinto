@@ -565,20 +565,20 @@ test "unknown-runner-label: unknown runner label" {
 }
 
 ///|
-#skip("not implemented yet")
 test "uses-syntax: missing @ref in uses" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "uses-syntax",
@@ -644,7 +644,6 @@ test "popular-action-inputs: unknown input on actions/checkout" {
 }
 
 ///|
-#skip("not implemented yet")
 test "outdated-action-version: node12 runtime" {
   let yaml =
     #|name: legacy
@@ -696,7 +695,6 @@ test "shell-name-per-os: pwsh on linux runner" {
 // lives in zizmor_rules_test.mbt.
 
 ///|
-#skip("not implemented yet")
 test "invalid-env-var-name: env name starts with digit" {
   let yaml =
     #|on: push
@@ -705,13 +703,14 @@ test "invalid-env-var-name: env name starts with digit" {
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
         "rule": "invalid-env-var-name",
@@ -776,20 +775,20 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
 }
 
 ///|
-#skip("not implemented yet")
 test "job-step-id-naming: job id has invalid characters" {
   let yaml =
     #|on: push
     #|jobs:
     #|  "build job":
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "job-step-id-naming",
@@ -801,20 +800,20 @@ test "job-step-id-naming: job id has invalid characters" {
 }
 
 ///|
-#skip("not implemented yet")
 test "deprecated-workflow-commands: ::set-output workflow command" {
   let yaml =
     #|on: push
     #|jobs:
     #|  build:
     #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
     #|    permissions:
     #|      contents: read
     #|    steps:
     #|      - run: echo "::set-output name=v::1"
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "deprecated-workflow-commands",
