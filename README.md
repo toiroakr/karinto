@@ -100,6 +100,14 @@ cd cf
 npm run deploy     # `wrangler deploy`
 ```
 
+After a deploy, the curl-based smoke check exercises three response paths against the live Worker:
+
+```sh
+cd cf
+npm run smoke      # defaults to https://karinto.toiroakr.workers.dev
+npm run smoke -- https://your-worker.example.workers.dev
+```
+
 ## API
 
 The Worker accepts `GET` and `POST`. Parameters can come from the query

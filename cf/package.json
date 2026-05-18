@@ -6,7 +6,8 @@
   "scripts": {
     "build": "cd .. && moon build --target js --release",
     "dev": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "smoke": "bash smoke.sh"
   },
   "devDependencies": {
     "js-yaml": "^4.1.1",
