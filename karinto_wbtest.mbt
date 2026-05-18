@@ -21,3 +21,23 @@ test "glob_match question mark" {
   inspect(glob_match("act-?d-unique", "act-id-unique"), content="true")
   inspect(glob_match("act-?d-unique", "act-xx-unique"), content="false")
 }
+
+///|
+/// Regression: a pathological pattern that would trigger exponential
+/// backtracking under the previous recursive matcher must terminate
+/// quickly and report no match.
+test "glob_match no exponential backtracking on adversarial pattern" {
+  // 20 alternating `*a` segments followed by `b` against an `a`-only string
+  // — the prior matcher took ~O(n^k) here; this should complete instantly.
+  let pat = "*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*b"
+  let s = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  inspect(glob_match(pat, s), content="false")
+}
+
+///|
+test "glob_match trailing star matches remainder" {
+  inspect(glob_match("ghl-*", ""), content="false")
+  inspect(glob_match("*", ""), content="true")
+  inspect(glob_match("**", "anything"), content="true")
+  inspect(glob_match("a*", "a"), content="true")
+}

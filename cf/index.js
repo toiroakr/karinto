@@ -30,6 +30,16 @@ function getWorker() {
   return _workerPromise;
 }
 
+// Reject obviously oversized payloads before they reach the linter. GitHub
+// workflow YAML files are well under 100 KB in practice; cap at 1 MiB to keep
+// `count_lines` / `walk_strings` / rule passes bounded.
+const MAX_BODY_BYTES = 1_048_576;
+// Defensive caps on user-controlled fan-out fields. `disable` patterns and
+// `targets` lists are otherwise unbounded inputs.
+const MAX_DISABLE_PATTERNS = 64;
+const MAX_DISABLE_PATTERN_LEN = 128;
+const MAX_TARGETS = 50;
+
 export default {
   async fetch(request, env, ctx) {
     const started = Date.now();
@@ -49,27 +59,69 @@ export default {
       });
       return json(result);
     } catch (err) {
-      log("error", { message: String(err?.message ?? err) });
-      return json({ ok: false, error: String(err?.message ?? err) }, 400);
+      const status = err?.status ?? 400;
+      log("error", { status, message: String(err?.message ?? err) });
+      return json({ ok: false, error: String(err?.message ?? err) }, status);
     }
   },
 };
+
+function httpError(message, status) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
 
 async function readParams(request) {
   const url = new URL(request.url);
   const params = {};
   for (const [k, v] of url.searchParams) params[k] = v;
 
+  const cl = Number(request.headers.get("content-length"));
+  if (Number.isFinite(cl) && cl > MAX_BODY_BYTES) {
+    throw httpError(`request body too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+  }
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     const ct = request.headers.get("content-type") || "";
-    const raw = await request.text();
+    const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, ct);
   } else if (request.method === "GET" && request.body) {
     // curl --data-urlencode + GET also sends a body.
-    const raw = await request.text();
+    const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
   return params;
+}
+
+// Stream the body and abort once `MAX_BODY_BYTES` is exceeded so a client
+// can't bypass the content-length check by omitting / lying about the header.
+async function readBoundedText(request) {
+  return readBoundedStream(request.body, "request body");
+}
+
+async function readBoundedResponse(response) {
+  return readBoundedStream(response.body, "response body");
+}
+
+async function readBoundedStream(body, label) {
+  if (!body) return "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw httpError(`${label} too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
 }
 
 const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv"]);
@@ -104,7 +156,7 @@ function mergeBody(params, raw, ct) {
 const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
 
 async function handle(params, env) {
-  const disable = params.disable || "";
+  const disable = sanitizeDisable(params.disable || "");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
@@ -115,8 +167,50 @@ async function handle(params, env) {
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
   }
+  if (params.content.length > MAX_BODY_BYTES) {
+    throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+  }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
   return JSON.parse(worker.lint_string(params.content, type, disable, vuln));
+}
+
+// Reject overly long / numerous / multi-star `disable=` patterns. The matcher
+// itself is linear, but limiting each pattern to at most one `*` keeps the
+// API simple and rules out any future regression in the matcher.
+function sanitizeDisable(raw) {
+  if (!raw) return "";
+  const pieces = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) return "";
+  if (pieces.length > MAX_DISABLE_PATTERNS) {
+    throw httpError(
+      `too many disable patterns (max ${MAX_DISABLE_PATTERNS})`,
+      400,
+    );
+  }
+  for (const p of pieces) {
+    if (p.length > MAX_DISABLE_PATTERN_LEN) {
+      throw httpError(
+        `disable pattern too long (max ${MAX_DISABLE_PATTERN_LEN} chars): ${p}`,
+        400,
+      );
+    }
+    if (countChar(p, "*") > 1) {
+      throw httpError(
+        `disable pattern allows at most one '*': ${p}`,
+        400,
+      );
+    }
+  }
+  return pieces.join(",");
+}
+
+function countChar(s, ch) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) if (s[i] === ch) n++;
+  return n;
 }
 
 async function handleRepo(params, disable, type, useOsv, worker) {
@@ -133,14 +227,25 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   }
 
   const files = [];
-  for (const path of targets.slice(0, 50)) {
+  for (const path of targets.slice(0, MAX_TARGETS)) {
     const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
       continue;
     }
-    const raw = await res.text();
+    const cl = Number(res.headers.get("content-length"));
+    if (Number.isFinite(cl) && cl > MAX_BODY_BYTES) {
+      files.push({ path, ok: false, error: `file too large (${cl} > ${MAX_BODY_BYTES} bytes)` });
+      continue;
+    }
+    let raw;
+    try {
+      raw = await readBoundedResponse(res);
+    } catch (e) {
+      files.push({ path, ok: false, error: String(e?.message ?? e) });
+      continue;
+    }
     const guessKind = type || guessKindFromPath(path);
     const vuln = useOsv ? await fetchVulnUses(raw, worker) : "";
     files.push({ path, ...JSON.parse(worker.lint_string(raw, guessKind, disable, vuln)) });
