@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitTypeAll(chore)",
+    ":dependencyDashboard",
+    ":enableVulnerabilityAlertsWithLabel(security)"
+  ],
+  "labels": ["dependencies", "skip-changeset"],
+  "timezone": "Asia/Tokyo",
+  "schedule": ["before 8am on monday"],
+  "prHourlyLimit": 4,
+  "rangeStrategy": "bump",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 8am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "pinDigests": false
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "npm non-major"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "npm major"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security", "skip-changeset"]
+  }
+}

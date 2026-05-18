@@ -163,3 +163,25 @@ action keeps a "chore: release" PR open that previews the next version.
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
+
+### Required repository settings
+
+| Setting | Where | Why |
+| --- | --- | --- |
+| Workflow permissions: **Read and write**, **Allow GitHub Actions to create and approve pull requests** | Settings → Actions → General | So `changesets/action` can push to `changeset-release/main` and open the "chore: release" PR. |
+
+## Dependency updates
+
+[Renovate](https://docs.renovatebot.com/) handles dependency PRs (config in
+`renovate.json`). The bot runs weekly (Mon morning JST):
+
+- GitHub Actions are grouped into a single PR.
+- npm minor + patch updates are grouped; majors get a separate PR.
+- `lockFileMaintenance` refreshes `package-lock.json` on the 1st of each month.
+- All Renovate PRs are auto-labelled `dependencies` + `skip-changeset` (so
+  they bypass the changeset CI gate — dependency bumps don't ship as a
+  user-visible release).
+
+Enable Renovate by installing the [GitHub App](https://github.com/apps/renovate)
+on the repo. The bot's first run will open a "Configure Renovate" PR — merge
+it to activate the schedule.
