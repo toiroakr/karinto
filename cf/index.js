@@ -75,29 +75,17 @@ export default {
   },
 };
 
-// Two-tier rate limit:
-//   1. Global ceiling — applied to every request regardless of origin.
-//   2. Per-IP — applied only to traffic that is NOT a GitHub-hosted Actions
-//      runner. CI runners share egress IPs across unrelated tenants, so a
-//      per-IP cap there would create cross-user collateral. The global
-//      ceiling still protects daily Worker / OSV budgets.
-// Falls open if the rate-limit binding is missing (e.g. `wrangler dev`
-// without `--remote`) so local development doesn't require the feature.
+// Per-IP rate limit. Traffic from GitHub-hosted Actions runners is exempt
+// because they share egress IPs across unrelated tenants — a noisy CI user
+// would otherwise 429 unrelated CI traffic as collateral. Falls open if
+// the binding is missing (e.g. `wrangler dev` without `--remote`).
 async function enforceRateLimit(request, env, ctx) {
-  if (env?.RATE_LIMITER_GLOBAL) {
-    const { success } = await env.RATE_LIMITER_GLOBAL.limit({ key: "global" });
-    if (!success) {
-      throw httpError("rate limit exceeded (global ceiling)", 429);
-    }
-  }
+  if (!env?.RATE_LIMITER_IP) return;
   const ip = request.headers.get("cf-connecting-ip");
   if (await isFromGitHubActions(ip, env, ctx)) return;
-  if (env?.RATE_LIMITER_IP) {
-    const key = ip || "unknown";
-    const { success } = await env.RATE_LIMITER_IP.limit({ key });
-    if (!success) {
-      throw httpError("rate limit exceeded", 429);
-    }
+  const { success } = await env.RATE_LIMITER_IP.limit({ key: ip || "unknown" });
+  if (!success) {
+    throw httpError("rate limit exceeded", 429);
   }
 }
 
