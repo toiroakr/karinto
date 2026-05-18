@@ -28,7 +28,7 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
-      - run: moon install
+      - run: moon update
 
       - name: Build JS bundle
         run: moon build --target js --release
