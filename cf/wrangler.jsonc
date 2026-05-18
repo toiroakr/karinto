@@ -38,9 +38,39 @@
 			"0 2 * * *"
 		]
 	},
+	// Named envs do NOT inherit `kv_namespaces`, `unsafe`, or `triggers`
+	// from the top-level config, so we duplicate them here. KV id is shared
+	// because the /meta payload is GitHub-published and identical for every
+	// env; the rate-limit namespace_id is distinct so staging traffic can't
+	// burn the prod token bucket.
 	"env": {
 		"staging": {
-			"name": "karinto-staging"
+			"name": "karinto-staging",
+			"unsafe": {
+				"bindings": [
+					{
+						"name": "RATE_LIMITER_IP",
+						"type": "ratelimit",
+						"namespace_id": "1003",
+						"simple": {
+							"limit": 60,
+							"period": 60
+						}
+					}
+				]
+			},
+			"kv_namespaces": [
+				{
+					"binding": "KV",
+					"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+					"remote": true
+				}
+			],
+			"triggers": {
+				"crons": [
+					"0 2 * * *"
+				]
+			}
 		}
 	}
 }

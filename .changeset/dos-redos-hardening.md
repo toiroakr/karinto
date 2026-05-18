@@ -9,8 +9,11 @@ Harden DoS/ReDoS surface:
   patterns such as `*a*a*…*b` against long inputs can no longer cause
   exponential CPU usage.
 - Cloudflare Worker now enforces a 1 MiB cap on request bodies and on
-  files fetched in `repo` mode. Oversized payloads short-circuit with
-  `413 Payload Too Large` before reaching the parser / rules.
+  files fetched in `repo` mode. Oversized direct payloads short-circuit
+  with `413 Payload Too Large` before reaching the parser / rules.
+  In `repo` mode the request still returns `200` with the per-file
+  error surfaced under `files[].error` so a single oversized file does
+  not invalidate results for the rest of the batch.
 - `disable=` patterns are limited to one `*` each (more than one returns
   `400`), and capped at 64 patterns × 128 characters per pattern.
 - Add a 60 req/min per-IP rate limit via the Workers Rate Limiting

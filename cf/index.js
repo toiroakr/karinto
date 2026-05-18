@@ -98,8 +98,14 @@ async function enforceRateLimit(request, env, ctx) {
 const META_URL = "https://api.github.com/meta";
 const META_KV_KEY = "actions_cidrs";
 const META_FETCH_TIMEOUT_MS = 5000;
+// Cap the in-isolate memo so the daily cron's KV write propagates to
+// long-lived isolates without waiting for recycle. 10 min is short enough
+// that runner CIDR churn (rare in practice) is bounded, long enough that
+// KV reads stay cheap.
+const RANGES_TTL_MS = 10 * 60 * 1000;
 
-let _rangesPromise; // isolate-level memo; resets on isolate recycle.
+let _rangesPromise; // isolate-level memo; reset by TTL or on isolate recycle.
+let _rangesExpiresAt = 0;
 
 async function isFromGitHubActions(ip, env, ctx) {
   if (!ip) return false;
@@ -112,11 +118,14 @@ async function isFromGitHubActions(ip, env, ctx) {
 }
 
 function getActionsRanges(env, ctx) {
-  if (!_rangesPromise) {
+  const now = Date.now();
+  if (!_rangesPromise || now >= _rangesExpiresAt) {
     _rangesPromise = loadActionsRanges(env, ctx).catch((e) => {
       _rangesPromise = undefined; // retry on the next request
+      _rangesExpiresAt = 0;
       throw e;
     });
+    _rangesExpiresAt = now + RANGES_TTL_MS;
   }
   return _rangesPromise;
 }
@@ -407,9 +416,15 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   if (targets.length === 0) {
     throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
   }
+  if (targets.length > MAX_TARGETS) {
+    throw httpError(
+      `too many targets (max ${MAX_TARGETS}, got ${targets.length})`,
+      400,
+    );
+  }
 
   const files = [];
-  for (const path of targets.slice(0, MAX_TARGETS)) {
+  for (const path of targets) {
     const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
