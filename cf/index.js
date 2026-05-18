@@ -142,10 +142,18 @@ async function loadActionsRanges(env, ctx) {
     }
   }
   const meta = await fetchMeta();
-  if (meta && env?.KV && ctx) {
+  if (!meta) {
+    // Don't memoize an empty range set: a transient /meta outage during a
+    // cold deploy would otherwise strip the GitHub Actions exemption for
+    // 10 minutes. Throw so `getActionsRanges` clears the memo and the next
+    // request retries (in-flight requests share the same rejected promise,
+    // so this is bounded to one /meta call per fetchMeta-timeout window).
+    throw new Error("meta unavailable");
+  }
+  if (env?.KV && ctx) {
     ctx.waitUntil(env.KV.put(META_KV_KEY, JSON.stringify(meta)));
   }
-  return compileRanges(meta?.actions || []);
+  return compileRanges(meta.actions || []);
 }
 
 async function refreshMetaCache(env) {
@@ -369,7 +377,10 @@ async function handle(params, env) {
 // itself is linear, but limiting each pattern to at most one `*` keeps the
 // API simple and rules out any future regression in the matcher.
 function sanitizeDisable(raw) {
-  if (!raw) return "";
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`disable` must be a string", 400);
+  }
   const pieces = raw
     .split(",")
     .map((s) => s.trim())
@@ -384,18 +395,23 @@ function sanitizeDisable(raw) {
   for (const p of pieces) {
     if (p.length > MAX_DISABLE_PATTERN_LEN) {
       throw httpError(
-        `disable pattern too long (max ${MAX_DISABLE_PATTERN_LEN} chars): ${p}`,
+        `disable pattern too long (max ${MAX_DISABLE_PATTERN_LEN} chars, got ${p.length}; starts: ${truncatePreview(p)})`,
         400,
       );
     }
     if (countChar(p, "*") > 1) {
       throw httpError(
-        `disable pattern allows at most one '*': ${p}`,
+        `disable pattern allows at most one '*' (got: ${truncatePreview(p)})`,
         400,
       );
     }
   }
   return pieces.join(",");
+}
+
+function truncatePreview(s) {
+  const max = 32;
+  return s.length <= max ? s : s.slice(0, max) + "…";
 }
 
 function countChar(s, ch) {
@@ -406,10 +422,14 @@ function countChar(s, ch) {
 
 async function handleRepo(params, disable, type, useOsv, worker) {
   const repo = params.repo;
-  if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
-    throw new Error(`invalid repo: ${repo}`);
+  if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
+    throw httpError(`invalid repo: ${repo}`, 400);
   }
-  const targets = (params.targets || "")
+  const rawTargets = params.targets ?? "";
+  if (typeof rawTargets !== "string") {
+    throw httpError("`targets` must be a string", 400);
+  }
+  const targets = rawTargets
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

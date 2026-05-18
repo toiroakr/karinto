@@ -16,6 +16,9 @@ Harden DoS/ReDoS surface:
   not invalidate results for the rest of the batch.
 - `disable=` patterns are limited to one `*` each (more than one returns
   `400`), and capped at 64 patterns × 128 characters per pattern.
+- `targets=` (in `repo` mode) is capped at 50 paths. Requests over the
+  cap are rejected with `400` rather than silently truncated, so clients
+  don't get an `ok:true` response that quietly skipped files.
 - Add a 60 req/min per-IP rate limit via the Workers Rate Limiting
   binding. Traffic from GitHub-hosted Actions runners is exempt
   because runners share egress IPs across unrelated tenants; the
@@ -25,6 +28,8 @@ Harden DoS/ReDoS surface:
   for the cold-deploy case. Over-limit requests get `429`.
 - Deploy note: this introduces a `KV` namespace and a `triggers.crons`
   entry in `cf/wrangler.jsonc`. Run `npx wrangler kv namespace create
-  karinto-meta` (and a staging counterpart) and paste the IDs before
-  the next deploy.
+  karinto-meta` once and paste the returned id into both the top-level
+  and `env.staging` `kv_namespaces` blocks — production and staging
+  share the namespace because the `/meta` payload is GitHub-published
+  and identical across envs.
 - Regression test exercises the previously catastrophic pattern.
