@@ -32,6 +32,7 @@ values win on conflict.
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
 | `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
+| `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 
 ### Examples
 
@@ -98,6 +99,20 @@ In `repo` mode the result is wrapped:
 
 For private repos pass `content` directly. The Worker does not handle
 `GITHUB_TOKEN`-authenticated `repo`-mode fetches.
+
+## Privacy
+
+The production deployment persists successful requests (the `content`
+plus a few non-secret query parameters) and the corresponding response
+into a private bucket for up to 30 days. These captures are used to
+replay traffic against PR previews and detect regressions before they
+reach prod. To opt out per-request, send either:
+
+- query / form parameter `no_capture=1`, **or**
+- HTTP header `X-Karinto-No-Capture: 1`
+
+Requests using `osv=1` or `repo=` are never captured; nor are requests
+whose body exceeds 100 KiB.
 
 ## Development
 

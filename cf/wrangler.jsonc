@@ -1,10 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Top-level config has NO R2 binding on purpose: PR previews
+  // (`wrangler deploy --name karinto-pr-<N>`) inherit this and we don't want
+  // them writing into the captures bucket. Production must be deployed via
+  // `wrangler deploy --env production` so the CAPTURES binding is attached.
   "name": "karinto",
   "main": "index.js",
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
   "env": {
+    "production": {
+      "name": "karinto",
+      "r2_buckets": [
+        { "binding": "CAPTURES", "bucket_name": "karinto-captures" }
+      ]
+    },
     "staging": {
       "name": "karinto-staging"
     }

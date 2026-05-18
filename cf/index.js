@@ -47,6 +47,11 @@ export default {
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
       });
+      ctx.waitUntil(
+        captureRequest(env, params, result, request.headers).catch((err) => {
+          log("capture_error", { message: String(err?.message ?? err) });
+        }),
+      );
       return json(result);
     } catch (err) {
       log("error", { message: String(err?.message ?? err) });
@@ -72,7 +77,7 @@ async function readParams(request) {
   return params;
 }
 
-const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv"]);
+const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv", "no_capture"]);
 
 function mergeBody(params, raw, ct) {
   if (ct.includes("application/json") || raw.trimStart().startsWith("{")) {
@@ -101,7 +106,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv|no_capture)=/;
 
 async function handle(params, env) {
   const disable = params.disable || "";
@@ -256,6 +261,64 @@ function json(body, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+// Dark-launch capture: persist successful prod requests + their canonical
+// response to R2 so PR Workers can replay them and diff for regressions.
+// Only runs when `env.CAPTURES` is bound (production env). Skipped for:
+//   - `osv=1` (external state),
+//   - `repo` mode (external GitHub state),
+//   - content > CAPTURE_CONTENT_LIMIT_KIB (free-tier hygiene; default 100),
+//   - opt-out via `no_capture=1` param or `X-Karinto-No-Capture` header.
+const DEFAULT_CAPTURE_CONTENT_LIMIT_KIB = 100;
+
+async function captureRequest(env, params, result, headers) {
+  if (!env?.CAPTURES) return;
+  if (isTrue(params.osv)) return;
+  if (params.repo) return;
+  if (!params.content) return;
+  if (!result?.ok) return;
+  const limitKib = Number(env.CAPTURE_CONTENT_LIMIT_KIB ?? DEFAULT_CAPTURE_CONTENT_LIMIT_KIB);
+  if (params.content.length > limitKib * 1024) return;
+  if (isTrue(params.no_capture)) return;
+  if (isTrue(headers?.get("x-karinto-no-capture"))) return;
+
+  const normalized = normalizeRequest(params);
+  const hash = await sha256Hex(JSON.stringify(normalized));
+  const key = `captures/${hash}.json`;
+
+  const payload = JSON.stringify({
+    request: normalized,
+    response: result,
+    first_seen: new Date().toISOString(),
+  });
+
+  await env.CAPTURES.put(key, payload, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+
+function normalizeRequest(params) {
+  const out = { content: params.content };
+  if (params.type) out.type = params.type;
+  if (params.disable) {
+    out.disable = params.disable
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }
+  return out;
+}
+
+async function sha256Hex(str) {
+  const buf = new TextEncoder().encode(str);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function log(event, data) {

@@ -45,3 +45,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Dark-launch tuning. Unset → Worker defaults apply (see cf/index.js
+          # and cf/maintenance.js for the fallback values).
+          CAPTURE_CONTENT_LIMIT_KIB: ${{ vars.CAPTURE_CONTENT_LIMIT_KIB }}
+          CAPTURES_SIZE_LIMIT_MIB: ${{ vars.CAPTURES_SIZE_LIMIT_MIB }}
+          CAPTURES_RECOVERY_RATIO: ${{ vars.CAPTURES_RECOVERY_RATIO }}

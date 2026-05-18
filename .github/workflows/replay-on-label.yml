@@ -1,0 +1,81 @@
+name: replay-on-label
+
+# Adding the `regression-test` label to a PR triggers a replay of recent
+# prod-captured requests against that PR's preview Worker. The result is
+# posted as a sticky comment and the label is removed when the run
+# finishes. Re-add the label to run again.
+
+on:
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: replay-on-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    # Filter to the trigger label and skip fork PRs (no access to
+    # REPLAY_TOKEN).
+    if: >
+      github.event.label.name == 'regression-test'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKER_URL: https://karinto-pr-${{ github.event.pull_request.number }}.toiroakr.workers.dev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Preview deploys take ~1 minute. If the user labels right after
+      # opening the PR, give the deploy time to finish before bailing.
+      - name: Wait for preview Worker to be reachable
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$WORKER_URL" || true)
+            if [ "$code" != "404" ] && [ "$code" != "000" ]; then
+              echo "preview reachable (HTTP $code)"
+              exit 0
+            fi
+            echo "waiting for $WORKER_URL (attempt $i, code=$code)"
+            sleep 10
+          done
+          echo "::error::Preview Worker $WORKER_URL is not reachable after ~2 minutes."
+          echo "::error::Wait for the deploy-preview workflow to finish, then re-add the label."
+          exit 1
+
+      - name: Replay prod captures
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REPLAY_SUMMARY_PATH: ${{ runner.temp }}/replay-summary.md
+          REPLAY_LIMIT: ${{ vars.REPLAY_LIMIT || '200' }}
+        run: |
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ]; then
+            echo "::error::R2_ACCESS_KEY_ID secret is not set. See DEVELOPMENT.md for setup."
+            exit 1
+          fi
+          node scripts/replay.mjs --target "$WORKER_URL" --limit "$REPLAY_LIMIT"
+
+      - name: Comment replay summary
+        if: ${{ always() && hashFiles(format('{0}/replay-summary.md', runner.temp)) != '' }}
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: dark-launch-replay
+          path: ${{ runner.temp }}/replay-summary.md
+
+      - name: Remove regression-test label
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr edit "$PR_NUMBER" --remove-label regression-test || true
