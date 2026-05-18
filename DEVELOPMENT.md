@@ -274,22 +274,29 @@ endpoint, authenticated with bucket-scoped read-only access keys.
 > already exist on the upstream deployment.
 
 ```sh
+# 1. Build the MoonBit → JS bundle that the Worker imports. The release
+#    workflow does this automatically, but a manual first-time deploy
+#    needs it explicitly:
+moon update
+moon build --target js --release
+
 cd cf
-# 1. Create the bucket
+# 2. Create the bucket
 npx wrangler r2 bucket create karinto-captures
 
-# 2. In the Cloudflare dashboard: R2 → karinto-captures → Lifecycle rules
+# 3. In the Cloudflare dashboard: R2 → karinto-captures → Lifecycle rules
 #    Add: "Delete objects older than 30 days", prefix `captures/`.
 
-# 3. Create an R2 API token (Dashboard → R2 → Manage R2 API Tokens →
+# 4. Create an R2 API token (Dashboard → R2 → Manage R2 API Tokens →
 #    "Create API Token"). Scope it to **Object Read only** on the
 #    `karinto-captures` bucket. Save the Access Key ID + Secret Access Key
 #    as GitHub repo secrets:
 gh secret set R2_ACCESS_KEY_ID     -b "<access key id>"
 gh secret set R2_SECRET_ACCESS_KEY -b "<secret access key>"
 
-# 4. Deploy the prod linter (with binding) + captures Worker. Normally this
+# 5. Deploy the prod linter (with binding) + captures Worker. Normally this
 #    happens via the release workflow, but the first time you can run:
+npm ci
 npx wrangler deploy --env production
 npx wrangler deploy --config wrangler.maintenance.jsonc
 ```

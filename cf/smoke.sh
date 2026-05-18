@@ -10,10 +10,11 @@ set -euo pipefail
 URL="${1:-https://karinto.toiroakr.workers.dev}"
 printf 'smoke-testing %s\n' "$URL"
 
-# Newly deployed workers.dev hostnames can take a few seconds to propagate.
-# Different request shapes can warm up independently, so probe both the
-# body-bearing and empty-body code paths until both stop returning 404.
-for attempt in 1 2 3 4 5 6 7 8; do
+# Newly deployed workers.dev hostnames can take 30s+ to propagate on the
+# very first deploy of a PR preview. Probe both the body-bearing and
+# empty-body code paths until both stop returning 404 (they can warm up
+# independently). 24 × 5s ≈ 2 min total budget.
+for attempt in $(seq 1 24); do
   body_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
   empty_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data '' "$URL" || true)
   if [ "$body_code" != "404" ] && [ "$body_code" != "000" ] \

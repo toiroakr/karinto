@@ -19,16 +19,32 @@
 // GitHub repository variables).
 const DEFAULT_SIZE_LIMIT_MIB = 7000;
 const DEFAULT_RECOVERY_RATIO = 0.7;
+// Safety cap on list pages (1000 objects/page) to bound Worker memory and
+// CPU even if the bucket somehow holds millions of entries. The R2 lifecycle
+// rule (30 days, configured in the dashboard) is the primary retention
+// mechanism; this Worker is just a soft cap on top.
+const MAX_LIST_PAGES = 200;
+
+function positiveNumber(raw, fallback) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function ratio(raw, fallback) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n < 1 ? n : fallback;
+}
 
 export default {
   async scheduled(_event, env) {
     if (!env.CAPTURES) return;
-    const sizeLimit = Number(env.CAPTURES_SIZE_LIMIT_MIB ?? DEFAULT_SIZE_LIMIT_MIB) * 1024 * 1024;
-    const recoveryRatio = Number(env.CAPTURES_RECOVERY_RATIO ?? DEFAULT_RECOVERY_RATIO);
-    const objects = await listAll(env.CAPTURES, "captures/");
+    const sizeLimit =
+      positiveNumber(env.CAPTURES_SIZE_LIMIT_MIB, DEFAULT_SIZE_LIMIT_MIB) * 1024 * 1024;
+    const recoveryRatio = ratio(env.CAPTURES_RECOVERY_RATIO, DEFAULT_RECOVERY_RATIO);
+    const { objects, truncated } = await listCapped(env.CAPTURES, "captures/", MAX_LIST_PAGES);
     const total = objects.reduce((s, o) => s + o.size, 0);
 
-    if (total < sizeLimit) {
+    if (total < sizeLimit && !truncated) {
       console.log(
         JSON.stringify({
           event: "maintenance",
@@ -58,18 +74,23 @@ export default {
         deleted,
         freed,
         remaining: total - freed,
+        listTruncated: truncated,
       }),
     );
   },
 };
 
-async function listAll(bucket, prefix) {
+async function listCapped(bucket, prefix, maxPages) {
   const out = [];
   let cursor;
-  do {
-    const page = await bucket.list({ prefix, cursor });
-    out.push(...page.objects);
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  return out;
+  for (let page = 0; page < maxPages; page++) {
+    const res = await bucket.list({ prefix, cursor });
+    out.push(...res.objects);
+    if (!res.truncated) return { objects: out, truncated: false };
+    cursor = res.cursor;
+  }
+  // Hit the page cap — let the caller log it. The next cron run will continue
+  // pruning oldest-first since R2 returns objects in lexicographic key order
+  // (hashes), but the lifecycle rule remains the primary retention.
+  return { objects: out, truncated: true };
 }

@@ -21,7 +21,12 @@ jobs:
       WORKER_NAME: karinto-pr-${{ github.event.pull_request.number }}
       WORKER_URL: https://karinto-pr-${{ github.event.pull_request.number }}.toiroakr.workers.dev
     steps:
+      # Pin to the PR head SHA so the Worker we deploy and the replay
+      # script / diff rules running against it stay in lockstep with
+      # replay-on-label.yml (which also checks out head.sha).
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install moon
         run: |
@@ -48,7 +53,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cf
-          command: deploy --name ${{ env.WORKER_NAME }}
+          # `--env=""` targets the top-level env in wrangler.jsonc, which
+          # deliberately omits the CAPTURES R2 binding so preview Workers
+          # can't write to the captures bucket. Without this flag, wrangler 4
+          # warns and the deploy is ambiguous.
+          command: deploy --env="" --name ${{ env.WORKER_NAME }}
 
       - name: Smoke check
         working-directory: cf
@@ -79,7 +88,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          REPLAY_SUMMARY_PATH: ${{ runner.temp }}/replay-summary.md
+          # Write the summary inside GITHUB_WORKSPACE so `hashFiles()` can
+          # see it (it only matches files in the checked-out workspace).
+          REPLAY_SUMMARY_PATH: ${{ github.workspace }}/replay-summary.md
           REPLAY_LIMIT: ${{ vars.REPLAY_LIMIT || '200' }}
         run: |
           if [ -z "${R2_ACCESS_KEY_ID:-}" ]; then
@@ -89,8 +100,8 @@ jobs:
           node scripts/replay.mjs --target "$WORKER_URL" --limit "$REPLAY_LIMIT"
 
       - name: Comment replay summary
-        if: ${{ always() && hashFiles(format('{0}/replay-summary.md', runner.temp)) != '' }}
+        if: ${{ always() && hashFiles('replay-summary.md') != '' }}
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: dark-launch-replay
-          path: ${{ runner.temp }}/replay-summary.md
+          path: ${{ github.workspace }}/replay-summary.md

@@ -34,13 +34,21 @@ const RULES_DIR = join(__dirname, "diff-rules");
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
 
+const DEFAULT_LIMIT = 200;
+
 function parseArgs(argv) {
-  const args = { limit: 30 };
+  const args = { limit: DEFAULT_LIMIT };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--target") args.target = argv[++i];
-    else if (a === "--limit") args.limit = parseInt(argv[++i], 10);
-    else if (a === "--help" || a === "-h") args.help = true;
+    else if (a === "--limit") {
+      const raw = argv[++i];
+      const n = parseInt(raw, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new Error(`--limit must be a positive integer (got ${JSON.stringify(raw)})`);
+      }
+      args.limit = n;
+    } else if (a === "--help" || a === "-h") args.help = true;
   }
   return args;
 }
@@ -266,17 +274,62 @@ function computeDiff(captured, replayed) {
   if (captured.ok !== replayed.ok) {
     diffs.push({ kind: "ok-mismatch", captured: captured.ok, replayed: replayed.ok });
   }
+
+  // Diagnostic comparison uses count maps so a duplicate diagnostic
+  // appearing N times in one side and M times in the other is treated as
+  // a real diff (Set-based comparison would collapse multiplicity).
   const cap = collectDiagnostics(captured);
   const rep = collectDiagnostics(replayed);
-  const capKeys = new Set(cap.map(diagKey));
-  const repKeys = new Set(rep.map(diagKey));
-
-  const onlyInCaptured = cap.filter((d) => !repKeys.has(diagKey(d)));
-  const onlyInReplayed = rep.filter((d) => !capKeys.has(diagKey(d)));
+  const onlyInCaptured = multisetSubtract(cap, rep);
+  const onlyInReplayed = multisetSubtract(rep, cap);
   if (onlyInCaptured.length || onlyInReplayed.length) {
     diffs.push({ kind: "diagnostics", onlyInCaptured, onlyInReplayed });
   }
+
+  // Catch-all for everything else `normalize()` exposes — result.kind,
+  // result.stats, per-file ok/error, parse-error details, etc. Without this
+  // a PR could regress documented response metadata without failing here.
+  const capMeta = stripDiagnostics(captured);
+  const repMeta = stripDiagnostics(replayed);
+  const capMetaJson = JSON.stringify(capMeta);
+  const repMetaJson = JSON.stringify(repMeta);
+  if (capMetaJson !== repMetaJson) {
+    diffs.push({ kind: "metadata", captured: capMeta, replayed: repMeta });
+  }
   return diffs;
+}
+
+function stripDiagnostics(resp) {
+  if (!resp || typeof resp !== "object") return resp;
+  const out = { ...resp };
+  if (out.result) {
+    const { diagnostics: _d, ...rest } = out.result;
+    out.result = rest;
+  }
+  if (Array.isArray(out.files)) {
+    out.files = out.files.map((f) => {
+      if (!f.result) return f;
+      const { diagnostics: _d, ...rest } = f.result;
+      return { ...f, result: rest };
+    });
+  }
+  return out;
+}
+
+function multisetSubtract(left, right) {
+  const counts = new Map();
+  for (const item of right) {
+    const k = diagKey(item);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const out = [];
+  for (const item of left) {
+    const k = diagKey(item);
+    const c = counts.get(k) || 0;
+    if (c > 0) counts.set(k, c - 1);
+    else out.push(item);
+  }
+  return out;
 }
 
 function collectDiagnostics(resp) {

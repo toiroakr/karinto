@@ -272,14 +272,25 @@ function json(body, status = 200) {
 //   - opt-out via `no_capture=1` param or `X-Karinto-No-Capture` header.
 const DEFAULT_CAPTURE_CONTENT_LIMIT_KIB = 100;
 
+// Numeric tuning vars come in from wrangler `--var` as strings. Treat
+// missing / non-finite / non-positive values as "use the default" so a
+// malformed GitHub variable can't silently disable the guard.
+function positiveNumber(raw, fallback) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 async function captureRequest(env, params, result, headers) {
   if (!env?.CAPTURES) return;
   if (isTrue(params.osv)) return;
   if (params.repo) return;
   if (!params.content) return;
   if (!result?.ok) return;
-  const limitKib = Number(env.CAPTURE_CONTENT_LIMIT_KIB ?? DEFAULT_CAPTURE_CONTENT_LIMIT_KIB);
-  if (params.content.length > limitKib * 1024) return;
+  const limitKib = positiveNumber(env.CAPTURE_CONTENT_LIMIT_KIB, DEFAULT_CAPTURE_CONTENT_LIMIT_KIB);
+  // length counts UTF-16 code units; capture size is determined by UTF-8
+  // bytes, so non-ASCII YAML would otherwise sneak past the limit.
+  const byteLen = new TextEncoder().encode(params.content).byteLength;
+  if (byteLen > limitKib * 1024) return;
   if (isTrue(params.no_capture)) return;
   if (isTrue(headers?.get("x-karinto-no-capture"))) return;
 
