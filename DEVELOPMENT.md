@@ -105,7 +105,7 @@ Three Workers, one per environment:
 
 | Environment | Worker name | URL | Trigger |
 | --- | --- | --- | --- |
-| Production | `karinto` | `https://karinto.toiroakr.workers.dev` | `release` workflow (manual dispatch) |
+| Production | `karinto` | `https://karinto.toiroakr.workers.dev` | merging the auto-generated "chore: release" PR |
 | Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
 
@@ -119,9 +119,14 @@ GitHub Actions wiring:
   the PR closes.
 - `.github/workflows/deploy-staging.yml` — deploys to staging on every push
   to `main`.
-- `.github/workflows/release.yml` — `workflow_dispatch` job that consumes
-  the accumulated changesets, bumps versions, writes the CHANGELOG section,
-  tags `vX.Y.Z`, deploys to production, and publishes a GitHub Release.
+- `.github/workflows/release.yml` — runs on every push to `main` via
+  `changesets/action`. When pending changesets are present it opens (or
+  updates) a "chore: release" PR that consumes them, bumps versions, and
+  rewrites `CHANGELOG.md`. When that PR is merged (i.e. main has no pending
+  changesets), the same workflow runs `scripts/release-publish.sh`:
+  builds, deploys to the production Worker, runs `cf/smoke.sh`, tags
+  `vX.Y.Z`, and creates a GitHub Release whose body is the new CHANGELOG
+  section.
 
 ### Per-PR changesets
 
@@ -136,14 +141,21 @@ tweaks, internal scripts), apply the `skip-changeset` label on GitHub.
 
 ### Cutting a release
 
-1. Open the **Actions** tab on GitHub and run the `release` workflow.
-2. The workflow:
-   - reads the queued `.changeset/*.md` entries
-   - bumps `package.json` and `moon.mod.json` (via `scripts/sync-moon-version.mjs`)
-   - rewrites `CHANGELOG.md` with the new section
-   - commits, tags `vX.Y.Z`, pushes
-   - builds, deploys to the production Worker, runs `cf/smoke.sh`
-   - creates a GitHub Release whose body is the new CHANGELOG section
+Releases are driven by `changesets/action`. As PRs land on `main`, the
+action keeps a "chore: release" PR open that previews the next version.
+
+1. Review the open **chore: release** PR (created/updated by
+   `changesets/action`). Its diff is purely the version bump,
+   `CHANGELOG.md` update, and removal of the consumed `.changeset/*.md`
+   files.
+2. Merge it. On the resulting push to `main`, the `release` workflow runs
+   `scripts/release-publish.sh`:
+   - `moon update && moon test && moon build --target js --release`
+   - `cd cf && npm ci && npx wrangler deploy`
+   - `bash cf/smoke.sh` against `https://karinto.toiroakr.workers.dev`
+   - `npx changeset tag` — creates `v<version>` and pushes it
+   - `changesets/action` then publishes a GitHub Release for that tag
+     using the new CHANGELOG section as the body.
 
 ### Required GitHub secrets
 

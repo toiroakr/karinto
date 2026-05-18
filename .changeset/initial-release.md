@@ -11,8 +11,8 @@ Initial release.
   form-encoded params, JSON body, or repo-mode dispatch.
 - OSV.dev integration for `known-vulnerable-actions` (opt-in via `osv=1`).
 - Curl-driven smoke check at `cf/smoke.sh` runnable as `npm run smoke`.
-- Changesets-managed release flow with `workflow_dispatch` cutting the
-  production deploy and a GitHub Release.
+- Changesets-managed Release PR flow that cuts the production deploy and
+  GitHub Release on merge.
 - Per-PR preview Workers (`karinto-pr-<N>.toiroakr.workers.dev`) auto-deployed
   and cleaned up.
 - Staging Worker (`karinto-staging.toiroakr.workers.dev`) auto-deployed on
