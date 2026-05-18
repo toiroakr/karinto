@@ -44,6 +44,7 @@ export default {
   async fetch(request, env, ctx) {
     const started = Date.now();
     try {
+      await enforceRateLimit(request, env, ctx);
       const params = await readParams(request);
       const result = await handle(params, env);
       const elapsed = Date.now() - started;
@@ -64,7 +65,200 @@ export default {
       return json({ ok: false, error: String(err?.message ?? err) }, status);
     }
   },
+
+  // Daily cron — refresh the GitHub Actions IP allow-list so per-IP rate
+  // limiting can exempt CI traffic. On fetch failure we leave whatever is
+  // already in KV; the request path falls back to a direct fetch if KV
+  // is empty (e.g. immediately after a fresh deploy).
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(refreshMetaCache(env));
+  },
 };
+
+// Two-tier rate limit:
+//   1. Global ceiling — applied to every request regardless of origin.
+//   2. Per-IP — applied only to traffic that is NOT a GitHub-hosted Actions
+//      runner. CI runners share egress IPs across unrelated tenants, so a
+//      per-IP cap there would create cross-user collateral. The global
+//      ceiling still protects daily Worker / OSV budgets.
+// Falls open if the rate-limit binding is missing (e.g. `wrangler dev`
+// without `--remote`) so local development doesn't require the feature.
+async function enforceRateLimit(request, env, ctx) {
+  if (env?.RATE_LIMITER_GLOBAL) {
+    const { success } = await env.RATE_LIMITER_GLOBAL.limit({ key: "global" });
+    if (!success) {
+      throw httpError("rate limit exceeded (global ceiling)", 429);
+    }
+  }
+  const ip = request.headers.get("cf-connecting-ip");
+  if (await isFromGitHubActions(ip, env, ctx)) return;
+  if (env?.RATE_LIMITER_IP) {
+    const key = ip || "unknown";
+    const { success } = await env.RATE_LIMITER_IP.limit({ key });
+    if (!success) {
+      throw httpError("rate limit exceeded", 429);
+    }
+  }
+}
+
+// --- GitHub Actions IP allow-list -------------------------------------------
+// Source: `api.github.com/meta`'s `.actions` field, refreshed by a daily
+// cron trigger into KV. The request path reads from KV (memoized for the
+// lifetime of the isolate) and falls back to a direct fetch on miss so a
+// fresh deploy keeps working before the first cron run.
+
+const META_URL = "https://api.github.com/meta";
+const META_KV_KEY = "actions_cidrs";
+const META_FETCH_TIMEOUT_MS = 5000;
+
+let _rangesPromise; // isolate-level memo; resets on isolate recycle.
+
+async function isFromGitHubActions(ip, env, ctx) {
+  if (!ip) return false;
+  try {
+    const ranges = await getActionsRanges(env, ctx);
+    return ipInRanges(ip, ranges);
+  } catch {
+    return false;
+  }
+}
+
+function getActionsRanges(env, ctx) {
+  if (!_rangesPromise) {
+    _rangesPromise = loadActionsRanges(env, ctx).catch((e) => {
+      _rangesPromise = undefined; // retry on the next request
+      throw e;
+    });
+  }
+  return _rangesPromise;
+}
+
+async function loadActionsRanges(env, ctx) {
+  if (env?.KV) {
+    const raw = await env.KV.get(META_KV_KEY);
+    if (raw) {
+      try {
+        return compileRanges(JSON.parse(raw)?.actions || []);
+      } catch {
+        // fall through to direct fetch
+      }
+    }
+  }
+  const meta = await fetchMeta();
+  if (meta && env?.KV && ctx) {
+    ctx.waitUntil(env.KV.put(META_KV_KEY, JSON.stringify(meta)));
+  }
+  return compileRanges(meta?.actions || []);
+}
+
+async function refreshMetaCache(env) {
+  const meta = await fetchMeta();
+  if (!meta) {
+    log("cron_meta_fetch_failed", {});
+    return;
+  }
+  if (env?.KV) {
+    await env.KV.put(META_KV_KEY, JSON.stringify(meta));
+  }
+  log("cron_meta_refreshed", { actions: (meta.actions || []).length });
+}
+
+async function fetchMeta() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), META_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(META_URL, {
+      headers: { "user-agent": "karinto-worker" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// --- CIDR matching ----------------------------------------------------------
+
+function compileRanges(cidrs) {
+  const v4 = [];
+  const v6 = [];
+  for (const cidr of cidrs) {
+    if (typeof cidr !== "string") continue;
+    const slash = cidr.indexOf("/");
+    if (slash < 0) continue;
+    const base = cidr.slice(0, slash);
+    const bits = Number(cidr.slice(slash + 1));
+    if (!Number.isFinite(bits) || bits < 0) continue;
+    if (base.includes(":")) {
+      const baseBig = ipv6ToBigInt(base);
+      if (baseBig !== null && bits <= 128) v6.push({ base: baseBig, bits });
+    } else {
+      const baseInt = ipv4ToInt(base);
+      if (baseInt !== null && bits <= 32) v4.push({ base: baseInt, bits });
+    }
+  }
+  return { v4, v6 };
+}
+
+function ipInRanges(ip, ranges) {
+  if (ip.includes(":")) {
+    const big = ipv6ToBigInt(ip);
+    if (big === null) return false;
+    for (const r of ranges.v6) {
+      if (r.bits === 0) return true;
+      const mask = ((1n << BigInt(r.bits)) - 1n) << BigInt(128 - r.bits);
+      if ((big & mask) === (r.base & mask)) return true;
+    }
+    return false;
+  }
+  const int = ipv4ToInt(ip);
+  if (int === null) return false;
+  for (const r of ranges.v4) {
+    if (r.bits === 0) return true;
+    const mask = r.bits === 32 ? 0xffffffff : ((0xffffffff << (32 - r.bits)) >>> 0);
+    if ((int & mask) === (r.base & mask)) return true;
+  }
+  return false;
+}
+
+function ipv4ToInt(ip) {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const v = Number(p);
+    if (v < 0 || v > 255) return null;
+    n = (n << 8) | v;
+  }
+  return n >>> 0;
+}
+
+function ipv6ToBigInt(ip) {
+  if (!ip.includes(":")) return null;
+  const dc = ip.split("::");
+  if (dc.length > 2) return null;
+  const head = dc[0] ? dc[0].split(":") : [];
+  const tail = dc.length === 2 ? (dc[1] ? dc[1].split(":") : []) : null;
+  let parts;
+  if (tail === null) {
+    parts = head;
+    if (parts.length !== 8) return null;
+  } else {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    parts = [...head, ...Array(fill).fill("0"), ...tail];
+  }
+  let n = 0n;
+  for (const p of parts) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(p)) return null;
+    n = (n << 16n) | BigInt(parseInt(p, 16));
+  }
+  return n;
+}
 
 function httpError(message, status) {
   const e = new Error(message);

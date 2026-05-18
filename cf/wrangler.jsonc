@@ -4,9 +4,50 @@
   "main": "index.js",
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Two-tier rate limit. Global ceiling caps overall load (incl. GitHub
+  // Actions runners — their egress IPs are detected via the /meta list
+  // refreshed daily by the cron trigger below). Per-IP limit kicks in for
+  // everyone else — tight enough to make curl-loop abuse pointless.
+  "unsafe": {
+    "bindings": [
+      {
+        "name": "RATE_LIMITER_GLOBAL",
+        "type": "ratelimit",
+        "namespace_id": "1001",
+        "simple": { "limit": 3000, "period": 60 }
+      },
+      {
+        "name": "RATE_LIMITER_IP",
+        "type": "ratelimit",
+        "namespace_id": "1002",
+        "simple": { "limit": 60, "period": 60 }
+      }
+    ]
+  },
+  // KV holds the cached `api.github.com/meta` payload. The cron trigger
+  // refreshes it daily; request path reads from KV (with a one-shot
+  // direct-fetch fallback for the cold-deploy case before the first cron).
+  //
+  // Create with: npx wrangler kv namespace create karinto-meta
+  // then paste the returned id below (and the preview id for `wrangler dev`).
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 2 * * *"]
+  },
   "env": {
     "staging": {
-      "name": "karinto-staging"
+      "name": "karinto-staging",
+      "kv_namespaces": [
+        {
+          "binding": "KV",
+          "id": "REPLACE_WITH_STAGING_KV_NAMESPACE_ID"
+        }
+      ]
     }
   }
 }
