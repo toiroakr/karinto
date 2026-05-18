@@ -20,9 +20,10 @@ origins lives in [`rules_catalog.mbt`](rules_catalog.mbt).
 
 ## API
 
-`GET` or `POST`. Parameters can come from the query string, the request
-body (raw `key=value&...`, JSON, or a plain YAML blob), or both — body
-values win on conflict.
+`GET` or `POST`. Parameters can come from the URL path
+(`/<owner>/<repo>/<commit>[/<target>]`), the query string, the request
+body (raw `key=value&...`, JSON, or a plain YAML blob), or any mix —
+body beats query, query beats path on conflict.
 
 | Key | Type | Notes |
 | --- | --- | --- |
@@ -30,6 +31,7 @@ values win on conflict.
 | `content` | string | The YAML source |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
+| `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Branch names and tags are rejected — pin to a commit. |
 | `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 
@@ -58,10 +60,16 @@ curl -G https://karinto.toiroakr.workers.dev \
      --data "type=workflow"
 ```
 
-`GET`/`POST` over a public repo:
+`GET`/`POST` over a public repo (single target via path):
 
 ```sh
-curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&targets=action.yml"
+curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"
+```
+
+Or with explicit query parameters and multiple targets:
+
+```sh
+curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11&targets=action.yml,.github/workflows/test.yml"
 ```
 
 ### Response
@@ -89,6 +97,7 @@ In `repo` mode the result is wrapped:
 {
   "ok": true,
   "repo": "actions/checkout",
+  "commit": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "targets": ["action.yml"],
   "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ]
 }

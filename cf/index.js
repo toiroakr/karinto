@@ -1,14 +1,16 @@
 // Cloudflare Workers entry point for karinto.
 //
-// Accepts GET or POST. Parameters can come from the URL query string,
-// the request body (raw `key=value&...`, JSON, or a YAML blob as the whole
-// body), or a mix of both.
+// Accepts GET or POST. Parameters can come from the URL path
+// (`/owner/repo/commit[/target]`), the URL query string, the request body
+// (raw `key=value&...`, JSON, or a YAML blob as the whole body), or a mix
+// of all three. Body > query > path on conflicts.
 //
 // Keys:
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
 //   - repo      "owner/name" — fetch files from a public GitHub repo
+//   - commit    commit SHA (7-64 hex chars); required whenever `repo` is set
 //   - targets   comma-separated literal paths (required with `repo`)
 //   - osv       "1" / "true" → query OSV.dev for known-vulnerable actions
 //               (adds ~50-300ms latency depending on action count)
@@ -42,6 +44,7 @@ export default {
         type: params.type || "(auto)",
         disable: params.disable || "",
         repo: params.repo || "",
+        commit: params.commit || "",
         targets: params.targets || "",
         content_lines: params.content ? params.content.split("\n").length : 0,
         files: result.files?.length ?? (params.content ? 1 : 0),
@@ -58,6 +61,7 @@ export default {
 async function readParams(request) {
   const url = new URL(request.url);
   const params = {};
+  Object.assign(params, parsePath(url.pathname));
   for (const [k, v] of url.searchParams) params[k] = v;
 
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -72,7 +76,32 @@ async function readParams(request) {
   return params;
 }
 
-const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv"]);
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, targets? }`.
+// Trailing segments past the commit form a single target path; multi-target
+// requests still need to come through the `targets=` query/body field.
+function parsePath(pathname) {
+  const segments = pathname.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
+  if (segments.length === 0) return {};
+  if (segments.length < 3) {
+    throw new Error(
+      `request path must be /<owner>/<repo>/<commit>[/<target>], got /${segments.join("/")}`,
+    );
+  }
+  const [owner, repo, commit, ...rest] = segments;
+  const out = { repo: `${owner}/${repo}`, commit };
+  if (rest.length > 0) out.targets = rest.join("/");
+  return out;
+}
+
+const KNOWN_KEYS = new Set([
+  "content",
+  "type",
+  "disable",
+  "repo",
+  "commit",
+  "targets",
+  "osv",
+]);
 
 function mergeBody(params, raw, ct) {
   if (ct.includes("application/json") || raw.trimStart().startsWith("{")) {
@@ -101,7 +130,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv)=/;
 
 async function handle(params, env) {
   const disable = params.disable || "";
@@ -124,6 +153,13 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw new Error(`invalid repo: ${repo}`);
   }
+  const commit = params.commit || "";
+  if (!commit) {
+    throw new Error("`commit` is required with `repo` (full or short commit SHA)");
+  }
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
+    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
+  }
   const targets = (params.targets || "")
     .split(",")
     .map((s) => s.trim())
@@ -134,7 +170,7 @@ async function handleRepo(params, disable, type, useOsv, worker) {
 
   const files = [];
   for (const path of targets.slice(0, 50)) {
-    const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
+    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${path}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
@@ -148,6 +184,7 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   return {
     ok: files.every((f) => f.ok !== false),
     repo,
+    commit,
     targets,
     files,
   };
