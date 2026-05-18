@@ -1,12 +1,76 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "karinto",
-  "main": "index.js",
-  "compatibility_date": "2026-05-01",
-  "compatibility_flags": ["nodejs_compat"],
-  "env": {
-    "staging": {
-      "name": "karinto-staging"
-    }
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "karinto",
+	"main": "index.js",
+	"compatibility_date": "2026-05-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// Per-IP rate limit. Skipped for GitHub-hosted Actions runners (their
+	// egress IPs are loaded from the /meta list cached in KV below), so a
+	// noisy CI tenant can't get unrelated CI traffic 429'd as collateral.
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "RATE_LIMITER_IP",
+				"type": "ratelimit",
+				"namespace_id": "1002",
+				"simple": {
+					"limit": 60,
+					"period": 60
+				}
+			}
+		]
+	},
+	// KV holds the cached `api.github.com/meta` payload. The cron trigger
+	// refreshes it daily; request path reads from KV (with a one-shot
+	// direct-fetch fallback for the cold-deploy case before the first cron).
+	// Shared by all envs — the data is the GitHub-published public IP list.
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+			"remote": true
+		}
+	],
+	"triggers": {
+		"crons": [
+			"0 2 * * *"
+		]
+	},
+	// Named envs do NOT inherit `kv_namespaces`, `unsafe`, or `triggers`
+	// from the top-level config, so we duplicate them here. KV id is shared
+	// because the /meta payload is GitHub-published and identical for every
+	// env; the rate-limit namespace_id is distinct so staging traffic can't
+	// burn the prod token bucket.
+	"env": {
+		"staging": {
+			"name": "karinto-staging",
+			"unsafe": {
+				"bindings": [
+					{
+						"name": "RATE_LIMITER_IP",
+						"type": "ratelimit",
+						"namespace_id": "1003",
+						"simple": {
+							"limit": 60,
+							"period": 60
+						}
+					}
+				]
+			},
+			"kv_namespaces": [
+				{
+					"binding": "KV",
+					"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+					"remote": true
+				}
+			],
+			"triggers": {
+				"crons": [
+					"0 2 * * *"
+				]
+			}
+		}
+	}
 }

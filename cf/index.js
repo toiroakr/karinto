@@ -30,10 +30,21 @@ function getWorker() {
   return _workerPromise;
 }
 
+// Reject obviously oversized payloads before they reach the linter. GitHub
+// workflow YAML files are well under 100 KB in practice; cap at 1 MiB to keep
+// `count_lines` / `walk_strings` / rule passes bounded.
+const MAX_BODY_BYTES = 1_048_576;
+// Defensive caps on user-controlled fan-out fields. `disable` patterns and
+// `targets` lists are otherwise unbounded inputs.
+const MAX_DISABLE_PATTERNS = 64;
+const MAX_DISABLE_PATTERN_LEN = 128;
+const MAX_TARGETS = 50;
+
 export default {
   async fetch(request, env, ctx) {
     const started = Date.now();
     try {
+      await enforceRateLimit(request, env, ctx);
       const params = await readParams(request);
       const result = await handle(params, env);
       const elapsed = Date.now() - started;
@@ -49,27 +60,272 @@ export default {
       });
       return json(result);
     } catch (err) {
-      log("error", { message: String(err?.message ?? err) });
-      return json({ ok: false, error: String(err?.message ?? err) }, 400);
+      const status = err?.status ?? 400;
+      log("error", { status, message: String(err?.message ?? err) });
+      return json({ ok: false, error: String(err?.message ?? err) }, status);
     }
   },
+
+  // Daily cron — refresh the GitHub Actions IP allow-list so per-IP rate
+  // limiting can exempt CI traffic. On fetch failure we leave whatever is
+  // already in KV; the request path falls back to a direct fetch if KV
+  // is empty (e.g. immediately after a fresh deploy).
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(refreshMetaCache(env));
+  },
 };
+
+// Per-IP rate limit. Traffic from GitHub-hosted Actions runners is exempt
+// because they share egress IPs across unrelated tenants — a noisy CI user
+// would otherwise 429 unrelated CI traffic as collateral. Falls open if
+// the binding is missing (e.g. `wrangler dev` without `--remote`).
+//
+// We always consult the limiter first so the hot path stays a single
+// Workers binding call. The (potentially slow) /meta lookup only runs
+// when the limiter says no — this keeps the DoS protection independent
+// of GitHub's availability even on a cold isolate.
+async function enforceRateLimit(request, env, ctx) {
+  if (!env?.RATE_LIMITER_IP) return;
+  const ip = request.headers.get("cf-connecting-ip");
+  const { success } = await env.RATE_LIMITER_IP.limit({ key: ip || "unknown" });
+  if (success) return;
+  if (await isFromGitHubActions(ip, env, ctx)) return;
+  throw httpError("rate limit exceeded", 429);
+}
+
+// --- GitHub Actions IP allow-list -------------------------------------------
+// Source: `api.github.com/meta`'s `.actions` field, refreshed by a daily
+// cron trigger into KV. The request path reads from KV (memoized for the
+// lifetime of the isolate) and falls back to a direct fetch on miss so a
+// fresh deploy keeps working before the first cron run.
+
+const META_URL = "https://api.github.com/meta";
+const META_KV_KEY = "actions_cidrs";
+const META_FETCH_TIMEOUT_MS = 5000;
+// Cap the in-isolate memo so the daily cron's KV write propagates to
+// long-lived isolates without waiting for recycle. 10 min is short enough
+// that runner CIDR churn (rare in practice) is bounded, long enough that
+// KV reads stay cheap.
+const RANGES_TTL_MS = 10 * 60 * 1000;
+
+let _rangesPromise; // isolate-level memo; reset by TTL or on isolate recycle.
+let _rangesExpiresAt = 0;
+
+async function isFromGitHubActions(ip, env, ctx) {
+  if (!ip) return false;
+  try {
+    const ranges = await getActionsRanges(env, ctx);
+    return ipInRanges(ip, ranges);
+  } catch {
+    return false;
+  }
+}
+
+function getActionsRanges(env, ctx) {
+  const now = Date.now();
+  if (!_rangesPromise || now >= _rangesExpiresAt) {
+    _rangesPromise = loadActionsRanges(env, ctx).catch((e) => {
+      _rangesPromise = undefined; // retry on the next request
+      _rangesExpiresAt = 0;
+      throw e;
+    });
+    _rangesExpiresAt = now + RANGES_TTL_MS;
+  }
+  return _rangesPromise;
+}
+
+async function loadActionsRanges(env, ctx) {
+  if (env?.KV) {
+    const raw = await env.KV.get(META_KV_KEY);
+    if (raw) {
+      try {
+        return compileRanges(JSON.parse(raw)?.actions || []);
+      } catch {
+        // fall through to direct fetch
+      }
+    }
+  }
+  const meta = await fetchMeta();
+  if (!meta) {
+    // Don't memoize an empty range set: a transient /meta outage during a
+    // cold deploy would otherwise strip the GitHub Actions exemption for
+    // 10 minutes. Throw so `getActionsRanges` clears the memo and the next
+    // request retries (in-flight requests share the same rejected promise,
+    // so this is bounded to one /meta call per fetchMeta-timeout window).
+    throw new Error("meta unavailable");
+  }
+  if (env?.KV && ctx) {
+    ctx.waitUntil(env.KV.put(META_KV_KEY, JSON.stringify(meta)));
+  }
+  return compileRanges(meta.actions || []);
+}
+
+async function refreshMetaCache(env) {
+  const meta = await fetchMeta();
+  if (!meta) {
+    log("cron_meta_fetch_failed", {});
+    return;
+  }
+  if (env?.KV) {
+    await env.KV.put(META_KV_KEY, JSON.stringify(meta));
+  }
+  log("cron_meta_refreshed", { actions: (meta.actions || []).length });
+}
+
+async function fetchMeta() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), META_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(META_URL, {
+      headers: { "user-agent": "karinto-worker" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// --- CIDR matching ----------------------------------------------------------
+
+function compileRanges(cidrs) {
+  const v4 = [];
+  const v6 = [];
+  for (const cidr of cidrs) {
+    if (typeof cidr !== "string") continue;
+    const slash = cidr.indexOf("/");
+    if (slash < 0) continue;
+    const base = cidr.slice(0, slash);
+    const bitsRaw = cidr.slice(slash + 1);
+    if (!/^\d+$/.test(bitsRaw)) continue;
+    const bits = Number(bitsRaw);
+    if (base.includes(":")) {
+      const baseBig = ipv6ToBigInt(base);
+      if (baseBig !== null && bits <= 128) v6.push({ base: baseBig, bits });
+    } else {
+      const baseInt = ipv4ToInt(base);
+      if (baseInt !== null && bits <= 32) v4.push({ base: baseInt, bits });
+    }
+  }
+  return { v4, v6 };
+}
+
+function ipInRanges(ip, ranges) {
+  if (ip.includes(":")) {
+    const big = ipv6ToBigInt(ip);
+    if (big === null) return false;
+    for (const r of ranges.v6) {
+      if (r.bits === 0) return true;
+      const mask = ((1n << BigInt(r.bits)) - 1n) << BigInt(128 - r.bits);
+      if ((big & mask) === (r.base & mask)) return true;
+    }
+    return false;
+  }
+  const int = ipv4ToInt(ip);
+  if (int === null) return false;
+  for (const r of ranges.v4) {
+    if (r.bits === 0) return true;
+    const mask = r.bits === 32 ? 0xffffffff : ((0xffffffff << (32 - r.bits)) >>> 0);
+    if ((int & mask) === (r.base & mask)) return true;
+  }
+  return false;
+}
+
+function ipv4ToInt(ip) {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const v = Number(p);
+    if (v < 0 || v > 255) return null;
+    n = (n << 8) | v;
+  }
+  return n >>> 0;
+}
+
+function ipv6ToBigInt(ip) {
+  if (!ip.includes(":")) return null;
+  const dc = ip.split("::");
+  if (dc.length > 2) return null;
+  const head = dc[0] ? dc[0].split(":") : [];
+  const tail = dc.length === 2 ? (dc[1] ? dc[1].split(":") : []) : null;
+  let parts;
+  if (tail === null) {
+    parts = head;
+    if (parts.length !== 8) return null;
+  } else {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    parts = [...head, ...Array(fill).fill("0"), ...tail];
+  }
+  let n = 0n;
+  for (const p of parts) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(p)) return null;
+    n = (n << 16n) | BigInt(parseInt(p, 16));
+  }
+  return n;
+}
+
+function httpError(message, status) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
 
 async function readParams(request) {
   const url = new URL(request.url);
   const params = {};
   for (const [k, v] of url.searchParams) params[k] = v;
 
+  const cl = Number(request.headers.get("content-length"));
+  if (Number.isFinite(cl) && cl > MAX_BODY_BYTES) {
+    throw httpError(`request body too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+  }
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     const ct = request.headers.get("content-type") || "";
-    const raw = await request.text();
+    const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, ct);
   } else if (request.method === "GET" && request.body) {
     // curl --data-urlencode + GET also sends a body.
-    const raw = await request.text();
+    const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
   return params;
+}
+
+// Stream the body and abort once `MAX_BODY_BYTES` is exceeded so a client
+// can't bypass the content-length check by omitting / lying about the header.
+async function readBoundedText(request) {
+  return readBoundedStream(request.body, "request body");
+}
+
+async function readBoundedResponse(response) {
+  return readBoundedStream(response.body, "response body");
+}
+
+async function readBoundedStream(body, label) {
+  if (!body) return "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw httpError(`${label} too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
 }
 
 const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv"]);
@@ -104,7 +360,7 @@ function mergeBody(params, raw, ct) {
 const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
 
 async function handle(params, env) {
-  const disable = params.disable || "";
+  const disable = sanitizeDisable(params.disable ?? "");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
@@ -115,32 +371,103 @@ async function handle(params, env) {
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
   }
+  if (params.content.length > MAX_BODY_BYTES) {
+    throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
+  }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
   return JSON.parse(worker.lint_string(params.content, type, disable, vuln));
 }
 
+// Reject overly long / numerous / multi-star `disable=` patterns. The matcher
+// itself is linear, but limiting each pattern to at most one `*` keeps the
+// API simple and rules out any future regression in the matcher.
+function sanitizeDisable(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`disable` must be a string", 400);
+  }
+  const pieces = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) return "";
+  if (pieces.length > MAX_DISABLE_PATTERNS) {
+    throw httpError(
+      `too many disable patterns (max ${MAX_DISABLE_PATTERNS})`,
+      400,
+    );
+  }
+  for (const p of pieces) {
+    if (p.length > MAX_DISABLE_PATTERN_LEN) {
+      throw httpError(
+        `disable pattern too long (max ${MAX_DISABLE_PATTERN_LEN} chars, got ${p.length}; starts: ${truncatePreview(p)})`,
+        400,
+      );
+    }
+    if (countChar(p, "*") > 1) {
+      throw httpError(
+        `disable pattern allows at most one '*' (got: ${truncatePreview(p)})`,
+        400,
+      );
+    }
+  }
+  return pieces.join(",");
+}
+
+function truncatePreview(s) {
+  const max = 32;
+  return s.length <= max ? s : s.slice(0, max) + "…";
+}
+
+function countChar(s, ch) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) if (s[i] === ch) n++;
+  return n;
+}
+
 async function handleRepo(params, disable, type, useOsv, worker) {
   const repo = params.repo;
-  if (!/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
-    throw new Error(`invalid repo: ${repo}`);
+  if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
+    throw httpError(`invalid repo: ${repo}`, 400);
   }
-  const targets = (params.targets || "")
+  const rawTargets = params.targets ?? "";
+  if (typeof rawTargets !== "string") {
+    throw httpError("`targets` must be a string", 400);
+  }
+  const targets = rawTargets
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   if (targets.length === 0) {
     throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
   }
+  if (targets.length > MAX_TARGETS) {
+    throw httpError(
+      `too many targets (max ${MAX_TARGETS}, got ${targets.length})`,
+      400,
+    );
+  }
 
   const files = [];
-  for (const path of targets.slice(0, 50)) {
+  for (const path of targets) {
     const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
       continue;
     }
-    const raw = await res.text();
+    const cl = Number(res.headers.get("content-length"));
+    if (Number.isFinite(cl) && cl > MAX_BODY_BYTES) {
+      files.push({ path, ok: false, error: `file too large (${cl} > ${MAX_BODY_BYTES} bytes)` });
+      continue;
+    }
+    let raw;
+    try {
+      raw = await readBoundedResponse(res);
+    } catch (e) {
+      files.push({ path, ok: false, error: String(e?.message ?? e) });
+      continue;
+    }
     const guessKind = type || guessKindFromPath(path);
     const vuln = useOsv ? await fetchVulnUses(raw, worker) : "";
     files.push({ path, ...JSON.parse(worker.lint_string(raw, guessKind, disable, vuln)) });

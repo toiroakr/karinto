@@ -30,9 +30,9 @@ values win on conflict.
 | --- | --- | --- |
 | `type` | `workflow` \| `action` \| *(omit)* | Optional; auto-detected when blank |
 | `content` | string | The YAML source |
-| `disable` | string | Comma-separated glob patterns of rule IDs to skip |
+| `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. |
+| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 
 ### Examples
