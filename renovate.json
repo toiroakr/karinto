@@ -8,11 +8,17 @@
   ],
   "labels": ["dependencies", "skip-changeset"],
   "timezone": "Asia/Tokyo",
-  "schedule": ["before 8am on monday"],
+  "schedule": ["before 8am"],
   "prHourlyLimit": 4,
   "rangeStrategy": "bump",
+  "minimumReleaseAge": "7 days",
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
   "lockFileMaintenance": {
     "enabled": true,
+    "automerge": true,
     "schedule": ["before 8am on the first day of the month"]
   },
   "packageRules": [
@@ -34,6 +40,7 @@
   ],
   "vulnerabilityAlerts": {
     "enabled": true,
+    "minimumReleaseAge": null,
     "labels": ["dependencies", "security", "skip-changeset"]
   }
 }
