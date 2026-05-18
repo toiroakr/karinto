@@ -10,6 +10,16 @@ set -euo pipefail
 URL="${1:-https://karinto.toiroakr.workers.dev}"
 printf 'smoke-testing %s\n' "$URL"
 
+# Newly deployed workers.dev hostnames can take a few seconds to propagate.
+for attempt in 1 2 3 4 5 6; do
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
+  if [ "$code" != "404" ] && [ "$code" != "000" ]; then
+    break
+  fi
+  printf '  waiting for %s (attempt %s, last code %s)\n' "$URL" "$attempt" "$code"
+  sleep 5
+done
+
 YAML='name: ci
 on: push
 permissions: write-all
