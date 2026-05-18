@@ -5,9 +5,11 @@
 Harden DoS/ReDoS surface:
 
 - Replace the recursive backtracking glob matcher behind the `disable=`
-  parameter with a linear-time two-pointer algorithm, so adversarial
-  patterns such as `*a*a*…*b` against long inputs can no longer cause
-  exponential CPU usage.
+  parameter with a two-pointer "last-star backtrack" algorithm, so
+  adversarial patterns such as `*a*a*…*b` against long inputs can no
+  longer cause exponential CPU usage. (The matcher is not strictly
+  linear — worst case is `O(m·n)` — but the `disable=` caps below keep
+  the bound small enough that DoS via this path is not feasible.)
 - Cloudflare Worker now enforces a 1 MiB cap on request bodies and on
   files fetched in `repo` mode. Oversized direct payloads short-circuit
   with `413 Payload Too Large` before reaching the parser / rules.

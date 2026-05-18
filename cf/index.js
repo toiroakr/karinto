@@ -195,8 +195,9 @@ function compileRanges(cidrs) {
     const slash = cidr.indexOf("/");
     if (slash < 0) continue;
     const base = cidr.slice(0, slash);
-    const bits = Number(cidr.slice(slash + 1));
-    if (!Number.isFinite(bits) || bits < 0) continue;
+    const bitsRaw = cidr.slice(slash + 1);
+    if (!/^\d+$/.test(bitsRaw)) continue;
+    const bits = Number(bitsRaw);
     if (base.includes(":")) {
       const baseBig = ipv6ToBigInt(base);
       if (baseBig !== null && bits <= 128) v6.push({ base: baseBig, bits });
@@ -355,7 +356,7 @@ function mergeBody(params, raw, ct) {
 const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv)=/;
 
 async function handle(params, env) {
-  const disable = sanitizeDisable(params.disable || "");
+  const disable = sanitizeDisable(params.disable ?? "");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();

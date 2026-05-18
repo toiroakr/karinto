@@ -258,9 +258,12 @@ fn is_disabled(rule_id : String, disabled : Array[String]) -> Bool {
 }
 
 ///|
-/// Glob match with `*` (any run) and `?` (single char). Linear-time
-/// two-pointer algorithm so untrusted `disable=` patterns can't trigger
-/// exponential backtracking (e.g. `*a*a*…*b` against `aaaa…`).
+/// Glob match with `*` (any run) and `?` (single char). Two-pointer with
+/// last-star backtrack — eliminates exponential blowup (e.g. `*a*a*…*b`
+/// vs `aaaa…`); worst case is O(m·n) when the post-`*` suffix has to be
+/// rescanned at each text position (`*aaab` vs `aaaa…`). The Worker caps
+/// `disable=` patterns at 128 chars / 64 entries so the bound is small
+/// enough that DoS via this path is not feasible.
 fn glob_match(pat : String, s : String) -> Bool {
   let p = pat.to_array()
   let t = s.to_array()
