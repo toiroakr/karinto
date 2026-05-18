@@ -23,7 +23,12 @@ jobs:
         run: moon test
 
   changeset-check:
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
+    # Skip on the auto-generated "Version Packages" PR from changesets/action,
+    # which removes (rather than adds) .changeset/*.md files.
+    if: >-
+      github.event_name == 'pull_request'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
+      && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
