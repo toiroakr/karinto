@@ -6,7 +6,7 @@
 .                             # MoonBit library package — the lint engine
 ├── karinto.mbt               # public API: types, lint(), helpers
 ├── rules.mbt                 # rule registry + implemented rules
-├── rules_catalog.mbt         # full catalogue (84 rules, metadata + origins)
+├── rules_catalog.mbt         # full catalogue (82 rules, metadata + origins)
 ├── karinto_test.mbt          # blackbox tests for implemented rules + engine
 ├── actionlint_rules_test.mbt # fixtures for actionlint-derived rules
 ├── zizmor_rules_test.mbt     # fixtures for zizmor audits
@@ -80,10 +80,12 @@ entry carries an ID, human-readable title, source family (actionlint /
 zizmor / ghalint), upstream origins, category, severity, priority,
 implementation status, and which file kinds it applies to.
 
-Of 84 catalogued rules, 62 are implemented; 22 are scaffolded as
+Of 82 catalogued rules, 61 are implemented; 17 are scaffolded as
 `#skip(...)`-attributed test cases in the per-source `*_rules_test.mbt`
-files. Each skipped entry ships fixture YAML and expected JSON so the
-behavioural spec is in place, ready to be filled in.
+files (each ships fixture YAML and expected JSON so the behavioural spec
+is in place, ready to be filled in); 4 are marked `NotPlanned` —
+deliberately out of scope and carry no fixture. The full per-rule
+rationale lives in [`rules_catalog.md`](rules_catalog.md).
 
 Five consolidations merge overlapping upstream checks into one karinto
 rule. The `origins` field on every catalog entry preserves the lineage:

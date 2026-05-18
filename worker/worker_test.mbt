@@ -33,8 +33,14 @@ test "osv_match: introduced/fixed range" {
     @worker.osv_match("tj-actions/changed-files@v35", advisories),
     content="tj-actions/changed-files@v35",
   )
-  inspect(@worker.osv_match("tj-actions/changed-files@v41", advisories), content="")
-  inspect(@worker.osv_match("tj-actions/changed-files@v100", advisories), content="")
+  inspect(
+    @worker.osv_match("tj-actions/changed-files@v41", advisories),
+    content="",
+  )
+  inspect(
+    @worker.osv_match("tj-actions/changed-files@v100", advisories),
+    content="",
+  )
 }
 
 ///|
@@ -48,9 +54,14 @@ test "osv_match: multi-range with semver fixed boundary" {
     @worker.osv_match("tj-actions/changed-files@v45", advisories),
     content="tj-actions/changed-files@v45",
   )
-  inspect(@worker.osv_match("tj-actions/changed-files@v46.0.1", advisories), content="")
-  inspect(@worker.osv_match("tj-actions/changed-files@v46.0.0", advisories),
-    content="tj-actions/changed-files@v46.0.0")
+  inspect(
+    @worker.osv_match("tj-actions/changed-files@v46.0.1", advisories),
+    content="",
+  )
+  inspect(
+    @worker.osv_match("tj-actions/changed-files@v46.0.0", advisories),
+    content="tj-actions/changed-files@v46.0.0",
+  )
 }
 
 ///|
@@ -59,8 +70,7 @@ test "osv_match: SHA-pinned ref matches conservatively" {
     #|{"tj-actions/changed-files":[{"events":[{"introduced":"0"},{"fixed":"41"}]}]}
   inspect(
     @worker.osv_match(
-      "tj-actions/changed-files@aabbccddeeff00112233445566778899aabbccdd",
-      advisories,
+      "tj-actions/changed-files@aabbccddeeff00112233445566778899aabbccdd", advisories,
     ),
     content="tj-actions/changed-files@aabbccddeeff00112233445566778899aabbccdd",
   )
@@ -103,7 +113,13 @@ test "osv_match: last_affected boundary (inclusive)" {
   let advisories =
     #|{"foo/bar":[{"events":[{"introduced":"1.0.0"},{"last_affected":"2.0.0"}]}]}
   inspect(@worker.osv_match("foo/bar@v0.9", advisories), content="")
-  inspect(@worker.osv_match("foo/bar@v1.0.0", advisories), content="foo/bar@v1.0.0")
-  inspect(@worker.osv_match("foo/bar@v2.0.0", advisories), content="foo/bar@v2.0.0")
+  inspect(
+    @worker.osv_match("foo/bar@v1.0.0", advisories),
+    content="foo/bar@v1.0.0",
+  )
+  inspect(
+    @worker.osv_match("foo/bar@v2.0.0", advisories),
+    content="foo/bar@v2.0.0",
+  )
   inspect(@worker.osv_match("foo/bar@v2.0.1", advisories), content="")
 }
