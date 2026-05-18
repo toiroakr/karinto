@@ -1,5 +1,5 @@
 ---
-"karinto": patch
+"karinto": minor
 ---
 
 Catalog overhaul:

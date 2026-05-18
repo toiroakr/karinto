@@ -87,6 +87,29 @@ test "coverage: every implemented rule appears in the catalogue" {
 }
 
 ///|
+test "coverage: every all_rules() entry is catalogued as Implemented" {
+  // Guard against the "in scope" filter in the fixture-coverage test silently
+  // dropping a rule that is actually wired into the engine. If a runtime rule
+  // is misclassified as Planned or NotPlanned in the catalogue, this fails.
+  let misclassified : Array[String] = []
+  for r in @karinto.all_rules() {
+    let mut status_ok = false
+    for s in @karinto.all_rule_specs() {
+      if s.id == r.id {
+        if s.status == Implemented {
+          status_ok = true
+        }
+        break
+      }
+    }
+    if !status_ok {
+      misclassified.push(r.id)
+    }
+  }
+  json_inspect(misclassified, content=[])
+}
+
+///|
 test "coverage: every spec records at least one upstream origin" {
   let missing : Array[String] = []
   for s in @karinto.all_rule_specs() {

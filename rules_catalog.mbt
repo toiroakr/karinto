@@ -1,9 +1,14 @@
 ///|
-/// Catalogue of every rule karinto is aware of — implemented or planned.
+/// Catalogue of every rule karinto is aware of, with one of three statuses:
+/// `Implemented`, `Planned`, or `NotPlanned` (deliberately out of scope).
 ///
-/// This is the single source of truth for rule metadata. Tests assert that
-/// every entry here has a corresponding fixture, and the JSON returned by
-/// `lint(...)` only emits rule IDs that appear here.
+/// This is the single source of truth for rule **metadata**. The runtime
+/// rule registry that actually drives lint execution lives in `rules.mbt`
+/// as `all_rules()`; editing this catalogue does not by itself add or
+/// remove engine behaviour. Tests (`coverage_test.mbt`) assert that:
+///   - every `Implemented` or `Planned` entry has a fixture test,
+///   - every entry in `all_rules()` is catalogued as `Implemented`,
+///   - JSON returned by `lint(...)` only emits rule IDs that appear here.
 ///
 /// `origins` records the upstream provenance verbatim. When two upstreams
 /// cover the same ground (e.g. zizmor's `unpinned-uses` and ghalint's

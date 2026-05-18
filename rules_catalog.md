@@ -1,9 +1,11 @@
 # karinto Rules Catalog
 
 Human-readable mirror of [`rules_catalog.mbt`](rules_catalog.mbt) — the
-source of truth used by the engine and `coverage_test.mbt`. Keep both files
-in sync; see [`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the
-update rule.
+source of truth for rule **metadata** (status, severity, upstream origins),
+enforced by `coverage_test.mbt`. The runtime rule registry that drives
+lint execution lives in `rules.mbt` (`all_rules()`); editing the catalogue
+does not by itself change engine behaviour. Keep both files in sync; see
+[`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the update rule.
 
 82 catalogued rules: **61 implemented**, **17 planned**, **4 not planned**,
 plus **5 upstream checks consolidated** into existing karinto rules (see
@@ -133,8 +135,9 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 
 ## ghalint family
 
-`ghl-004`, `ghl-007`, and `ghl-008` are intentionally absent — they are
-absorbed into the consolidated zizmor entries above.
+`ghl-004`, `ghl-007`, and `ghl-008` have no standalone rule spec in
+`rules_catalog.mbt` — they are absorbed into the consolidated zizmor
+entries above and surface here only as `_absorbed_` rows for lineage.
 
 | ID | Origin | Severity | Status | Notes |
 | --- | --- | --- | --- | --- |

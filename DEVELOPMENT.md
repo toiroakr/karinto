@@ -6,7 +6,7 @@
 .                             # MoonBit library package — the lint engine
 ├── karinto.mbt               # public API: types, lint(), helpers
 ├── rules.mbt                 # rule registry + implemented rules
-├── rules_catalog.mbt         # full catalogue (84 rules, metadata + origins)
+├── rules_catalog.mbt         # full catalogue (82 rules, metadata + origins)
 ├── karinto_test.mbt          # blackbox tests for implemented rules + engine
 ├── actionlint_rules_test.mbt # fixtures for actionlint-derived rules
 ├── zizmor_rules_test.mbt     # fixtures for zizmor audits

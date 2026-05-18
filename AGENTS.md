@@ -52,10 +52,13 @@ You can browse and install extra skills here:
 
 ## Rule catalog discipline
 
-[`rules_catalog.mbt`](rules_catalog.mbt) is the source of truth used by the
-engine and `coverage_test.mbt`. [`rules_catalog.md`](rules_catalog.md) is a
-human-readable mirror with upstream doc links and per-rule status / merge
-rationale notes.
+[`rules_catalog.mbt`](rules_catalog.mbt) is the source of truth for rule
+**metadata** (status, severity, upstream origins) and is enforced by
+`coverage_test.mbt`. The runtime rule registry that drives lint execution
+lives in `rules.mbt` as `all_rules()`; the catalogue does not directly
+control engine behaviour. [`rules_catalog.md`](rules_catalog.md) is a
+human-readable mirror of the catalogue with upstream doc links and
+per-rule status / merge rationale notes.
 
 When you change `rules_catalog.mbt` (adding a rule, flipping `Planned` ↔
 `Implemented`, adjusting severity, recording a new consolidation), update
