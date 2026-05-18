@@ -5,18 +5,21 @@ source of truth used by the engine and `coverage_test.mbt`. Keep both files
 in sync; see [`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the
 update rule.
 
-84 catalogued rules: **62 implemented**, **22 planned**, plus **5 upstream
-checks consolidated** into existing karinto rules (see below).
+84 catalogued rules: **62 implemented**, **18 planned**, **4 not planned**,
+plus **5 upstream checks consolidated** into existing karinto rules (see
+below).
 
 ## Status legend
 
 - **Implemented** — rule logic lives in [`rules.mbt`](rules.mbt); fixtures
   are active in the per-source `*_rules_test.mbt`.
 - **Planned** — scaffolded as `#skip("not implemented yet")` test cases with
-  fixture YAML and expected JSON; implementation pending. No rule is yet
-  classified as "decided not to implement" — the closest equivalent is the
-  five upstream checks that were absorbed into other karinto rules instead
-  of getting their own entry (see [Consolidations](#consolidations)).
+  fixture YAML and expected JSON; implementation pending.
+- **Not planned** — deliberately out of scope (runtime constraint, or
+  already covered by another karinto rule). No fixture is kept.
+- **Consolidated** — the upstream check is fully covered by another karinto
+  rule (see [Consolidations](#consolidations)). Not a status of its own;
+  these upstreams have no standalone catalogue entry.
 
 ## Upstream documentation roots
 
@@ -60,8 +63,8 @@ the diagnostic provenance is never lost.
 | `expression-matrix-type` | [`actionlint:matrix-type`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Planned | Requires matrix expansion model; fixtures in place. |
 | `expression-needs-type` | [`actionlint:needs-type`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Planned | Requires job dependency graph typing; fixtures in place. |
 | `meaningless-comparison` | [`actionlint:meaningless-comparison`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Implemented | |
-| `shellcheck` | [`actionlint:shellcheck-on-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Planned | Requires bundling/calling shellcheck — out of scope for the Worker runtime today. |
-| `pyflakes` | [`actionlint:pyflakes-on-python-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Planned | Requires bundling/calling pyflakes — same Worker-runtime caveat as `shellcheck`. |
+| `shellcheck` | [`actionlint:shellcheck-on-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Not planned | Cloudflare Workers cannot ship native `shellcheck` binaries; no in-pure-JS substitute that matches actionlint coverage. |
+| `pyflakes` | [`actionlint:pyflakes-on-python-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Not planned | Same Worker-runtime constraint as `shellcheck`. |
 | `job-needs-graph` | [`actionlint:job-needs-graph`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
 | `matrix-values` | [`actionlint:matrix-values`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Planned | Fixtures in place; expansion model TBD. |
 | `webhook-events` | [`actionlint:webhook-events`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
@@ -101,7 +104,7 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `dependabot-cooldown` | [`zizmor:dependabot-cooldown`](https://docs.zizmor.sh/audits/#dependabot-cooldown) | info | Implemented | Applies to `dependabot.yml` only — neither workflow nor action. |
 | `dependabot-execution` | [`zizmor:dependabot-execution`](https://docs.zizmor.sh/audits/#dependabot-execution) | error | Planned | Fixtures in place. |
 | `excessive-permissions` | [`zizmor:excessive-permissions`](https://docs.zizmor.sh/audits/#excessive-permissions) | warning | Implemented | |
-| `forbidden-uses` | [`zizmor:forbidden-uses`](https://docs.zizmor.sh/audits/#forbidden-uses) | warning | Planned | Requires user-supplied allow/denylist config; not exposed by karinto's stateless API yet. |
+| `forbidden-uses` | [`zizmor:forbidden-uses`](https://docs.zizmor.sh/audits/#forbidden-uses) | warning | Planned | Natural fit for karinto: thread a per-request allow/denylist (e.g. `?forbidden=org/*,bad-action/*`) through the stateless API — no server-side config store needed. |
 | `github-app` | [`zizmor:github-app`](https://docs.zizmor.sh/audits/#github-app) | warning | Planned | Detection heuristics still being refined; fixtures in place. |
 | `github-env` | [`zizmor:github-env`](https://docs.zizmor.sh/audits/#github-env) | error | Implemented | |
 | `hardcoded-container-credentials` | [`zizmor:hardcoded-container-credentials`](https://docs.zizmor.sh/audits/#hardcoded-container-credentials) + `actionlint:hardcoded-credentials` | error | Implemented | **Consolidated** — absorbs the matching actionlint check. |
@@ -111,12 +114,12 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `misfeature` | [`zizmor:misfeature`](https://docs.zizmor.sh/audits/#misfeature) | info | Implemented | |
 | `obfuscation` | [`zizmor:obfuscation`](https://docs.zizmor.sh/audits/#obfuscation) | warning | Implemented | |
 | `overprovisioned-secrets` | [`zizmor:overprovisioned-secrets`](https://docs.zizmor.sh/audits/#overprovisioned-secrets) | warning | Implemented | |
-| `ref-confusion` | [`zizmor:ref-confusion`](https://docs.zizmor.sh/audits/#ref-confusion) | warning | Planned | Requires GitHub API ref enumeration; fixtures in place. |
+| `ref-confusion` | [`zizmor:ref-confusion`](https://docs.zizmor.sh/audits/#ref-confusion) | warning | Not planned | The hazard (a `uses:` ref that could mean a tag or a branch) cannot arise in workflows that already comply with karinto's `unpinned-uses` SHA-pin requirement. |
 | `ref-version-mismatch` | [`zizmor:ref-version-mismatch`](https://docs.zizmor.sh/audits/#ref-version-mismatch) | warning | Planned | Requires GitHub API to resolve tag → SHA; fixtures in place. |
 | `secrets-inherit` | [`zizmor:secrets-inherit`](https://docs.zizmor.sh/audits/#secrets-inherit) + [`ghalint:ghl-004`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/004.md) | error | Implemented | **Consolidated** — absorbs ghalint `deny_inherit_secrets`. |
 | `secrets-outside-env` | [`zizmor:secrets-outside-env`](https://docs.zizmor.sh/audits/#secrets-outside-env) | warning | Implemented | |
 | `self-hosted-runner` | [`zizmor:self-hosted-runner`](https://docs.zizmor.sh/audits/#self-hosted-runner) | warning | Implemented | |
-| `stale-action-refs` | [`zizmor:stale-action-refs`](https://docs.zizmor.sh/audits/#stale-action-refs) | info | Planned | Requires GitHub API to enumerate tags for a SHA; fixtures in place. |
+| `stale-action-refs` | [`zizmor:stale-action-refs`](https://docs.zizmor.sh/audits/#stale-action-refs) | info | Not planned | Would require a GitHub API call to enumerate tags reachable from a SHA. The signal is only informational (severity `info`); the API/latency/rate-limit cost is not worth it. |
 | `superfluous-actions` | [`zizmor:superfluous-actions`](https://docs.zizmor.sh/audits/#superfluous-actions) | info | Implemented | |
 | `template-injection` | [`zizmor:template-injection`](https://docs.zizmor.sh/audits/#template-injection) + `actionlint:script-injection` | error | Implemented | **Consolidated** — absorbs the matching actionlint taint check. |
 | `undocumented-permissions` | [`zizmor:undocumented-permissions`](https://docs.zizmor.sh/audits/#undocumented-permissions) | info | Planned | Stylistic; fixtures in place. |

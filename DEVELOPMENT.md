@@ -80,10 +80,12 @@ entry carries an ID, human-readable title, source family (actionlint /
 zizmor / ghalint), upstream origins, category, severity, priority,
 implementation status, and which file kinds it applies to.
 
-Of 84 catalogued rules, 62 are implemented; 22 are scaffolded as
+Of 84 catalogued rules, 62 are implemented; 18 are scaffolded as
 `#skip(...)`-attributed test cases in the per-source `*_rules_test.mbt`
-files. Each skipped entry ships fixture YAML and expected JSON so the
-behavioural spec is in place, ready to be filled in.
+files (each ships fixture YAML and expected JSON so the behavioural spec
+is in place, ready to be filled in); 4 are marked `NotPlanned` —
+deliberately out of scope and carry no fixture. The full per-rule
+rationale lives in [`rules_catalog.md`](rules_catalog.md).
 
 Five consolidations merge overlapping upstream checks into one karinto
 rule. The `origins` field on every catalog entry preserves the lineage:

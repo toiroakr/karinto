@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "toiroakr/curllint"
+package "toiroakr/karinto"
 
 import {
   "moonbit-community/yaml",
@@ -7,13 +7,30 @@ import {
 }
 
 // Values
+pub fn all_rule_specs() -> Array[RuleSpec]
+
 pub fn all_rules() -> Array[Rule]
 
-pub fn lint(String, kind? : FileKind, disabled? : Array[String]) -> LintResult
+pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String]) -> LintResult
+
+pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind) -> WalkCtx
+
+pub fn rule_spec(String) -> RuleSpec
 
 // Errors
 
 // Types and methods
+pub(all) enum Category {
+  Syntax
+  Expression
+  Security
+  SupplyChain
+  Performance
+  BestPractice
+  Config
+  External
+} derive(Eq, @debug.Debug)
+
 pub(all) struct Diagnostic {
   rule : String
   severity : Severity
@@ -29,6 +46,16 @@ pub(all) enum FileKind {
 } derive(Eq, @debug.Debug)
 pub impl ToJson for FileKind
 
+pub(all) struct JobInfo {
+  name : String
+  raw : Map[String, @yaml.Yaml]
+  if_cond : String?
+  uses : String?
+  has_permissions : Bool
+  has_timeout : Bool
+  steps : Array[StepInfo]
+}
+
 pub(all) struct LintResult {
   kind : FileKind
   stats : Stats
@@ -42,12 +69,33 @@ pub(all) struct Position {
   col : Int
 } derive(Eq, ToJson, @debug.Debug)
 
+pub(all) enum Priority {
+  High
+  Medium
+  Low
+} derive(Eq, @debug.Debug)
+
 pub(all) struct Rule {
   id : String
   title : String
   applies : (FileKind) -> Bool
-  check : (@yaml.Yaml, Array[Diagnostic]) -> Unit
+  on_doc : ((WalkCtx, Array[Diagnostic]) -> Unit)?
+  on_job : ((WalkCtx, JobInfo, Array[Diagnostic]) -> Unit)?
+  on_step : ((WalkCtx, StepInfo, Array[Diagnostic]) -> Unit)?
 }
+
+pub(all) struct RuleSpec {
+  id : String
+  title : String
+  source : Source
+  origins : Array[String]
+  category : Category
+  default_severity : Severity
+  priority : Priority
+  status : Status
+  applies_to_workflow : Bool
+  applies_to_action : Bool
+} derive(Eq, @debug.Debug)
 
 pub(all) enum Severity {
   Error
@@ -56,11 +104,53 @@ pub(all) enum Severity {
 } derive(Eq, @debug.Debug)
 pub impl ToJson for Severity
 
+pub(all) enum Source {
+  Actionlint
+  Zizmor
+  Ghalint
+  Curllint
+} derive(Eq, @debug.Debug)
+
 pub(all) struct Stats {
   jobs : Int
   steps : Int
   lines : Int
 } derive(Eq, ToJson, @debug.Debug)
+
+pub(all) enum Status {
+  Implemented
+  Planned
+  NotPlanned
+} derive(Eq, @debug.Debug)
+
+pub(all) struct StepInfo {
+  raw : Map[String, @yaml.Yaml]
+  uses : String?
+  run : String?
+  if_cond : String?
+  with_ : Map[String, @yaml.Yaml]?
+  is_actions_checkout : Bool
+  is_upload_artifact : Bool
+  is_pypi_publish : Bool
+  is_local_or_docker : Bool
+  has_persist_creds_false : Bool
+  has_shell : Bool
+  at_idx : Int
+  has_full_sha : Bool
+}
+
+pub(all) struct WalkCtx {
+  doc : @yaml.Yaml
+  workflow_map : Map[String, @yaml.Yaml]?
+  workflow_has_permissions : Bool
+  jobs : Array[JobInfo]
+  workflow_steps : Array[StepInfo]
+  action_steps : Array[StepInfo]
+  action_is_composite : Bool
+  updates : Array[Map[String, @yaml.Yaml]]
+  vuln_uses : Array[String]
+  kind : FileKind
+}
 
 // Type aliases
 
