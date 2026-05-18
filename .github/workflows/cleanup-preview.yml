@@ -13,9 +13,9 @@ jobs:
     env:
       WORKER_NAME: karinto-pr-${{ github.event.pull_request.number }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -25,14 +25,32 @@ jobs:
         run: npm ci
 
       - name: Delete preview Worker
+        id: delete
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: cf
-        run: npx wrangler delete --name "$WORKER_NAME"
+        # The auto-generated changeset-release/main PR is created via
+        # GITHUB_TOKEN, which never triggers workflows — so no preview Worker
+        # was ever deployed for it. Treat "Worker does not exist" (code 10007)
+        # as a no-op rather than a job failure.
+        run: |
+          if out=$(npx wrangler delete --name "$WORKER_NAME" 2>&1); then
+            printf '%s\n' "$out"
+            echo "deleted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$out"
+          if printf '%s' "$out" | grep -q 'code: 10007'; then
+            echo "Worker $WORKER_NAME does not exist; nothing to clean up."
+            echo "deleted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit 1
 
       - name: Mark preview comment as cleaned up
-        uses: marocchino/sticky-pull-request-comment@v2
+        if: steps.delete.outputs.deleted == 'true'
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: preview-worker
           message: |

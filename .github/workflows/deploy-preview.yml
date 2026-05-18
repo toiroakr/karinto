@@ -21,7 +21,7 @@ jobs:
       WORKER_NAME: karinto-pr-${{ github.event.pull_request.number }}
       WORKER_URL: https://karinto-pr-${{ github.event.pull_request.number }}.toiroakr.workers.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install moon
         run: |
@@ -33,7 +33,7 @@ jobs:
       - name: Build JS bundle
         run: moon build --target js --release
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Deploy preview Worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -55,7 +55,7 @@ jobs:
         run: bash smoke.sh "$WORKER_URL"
 
       - name: Comment preview URL
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: preview-worker
           message: |

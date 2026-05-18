@@ -163,3 +163,35 @@ action keeps a "chore: release" PR open that previews the next version.
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
+
+### Required repository settings
+
+| Setting | Where | Why |
+| --- | --- | --- |
+| Workflow permissions: **Read and write**, **Allow GitHub Actions to create and approve pull requests** | Settings → Actions → General | So `changesets/action` can push to `changeset-release/main` and open the "chore: release" PR. |
+
+## Dependency updates
+
+[Renovate](https://docs.renovatebot.com/) handles dependency PRs (config in
+`renovate.json`). The bot runs **daily** (before 8am JST):
+
+- GitHub Actions are grouped into a single PR.
+- npm minor + patch updates are grouped; majors get a separate PR.
+- `lockFileMaintenance` refreshes `package-lock.json` on the 1st of each month.
+- All Renovate PRs are auto-labelled `dependencies` + `skip-changeset` (so
+  they bypass the changeset CI gate — dependency bumps don't ship as a
+  user-visible release).
+- `minimumReleaseAge: 7 days` — Renovate waits a week after a version is
+  published before opening a PR, to dodge insta-broken releases. Security
+  advisories (`vulnerabilityAlerts`) bypass this delay.
+- **Auto-merge** is enabled on every Renovate PR (squash). Once all checks
+  pass (`moon-test`, `deploy`, `changeset-check` skipped), GitHub
+  auto-merges the PR. The branch is auto-deleted after merge.
+
+Enable Renovate by installing the [GitHub App](https://github.com/apps/renovate)
+on the repo. The bot's first run will open a "Configure Renovate" PR — merge
+it to activate the schedule.
+
+> Repo settings already configured: `allow_auto_merge: true`,
+> `delete_branch_on_merge: true`, and Actions are allowed to create + approve
+> PRs (needed for `changesets/action`).
