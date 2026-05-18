@@ -1,0 +1,49 @@
+name: deploy-staging
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - run: moon update
+
+      - run: moon test
+
+      - name: Build JS bundle
+        run: moon build --target js --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cf/package-lock.json
+
+      - name: Install cf deps
+        working-directory: cf
+        run: npm ci
+
+      - name: Deploy staging Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cf
+          command: deploy --env staging
+
+      - name: Smoke check
+        working-directory: cf
+        run: bash smoke.sh https://karinto-staging.toiroakr.workers.dev

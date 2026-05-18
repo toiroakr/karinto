@@ -1,0 +1,204 @@
+///|
+/// Catalogue of every rule karinto is aware of — implemented or planned.
+///
+/// This is the single source of truth for rule metadata. Tests assert that
+/// every entry here has a corresponding fixture, and the JSON returned by
+/// `lint(...)` only emits rule IDs that appear here.
+///
+/// `origins` records the upstream provenance verbatim. When two upstreams
+/// cover the same ground (e.g. zizmor's `unpinned-uses` and ghalint's
+/// `ghl-008`), karinto merges them into a single rule and lists every
+/// origin in this array, so the lineage is never lost.
+
+///|
+pub(all) enum Source {
+  Actionlint
+  Zizmor
+  Ghalint
+  Curllint
+} derive(Eq, Debug)
+
+///|
+pub(all) enum Category {
+  Syntax
+  Expression
+  Security
+  SupplyChain
+  Performance
+  BestPractice
+  Config
+  External
+} derive(Eq, Debug)
+
+///|
+pub(all) enum Priority {
+  High
+  Medium
+  Low
+} derive(Eq, Debug)
+
+///|
+pub(all) enum Status {
+  Implemented
+  Planned
+} derive(Eq, Debug)
+
+///|
+pub(all) struct RuleSpec {
+  id : String
+  title : String
+  source : Source
+  origins : Array[String]
+  category : Category
+  default_severity : Severity
+  priority : Priority
+  status : Status
+  applies_to_workflow : Bool
+  applies_to_action : Bool
+} derive(Eq, Debug)
+
+///|
+/// The full catalogue: 82 rules spanning actionlint (36), zizmor (36) and
+/// ghalint (10), with 5 deliberate consolidations recorded in `origins`.
+pub fn all_rule_specs() -> Array[RuleSpec] {
+  [
+    // -----------------------------------------------------------------------
+    // actionlint family — syntax, expression typing, generic checks.
+    // -----------------------------------------------------------------------
+    spec("unexpected-keys", "Unexpected keys", Actionlint, ["actionlint:unexpected-keys"], Syntax, Error, Medium, Implemented, true, true),
+    spec("missing-required-keys", "Missing required keys", Actionlint, ["actionlint:missing-required-keys"], Syntax, Error, High, Implemented, true, true),
+    spec("empty-mappings", "Empty mappings", Actionlint, ["actionlint:empty-mappings"], Syntax, Warning, Medium, Implemented, true, true),
+    spec("invalid-mapping-values", "Invalid mapping value types", Actionlint, ["actionlint:invalid-mapping-values"], Syntax, Error, Medium, Implemented, true, true),
+    spec("expression-syntax", "Expression syntax error", Actionlint, ["actionlint:expression-syntax"], Expression, Error, High, Implemented, true, true),
+    spec("expression-type-mismatch", "Expression type mismatch", Actionlint, ["actionlint:expression-type-mismatch"], Expression, Error, High, Planned, true, true),
+    spec("unknown-context-or-function", "Unknown context/function name or bad arity", Actionlint, ["actionlint:unknown-context-or-function"], Expression, Error, High, Implemented, true, true),
+    spec("context-availability", "Context/function used where it is not available", Actionlint, ["actionlint:context-availability"], Expression, Error, High, Implemented, true, true),
+    spec("expression-steps-type", "Bad type for steps.<id>", Actionlint, ["actionlint:steps-id-type"], Expression, Error, Medium, Planned, true, true),
+    spec("expression-matrix-type", "Bad type for matrix", Actionlint, ["actionlint:matrix-type"], Expression, Error, Medium, Planned, true, false),
+    spec("expression-needs-type", "Bad type for needs", Actionlint, ["actionlint:needs-type"], Expression, Error, Medium, Planned, true, false),
+    spec("meaningless-comparison", "Meaningless comparison", Actionlint, ["actionlint:meaningless-comparison"], Expression, Warning, Low, Implemented, true, true),
+    spec("shellcheck", "shellcheck findings in run", Actionlint, ["actionlint:shellcheck-on-run"], External, Warning, Medium, Planned, true, true),
+    spec("pyflakes", "pyflakes findings in python run", Actionlint, ["actionlint:pyflakes-on-python-run"], External, Warning, Low, Planned, true, true),
+    spec("job-needs-graph", "Invalid job needs graph", Actionlint, ["actionlint:job-needs-graph"], Syntax, Error, High, Implemented, true, false),
+    spec("matrix-values", "Bad matrix values", Actionlint, ["actionlint:matrix-values"], Syntax, Error, Medium, Planned, true, false),
+    spec("webhook-events", "Unknown webhook event/activity", Actionlint, ["actionlint:webhook-events"], Syntax, Error, High, Implemented, true, false),
+    spec("workflow-dispatch-inputs", "Bad workflow_dispatch inputs", Actionlint, ["actionlint:workflow-dispatch-inputs"], Syntax, Error, Medium, Implemented, true, false),
+    spec("glob-patterns", "Bad glob pattern", Actionlint, ["actionlint:glob-patterns"], Syntax, Error, Low, Implemented, true, false),
+    spec("cron-and-timezone", "Bad cron expression or IANA timezone", Actionlint, ["actionlint:cron-and-timezone"], Syntax, Error, Medium, Implemented, true, false),
+    spec("unknown-runner-label", "Unknown runner label", Actionlint, ["actionlint:runner-label"], Syntax, Warning, Medium, Implemented, true, false),
+    spec("uses-syntax", "Bad uses: format", Actionlint, ["actionlint:uses-syntax"], Syntax, Error, High, Implemented, true, true),
+    spec("local-action-inputs", "Local action inputs invalid", Actionlint, ["actionlint:local-action-inputs"], Syntax, Error, Medium, Planned, true, true),
+    spec("popular-action-inputs", "Popular action inputs invalid", Actionlint, ["actionlint:popular-action-inputs"], Syntax, Error, Medium, Planned, true, true),
+    spec("outdated-action-version", "Outdated popular action version (EOL runtime)", Actionlint, ["actionlint:outdated-popular-action-version"], BestPractice, Warning, Medium, Implemented, true, true),
+    spec("shell-name-per-os", "Bad shell for OS", Actionlint, ["actionlint:shell-name"], Syntax, Error, Low, Implemented, true, true),
+    spec("duplicate-job-step-ids", "Duplicate job/step IDs", Actionlint, ["actionlint:duplicate-job-step-ids"], Syntax, Error, High, Implemented, true, false),
+    spec("invalid-env-var-name", "Bad environment variable name", Actionlint, ["actionlint:env-var-name"], Syntax, Warning, Low, Implemented, true, true),
+    spec("permissions-syntax", "Bad permissions scope/value (syntax)", Actionlint, ["actionlint:permissions-scope-and-value"], Syntax, Error, High, Implemented, true, false),
+    spec("reusable-workflow-definition", "Bad reusable workflow inputs/outputs/secrets", Actionlint, ["actionlint:reusable-workflow"], Syntax, Error, Medium, Implemented, true, false),
+    spec("job-step-id-naming", "Bad job/step ID naming", Actionlint, ["actionlint:job-step-id-naming"], BestPractice, Warning, Low, Implemented, true, true),
+    spec("deprecated-workflow-commands", "Deprecated workflow command", Actionlint, ["actionlint:deprecated-workflow-commands"], BestPractice, Warning, Medium, Implemented, true, true),
+    spec("constant-if-condition", "Constant if condition", Actionlint, ["actionlint:constant-if-condition"], BestPractice, Warning, Low, Implemented, true, true),
+    spec("action-yml-metadata", "Invalid action.yml metadata", Actionlint, ["actionlint:action-yml-metadata"], Syntax, Error, Medium, Implemented, false, true),
+    spec("deprecated-action-inputs", "Deprecated action inputs", Actionlint, ["actionlint:deprecated-popular-action-inputs"], BestPractice, Warning, Low, Planned, true, true),
+    spec("yaml-anchor-issues", "YAML anchor/alias issues", Actionlint, ["actionlint:yaml-anchors"], Syntax, Warning, Low, Planned, true, true),
+    // -----------------------------------------------------------------------
+    // zizmor family — security and supply-chain audits.
+    // Some entries here absorb a matching actionlint or ghalint rule;
+    // when that happens, every upstream is listed in `origins`.
+    // -----------------------------------------------------------------------
+    spec("anonymous-definition", "Missing name on workflow/action", Zizmor, ["zizmor:anonymous-definition"], BestPractice, Info, Low, Planned, true, true),
+    spec("archived-uses", "References archived repo", Zizmor, ["zizmor:archived-uses"], SupplyChain, Warning, Medium, Planned, true, true),
+    spec("artipacked", "Unprotected git credential persistence", Zizmor, ["zizmor:artipacked"], Security, Error, High, Implemented, true, false),
+    spec("bot-conditions", "Spoofable github.actor bot check", Zizmor, ["zizmor:bot-conditions"], Security, Error, High, Implemented, true, false),
+    spec("cache-poisoning", "Cache poisoning risk in release flow", Zizmor, ["zizmor:cache-poisoning"], Security, Error, High, Implemented, true, false),
+    spec("concurrency-limits", "Missing concurrency control", Zizmor, ["zizmor:concurrency-limits"], Performance, Info, Low, Implemented, true, false),
+    spec("dangerous-triggers", "pull_request_target etc.", Zizmor, ["zizmor:dangerous-triggers"], Security, Error, High, Implemented, true, false),
+    spec("dependabot-cooldown", "Missing dependabot cooldown", Zizmor, ["zizmor:dependabot-cooldown"], SupplyChain, Info, Low, Implemented, false, false),
+    spec("dependabot-execution", "External exec in dependabot config", Zizmor, ["zizmor:dependabot-execution"], Security, Error, High, Planned, true, false),
+    spec("excessive-permissions", "Overly broad permissions", Zizmor, ["zizmor:excessive-permissions"], Security, Warning, High, Implemented, true, false),
+    spec("forbidden-uses", "Disallowed action by allowlist", Zizmor, ["zizmor:forbidden-uses"], Config, Warning, Low, Planned, true, true),
+    spec("github-app", "GitHub App install token misuse", Zizmor, ["zizmor:github-app"], Security, Warning, Medium, Planned, true, false),
+    spec("github-env", "Dangerous $GITHUB_ENV writes", Zizmor, ["zizmor:github-env"], Security, Error, High, Implemented, true, true),
+    // Consolidates actionlint's "hardcoded credentials" check (containers + services).
+    spec("hardcoded-container-credentials", "Plain container/service credentials", Zizmor, ["zizmor:hardcoded-container-credentials", "actionlint:hardcoded-credentials"], Security, Error, High, Implemented, true, false),
+    spec("impostor-commit", "SHA not in claimed repo (network)", Zizmor, ["zizmor:impostor-commit"], SupplyChain, Error, High, Planned, true, true),
+    spec("insecure-commands", "ACTIONS_ALLOW_UNSECURE_COMMANDS", Zizmor, ["zizmor:insecure-commands"], Security, Warning, Medium, Implemented, true, true),
+    spec("known-vulnerable-actions", "CVE-listed actions", Zizmor, ["zizmor:known-vulnerable-actions"], SupplyChain, Error, High, Implemented, true, true),
+    spec("misfeature", "Problematic feature pattern", Zizmor, ["zizmor:misfeature"], BestPractice, Info, Low, Implemented, true, true),
+    spec("obfuscation", "Obfuscated expressions/refs", Zizmor, ["zizmor:obfuscation"], Security, Warning, Medium, Implemented, true, true),
+    spec("overprovisioned-secrets", "Whole secrets context exposed", Zizmor, ["zizmor:overprovisioned-secrets"], Security, Warning, High, Implemented, true, false),
+    spec("ref-confusion", "Confusable symbolic refs", Zizmor, ["zizmor:ref-confusion"], SupplyChain, Warning, Medium, Planned, true, true),
+    spec("ref-version-mismatch", "Pinned-SHA comment vs actual tag", Zizmor, ["zizmor:ref-version-mismatch"], BestPractice, Warning, Low, Planned, true, true),
+    // Consolidates ghalint ghl-004 (deny_inherit_secrets).
+    spec("secrets-inherit", "Blanket `secrets: inherit`", Zizmor, ["zizmor:secrets-inherit", "ghalint:ghl-004 (deny_inherit_secrets)"], Security, Error, High, Implemented, true, false),
+    spec("secrets-outside-env", "Secrets used outside protected environment", Zizmor, ["zizmor:secrets-outside-env"], Security, Warning, High, Implemented, true, false),
+    spec("self-hosted-runner", "Self-hosted runner used", Zizmor, ["zizmor:self-hosted-runner"], Security, Warning, Medium, Implemented, true, false),
+    spec("stale-action-refs", "SHA without any tag", Zizmor, ["zizmor:stale-action-refs"], SupplyChain, Info, Low, Planned, true, true),
+    spec("superfluous-actions", "Duplicate runner tooling", Zizmor, ["zizmor:superfluous-actions"], BestPractice, Info, Low, Implemented, true, false),
+    // Consolidates actionlint's "script injection" check (untrusted input in `run:`).
+    spec("template-injection", "Template injection via untrusted input", Zizmor, ["zizmor:template-injection", "actionlint:script-injection"], Security, Error, High, Implemented, true, true),
+    spec("undocumented-permissions", "Permission block without comment", Zizmor, ["zizmor:undocumented-permissions"], BestPractice, Info, Low, Planned, true, false),
+    // Consolidates ghalint ghl-007 (deny_job_container_latest_image) — :latest is one specific case of "not pinned by digest".
+    spec("unpinned-images", "Container image not pinned by digest", Zizmor, ["zizmor:unpinned-images", "ghalint:ghl-007 (deny_job_container_latest_image)"], SupplyChain, Warning, High, Implemented, true, false),
+    spec("unpinned-tools", "Runtime-fetched external tools", Zizmor, ["zizmor:unpinned-tools"], SupplyChain, Warning, Medium, Implemented, true, false),
+    // Consolidates ghalint ghl-008 (action_ref_should_be_full_length_commit_sha).
+    spec("unpinned-uses", "uses: not pinned to full SHA", Zizmor, ["zizmor:unpinned-uses", "ghalint:ghl-008 (action_ref_should_be_full_length_commit_sha)"], SupplyChain, Warning, High, Implemented, true, true),
+    spec("unredacted-secrets", "Secret-leak via redaction failure", Zizmor, ["zizmor:unredacted-secrets"], Security, Error, High, Implemented, true, false),
+    spec("unsound-condition", "Logically broken if:", Zizmor, ["zizmor:unsound-condition"], BestPractice, Warning, Medium, Implemented, true, true),
+    spec("unsound-contains", "Misuse of contains()", Zizmor, ["zizmor:unsound-contains"], Security, Warning, Medium, Implemented, true, true),
+    spec("use-trusted-publishing", "Prefer OIDC trusted publishing", Zizmor, ["zizmor:use-trusted-publishing"], BestPractice, Info, Medium, Implemented, true, false),
+    // -----------------------------------------------------------------------
+    // ghalint family — policy/security checks. The numbering matches the
+    // upstream `docs/policies/NNN.md` files. ghl-004/007/008 are absorbed
+    // into the zizmor entries above and intentionally absent here.
+    // -----------------------------------------------------------------------
+    spec("job-permissions-required", "Job permissions required", Ghalint, ["ghalint:ghl-001 (job_permissions)"], Security, Warning, High, Implemented, true, false),
+    spec("permissions-read-all-forbidden", "Forbid `permissions: read-all`", Ghalint, ["ghalint:ghl-002 (deny_read_all_permission)"], Security, Error, High, Implemented, true, false),
+    spec("permissions-write-all-forbidden", "Forbid `permissions: write-all`", Ghalint, ["ghalint:ghl-003 (deny_write_all_permission)"], Security, Error, High, Implemented, true, false),
+    spec("workflow-env-no-secrets", "No secrets in workflow env", Ghalint, ["ghalint:ghl-005 (workflow_secrets)"], Security, Error, High, Implemented, true, false),
+    spec("job-env-no-secrets", "No secrets in job env", Ghalint, ["ghalint:ghl-006 (job_secrets)"], Security, Error, High, Implemented, true, false),
+    spec("github-app-limit-repositories", "Limit GitHub App repository scope", Ghalint, ["ghalint:ghl-009 (github_app_should_limit_repositories)"], Security, Warning, Medium, Implemented, true, false),
+    spec("github-app-limit-permissions", "Limit GitHub App permissions", Ghalint, ["ghalint:ghl-010 (github_app_should_limit_permissions)"], Security, Warning, Medium, Implemented, true, false),
+    spec("composite-step-shell-required", "Composite action step needs shell", Ghalint, ["ghalint:ghl-011 (action_shell_is_required)"], BestPractice, Warning, Low, Implemented, false, true),
+    spec("job-timeout-minutes-required", "Job timeout-minutes required", Ghalint, ["ghalint:ghl-012 (job_timeout_minutes_is_required)"], BestPractice, Warning, Medium, Implemented, true, false),
+    spec("checkout-persist-credentials-false", "checkout persist-credentials must be false", Ghalint, ["ghalint:ghl-013 (checkout_persist_credentials_should_be_false)"], Security, Error, High, Implemented, true, false),
+  ]
+}
+
+///|
+fn spec(
+  id : String,
+  title : String,
+  source : Source,
+  origins : Array[String],
+  category : Category,
+  default_severity : Severity,
+  priority : Priority,
+  status : Status,
+  applies_to_workflow : Bool,
+  applies_to_action : Bool,
+) -> RuleSpec {
+  RuleSpec::{
+    id,
+    title,
+    source,
+    origins,
+    category,
+    default_severity,
+    priority,
+    status,
+    applies_to_workflow,
+    applies_to_action,
+  }
+}
+
+///|
+/// Returns the rule spec for `id`, panicking if none exists.
+pub fn rule_spec(id : String) -> RuleSpec {
+  for s in all_rule_specs() {
+    if s.id == id {
+      return s
+    }
+  }
+  abort("no such rule in catalog: \{id}")
+}

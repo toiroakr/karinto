@@ -1,0 +1,10 @@
+import {
+  "toiroakr/karinto" @karinto,
+  "moonbitlang/core/json",
+}
+
+supported_targets = "js"
+
+options(
+  link: { "js": { "exports": [ "lint_string", "osv_match" ], "format": "esm" } },
+)

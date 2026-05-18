@@ -1,0 +1,51 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  moon-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve registry
+        run: moon update
+
+      - name: moon test
+        run: moon test
+
+  changeset-check:
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify a changeset is present
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          ADDED=$(git diff --name-only --diff-filter=A "origin/${{ github.base_ref }}...HEAD" \
+            | grep -E '^\.changeset/[^/]+\.md$' \
+            | grep -vE '(^\.changeset/README\.md$|^\.changeset/config\.json$)' \
+            | wc -l)
+          if [ "$ADDED" -eq 0 ]; then
+            echo "::error::No changeset entry found. Run 'npx changeset' locally to add one, or apply the 'skip-changeset' label if the PR has no user-visible impact."
+            exit 1
+          fi
+          echo "Found $ADDED new changeset file(s)."

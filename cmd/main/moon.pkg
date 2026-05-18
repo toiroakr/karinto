@@ -1,0 +1,8 @@
+import {
+  "toiroakr/karinto" @karinto,
+  "moonbitlang/core/json",
+}
+
+options(
+  "is-main": true,
+)

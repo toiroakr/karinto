@@ -1,0 +1,10 @@
+.DS_Store
+_build/
+.mooncakes/
+.moonagent/
+node_modules/
+.wrangler/
+
+# Release workflow scratch files
+changeset-status.json
+RELEASE_NOTES.md

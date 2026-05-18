@@ -1,0 +1,16 @@
+{
+  "name": "karinto-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "cd .. && moon build --target js --release",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "smoke": "bash smoke.sh"
+  },
+  "devDependencies": {
+    "js-yaml": "^4.1.1",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,297 @@
+///|
+/// karinto — GitHub Actions linter library.
+///
+/// Lints a YAML workflow or action file. Rules are inspired by actionlint,
+/// zizmor, and ghalint (all MIT). See THIRD_PARTY_LICENSES.md for attribution.
+
+///|
+pub(all) enum FileKind {
+  Workflow
+  Action
+  Unknown
+} derive(Eq, Debug)
+
+///|
+pub(all) enum Severity {
+  Error
+  Warning
+  Info
+} derive(Eq, Debug)
+
+///|
+pub(all) struct Position {
+  line : Int
+  col : Int
+} derive(Eq, Debug, ToJson)
+
+///|
+pub(all) struct Diagnostic {
+  rule : String
+  severity : Severity
+  message : String
+  pos : Position?
+} derive(Eq, Debug)
+
+///|
+pub impl ToJson for Severity with to_json(self) {
+  match self {
+    Error => "error"
+    Warning => "warning"
+    Info => "info"
+  }
+}
+
+///|
+pub impl ToJson for Diagnostic with to_json(self) {
+  let m : Map[String, Json] = {
+    "rule": self.rule.to_json(),
+    "severity": self.severity.to_json(),
+    "message": self.message.to_json(),
+  }
+  match self.pos {
+    Some(p) => m["pos"] = p.to_json()
+    None => ()
+  }
+  m.to_json()
+}
+
+///|
+pub(all) struct Stats {
+  jobs : Int
+  steps : Int
+  lines : Int
+} derive(Eq, Debug, ToJson)
+
+///|
+pub(all) struct LintResult {
+  kind : FileKind
+  stats : Stats
+  diagnostics : Array[Diagnostic]
+  parse_error : String?
+}
+
+///|
+pub impl ToJson for FileKind with to_json(self) {
+  match self {
+    Workflow => "workflow"
+    Action => "action"
+    Unknown => "unknown"
+  }
+}
+
+///|
+pub impl ToJson for LintResult with to_json(self) {
+  let m : Map[String, Json] = {
+    "kind": self.kind.to_json(),
+    "stats": self.stats.to_json(),
+    "diagnostics": self.diagnostics.to_json(),
+  }
+  match self.parse_error {
+    Some(e) => m["parse_error"] = e.to_json()
+    None => ()
+  }
+  m.to_json()
+}
+
+///|
+/// Lint a YAML document.
+///
+/// - `content`: the YAML source.
+/// - `kind`: explicit file kind. `Unknown` triggers heuristic detection.
+/// - `disabled`: glob patterns of rule IDs to skip.
+pub fn lint(
+  content : String,
+  kind? : FileKind = Unknown,
+  disabled? : Array[String] = [],
+  vuln_uses? : Array[String] = [],
+) -> LintResult {
+  let lines = count_lines(content)
+  let docs = try? @yaml.Yaml::load_from_string(content)
+  match docs {
+    Err(e) =>
+      LintResult::{
+        kind,
+        stats: Stats::{ jobs: 0, steps: 0, lines },
+        diagnostics: [],
+        parse_error: Some(e.to_string()),
+      }
+    Ok(arr) => {
+      let doc = if arr.length() > 0 { arr[0] } else { @yaml.Yaml::Null }
+      let resolved_kind = match kind {
+        Unknown => detect_kind(doc)
+        _ => kind
+      }
+      let stats = compute_stats(doc, lines)
+      let diagnostics = run_rules(doc, resolved_kind, disabled, vuln_uses)
+      LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
+    }
+  }
+}
+
+///|
+fn count_lines(s : String) -> Int {
+  let mut n = 1
+  for ch in s {
+    if ch == '\n' {
+      n = n + 1
+    }
+  }
+  n
+}
+
+///|
+fn detect_kind(doc : @yaml.Yaml) -> FileKind {
+  match doc {
+    Map(m) =>
+      if m.contains("jobs") || m.contains("on") {
+        Workflow
+      } else if m.contains("runs") {
+        Action
+      } else {
+        Unknown
+      }
+    _ => Unknown
+  }
+}
+
+///|
+fn compute_stats(doc : @yaml.Yaml, lines : Int) -> Stats {
+  let mut jobs = 0
+  let mut steps = 0
+  match doc {
+    Map(m) =>
+      match m.get("jobs") {
+        Some(Map(js)) => {
+          jobs = js.length()
+          js.each(fn(_k, v) {
+            match v {
+              Map(jm) =>
+                match jm.get("steps") {
+                  Some(Array(s)) => steps = steps + s.length()
+                  _ => ()
+                }
+              _ => ()
+            }
+          })
+        }
+        _ => ()
+      }
+    _ => ()
+  }
+  Stats::{ jobs, steps, lines }
+}
+
+///|
+fn run_rules(
+  doc : @yaml.Yaml,
+  kind : FileKind,
+  disabled : Array[String],
+  vuln_uses : Array[String],
+) -> Array[Diagnostic] {
+  let ctx = prewalk(doc, vuln_uses~, kind~)
+  let out : Array[Diagnostic] = []
+
+  // Filter once. Each scope iterates pre-built callback arrays — no per-step
+  // option-match overhead.
+  let doc_cbs : Array[(WalkCtx, Array[Diagnostic]) -> Unit] = []
+  let job_cbs : Array[(WalkCtx, JobInfo, Array[Diagnostic]) -> Unit] = []
+  let step_cbs : Array[(WalkCtx, StepInfo, Array[Diagnostic]) -> Unit] = []
+  for rule in all_rules() {
+    if is_disabled(rule.id, disabled) {
+      continue
+    }
+    if !(rule.applies)(kind) {
+      continue
+    }
+    match rule.on_doc {
+      Some(f) => doc_cbs.push(f)
+      None => ()
+    }
+    match rule.on_job {
+      Some(f) => job_cbs.push(f)
+      None => ()
+    }
+    match rule.on_step {
+      Some(f) => step_cbs.push(f)
+      None => ()
+    }
+  }
+
+  // Doc scope.
+  for f in doc_cbs {
+    f(ctx, out)
+  }
+  // Step scope (workflow + action steps). Run before job scope so step-level
+  // findings precede the job-level conclusions they may inform (e.g. checkout
+  // persist-credentials-false before artipacked).
+  if step_cbs.length() > 0 {
+    for s in ctx.workflow_steps {
+      for f in step_cbs {
+        f(ctx, s, out)
+      }
+    }
+    for s in ctx.action_steps {
+      for f in step_cbs {
+        f(ctx, s, out)
+      }
+    }
+  }
+  // Job scope.
+  if job_cbs.length() > 0 {
+    for j in ctx.jobs {
+      for f in job_cbs {
+        f(ctx, j, out)
+      }
+    }
+  }
+  out
+}
+
+///|
+fn is_disabled(rule_id : String, disabled : Array[String]) -> Bool {
+  for pat in disabled {
+    if glob_match(pat, rule_id) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Simple glob matching supporting `*` (any chars) and exact match.
+fn glob_match(pat : String, s : String) -> Bool {
+  glob_match_chars(pat.to_array(), 0, s.to_array(), 0)
+}
+
+///|
+fn glob_match_chars(
+  pat : Array[Char],
+  pi : Int,
+  s : Array[Char],
+  si : Int,
+) -> Bool {
+  if pi >= pat.length() {
+    return si >= s.length()
+  }
+  let pc = pat[pi]
+  if pc == '*' {
+    // Try matching zero or more chars.
+    let mut k = si
+    while k <= s.length() {
+      if glob_match_chars(pat, pi + 1, s, k) {
+        return true
+      }
+      k = k + 1
+    }
+    false
+  } else {
+    if si >= s.length() {
+      return false
+    }
+    if pc == '?' || pc == s[si] {
+      glob_match_chars(pat, pi + 1, s, si + 1)
+    } else {
+      false
+    }
+  }
+}

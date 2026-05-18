@@ -1,0 +1,93 @@
+name: release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refuse if no pending changesets
+        run: |
+          npx changeset status --output=changeset-status.json
+          PENDING=$(node -p "JSON.parse(require('fs').readFileSync('changeset-status.json', 'utf8')).releases.length")
+          if [ "$PENDING" = "0" ]; then
+            echo "::error::No pending changesets. Add one via 'npx changeset' before releasing."
+            exit 1
+          fi
+          rm changeset-status.json
+
+      - name: Bump version + write CHANGELOG
+        id: bump
+        run: |
+          npx changeset version
+          npm run sync-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Extract the latest CHANGELOG section for the GitHub Release body.
+          awk '/^## /{n++} n==1{print} n==2{exit}' CHANGELOG.md > RELEASE_NOTES.md
+
+      - name: Commit + tag
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json moon.mod.json CHANGELOG.md .changeset
+          git commit -m "Release v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin main
+          git push origin "v${VERSION}"
+
+      - name: Install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - run: moon update
+      - run: moon test
+
+      - name: Build JS bundle
+        run: moon build --target js --release
+
+      - name: Install cf deps
+        working-directory: cf
+        run: npm ci
+
+      - name: Deploy production Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cf
+          command: deploy
+
+      - name: Smoke check production
+        working-directory: cf
+        run: bash smoke.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
+          body_path: RELEASE_NOTES.md
