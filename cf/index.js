@@ -79,14 +79,18 @@ export default {
 // because they share egress IPs across unrelated tenants — a noisy CI user
 // would otherwise 429 unrelated CI traffic as collateral. Falls open if
 // the binding is missing (e.g. `wrangler dev` without `--remote`).
+//
+// We always consult the limiter first so the hot path stays a single
+// Workers binding call. The (potentially slow) /meta lookup only runs
+// when the limiter says no — this keeps the DoS protection independent
+// of GitHub's availability even on a cold isolate.
 async function enforceRateLimit(request, env, ctx) {
   if (!env?.RATE_LIMITER_IP) return;
   const ip = request.headers.get("cf-connecting-ip");
-  if (await isFromGitHubActions(ip, env, ctx)) return;
   const { success } = await env.RATE_LIMITER_IP.limit({ key: ip || "unknown" });
-  if (!success) {
-    throw httpError("rate limit exceeded", 429);
-  }
+  if (success) return;
+  if (await isFromGitHubActions(ip, env, ctx)) return;
+  throw httpError("rate limit exceeded", 429);
 }
 
 // --- GitHub Actions IP allow-list -------------------------------------------

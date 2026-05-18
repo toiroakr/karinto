@@ -41,3 +41,13 @@ test "glob_match trailing star matches remainder" {
   inspect(glob_match("**", "anything"), content="true")
   inspect(glob_match("a*", "a"), content="true")
 }
+
+///|
+test "glob_match wildcard before literal `*` in input" {
+  // Rule IDs never contain `*`, but the matcher must not crash or
+  // misclassify if a caller passes one — record the wildcard before
+  // trying a literal match.
+  inspect(glob_match("*", "**x"), content="true")
+  inspect(glob_match("*", "*"), content="true")
+  inspect(glob_match("*x", "**x"), content="true")
+}

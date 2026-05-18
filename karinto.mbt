@@ -274,13 +274,16 @@ fn glob_match(pat : String, s : String) -> Bool {
   let mut star = -1
   let mut restart = 0
   while j < n {
-    if i < m && (p[i] == '?' || p[i] == t[j]) {
-      i = i + 1
-      j = j + 1
-    } else if i < m && p[i] == '*' {
+    // Wildcard must be checked before the literal/`?` branch — otherwise
+    // a text char that happens to equal `*` would be consumed as a
+    // literal instead of recording the wildcard position.
+    if i < m && p[i] == '*' {
       star = i
       restart = j
       i = i + 1
+    } else if i < m && (p[i] == '?' || p[i] == t[j]) {
+      i = i + 1
+      j = j + 1
     } else if star >= 0 {
       // Rewind to the last `*` and advance the text cursor by one.
       i = star + 1
