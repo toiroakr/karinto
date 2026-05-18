@@ -50,6 +50,18 @@ You can browse and install extra skills here:
   prefer assertion tests. You can use `moon coverage analyze > uncovered.log` to
   see which parts of your code are not covered by tests.
 
+## Rule catalog discipline
+
+[`rules_catalog.mbt`](rules_catalog.mbt) is the source of truth used by the
+engine and `coverage_test.mbt`. [`rules_catalog.md`](rules_catalog.md) is a
+human-readable mirror with upstream doc links and per-rule status / merge
+rationale notes.
+
+When you change `rules_catalog.mbt` (adding a rule, flipping `Planned` ↔
+`Implemented`, adjusting severity, recording a new consolidation), update
+`rules_catalog.md` in the same commit so the two stay in sync. Tests do not
+enforce this — the responsibility is on the editor.
+
 ## License attribution discipline
 
 The Worker build (`moon build --target js --release`) inlines every MoonBit

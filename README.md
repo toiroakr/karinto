@@ -16,7 +16,9 @@ and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
 triggers, and more). The full catalogue with status, severity, and upstream
-origins lives in [`rules_catalog.mbt`](rules_catalog.mbt).
+origins lives in [`rules_catalog.md`](rules_catalog.md) (human-readable
+mirror of the in-code source of truth at
+[`rules_catalog.mbt`](rules_catalog.mbt)).
 
 ## API
 
