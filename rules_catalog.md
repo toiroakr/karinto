@@ -5,7 +5,7 @@ source of truth used by the engine and `coverage_test.mbt`. Keep both files
 in sync; see [`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the
 update rule.
 
-84 catalogued rules: **62 implemented**, **18 planned**, **4 not planned**,
+82 catalogued rules: **61 implemented**, **17 planned**, **4 not planned**,
 plus **5 upstream checks consolidated** into existing karinto rules (see
 below).
 

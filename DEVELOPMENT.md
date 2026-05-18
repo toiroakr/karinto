@@ -80,7 +80,7 @@ entry carries an ID, human-readable title, source family (actionlint /
 zizmor / ghalint), upstream origins, category, severity, priority,
 implementation status, and which file kinds it applies to.
 
-Of 84 catalogued rules, 62 are implemented; 18 are scaffolded as
+Of 82 catalogued rules, 61 are implemented; 17 are scaffolded as
 `#skip(...)`-attributed test cases in the per-source `*_rules_test.mbt`
 files (each ships fixture YAML and expected JSON so the behavioural spec
 is in place, ready to be filled in); 4 are marked `NotPlanned` —

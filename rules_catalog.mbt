@@ -59,10 +59,11 @@ pub(all) struct RuleSpec {
 } derive(Eq, Debug)
 
 ///|
-/// The full catalogue: 84 rules spanning actionlint (36), zizmor (36) and
-/// ghalint (10 — three are absorbed into the zizmor consolidations).
-/// 5 deliberate consolidations are recorded in `origins`, and 4 rules are
-/// marked `NotPlanned` (out of scope, see status comments below).
+/// The full catalogue: 82 rules spanning actionlint (36), zizmor (36) and
+/// ghalint (10). 5 deliberate consolidations are recorded in `origins`
+/// (zizmor entries that also absorb the matching actionlint or ghalint
+/// check), and 4 rules are marked `NotPlanned` (out of scope, see status
+/// comments below).
 pub fn all_rule_specs() -> Array[RuleSpec] {
   [
     // -----------------------------------------------------------------------
