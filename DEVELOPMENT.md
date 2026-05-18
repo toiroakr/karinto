@@ -98,3 +98,56 @@ rule. The `origins` field on every catalog entry preserves the lineage:
 
 `coverage_test.mbt` asserts that the catalog, the rule implementations,
 and the test fixtures stay in sync.
+
+## Environments and release flow
+
+Three Workers, one per environment:
+
+| Environment | Worker name | URL | Trigger |
+| --- | --- | --- | --- |
+| Production | `karinto` | `https://karinto.toiroakr.workers.dev` | `release` workflow (manual dispatch) |
+| Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
+| Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
+
+GitHub Actions wiring:
+
+- `.github/workflows/test.yml` — runs `moon test` on every PR and on `main`,
+  and enforces that pull requests include a `.changeset/*.md` entry.
+- `.github/workflows/deploy-preview.yml` — builds and deploys the per-PR
+  Worker, then posts a sticky comment with the preview URL.
+- `.github/workflows/cleanup-preview.yml` — deletes the preview Worker when
+  the PR closes.
+- `.github/workflows/deploy-staging.yml` — deploys to staging on every push
+  to `main`.
+- `.github/workflows/release.yml` — `workflow_dispatch` job that consumes
+  the accumulated changesets, bumps versions, writes the CHANGELOG section,
+  tags `vX.Y.Z`, deploys to production, and publishes a GitHub Release.
+
+### Per-PR changesets
+
+Every PR with a user-visible change must include a changeset:
+
+```sh
+npx changeset       # prompts for bump type + summary, writes .changeset/<id>.md
+```
+
+CI fails without one. If a PR genuinely has no user-visible impact (CI
+tweaks, internal scripts), apply the `skip-changeset` label on GitHub.
+
+### Cutting a release
+
+1. Open the **Actions** tab on GitHub and run the `release` workflow.
+2. The workflow:
+   - reads the queued `.changeset/*.md` entries
+   - bumps `package.json` and `moon.mod.json` (via `scripts/sync-moon-version.mjs`)
+   - rewrites `CHANGELOG.md` with the new section
+   - commits, tags `vX.Y.Z`, pushes
+   - builds, deploys to the production Worker, runs `cf/smoke.sh`
+   - creates a GitHub Release whose body is the new CHANGELOG section
+
+### Required GitHub secrets
+
+| Secret | Where to get it |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |

@@ -1,0 +1,68 @@
+name: deploy-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: deploy-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # External fork PRs lack repo secrets; skip them — the comment step
+    # would also fail without `pull-requests: write`.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKER_NAME: karinto-pr-${{ github.event.pull_request.number }}
+      WORKER_URL: https://karinto-pr-${{ github.event.pull_request.number }}.toiroakr.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - run: moon install
+
+      - name: Build JS bundle
+        run: moon build --target js --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: cf/package-lock.json
+
+      - working-directory: cf
+        run: npm ci
+
+      - name: Deploy preview Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cf
+          command: deploy --name ${{ env.WORKER_NAME }}
+
+      - name: Smoke check
+        working-directory: cf
+        run: bash smoke.sh "$WORKER_URL"
+
+      - name: Comment preview URL
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: preview-worker
+          message: |
+            Preview Worker deployed: ${{ env.WORKER_URL }}
+
+            ```sh
+            curl -X POST --data-binary @workflow.yml ${{ env.WORKER_URL }}
+            ```
+
+            <sub>Auto-cleaned when this PR closes.</sub>
