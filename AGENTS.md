@@ -49,3 +49,28 @@ You can browse and install extra skills here:
   behavior. For solid, well-defined results (e.g. scientific computations),
   prefer assertion tests. You can use `moon coverage analyze > uncovered.log` to
   see which parts of your code are not covered by tests.
+
+## License attribution discipline
+
+The Worker build (`moon build --target js --release`) inlines every MoonBit
+dependency into the distributed JS bundle, so each runtime dep must have its
+license text reproduced in `THIRD_PARTY_LICENSES.md`. When adding a dependency,
+the maintenance burden is to keep that file in sync:
+
+- **New MoonBit dep in `moon.mod.json` `deps`** — copy
+  `.mooncakes/<owner>/<name>/LICENSE` into a new `## <name>` section of
+  `THIRD_PARTY_LICENSES.md`. If the LICENSE file embeds transitive
+  attributions (e.g. the way `moonbit-community/yaml` ships the yaml-rust2
+  notice), surface those as separate sections too so the chain stays visible.
+  Add a row to the top-level project table.
+- **New npm runtime dep in `cf/package.json` `dependencies`** (not
+  `devDependencies` — wrangler / js-yaml today are devDeps and are not
+  redistributed) — copy `cf/node_modules/<name>/LICENSE` into a section
+  similarly and add a table row.
+- **"Inspired by" projects** (rule taxonomy borrowed but no code ported) —
+  table entry is courtesy, not a legal requirement. If actual code gets
+  ported later, promote the entry to a full license-text section.
+
+`.mooncakes/` and `cf/node_modules/` are gitignored, so they cannot satisfy
+attribution by themselves — the texts must be in the tracked
+`THIRD_PARTY_LICENSES.md`.
