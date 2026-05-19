@@ -502,6 +502,9 @@ async function handleRepo(params, pathTarget, disable, type, useOsv, worker) {
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
   }
+  if (params.commit !== undefined && typeof params.commit !== "string") {
+    throw httpError("`commit` must be a string", 400);
+  }
   const commit = params.commit || "";
   if (!commit) {
     throw new Error("`commit` is required with `repo` (commit SHA, full or abbreviated)");

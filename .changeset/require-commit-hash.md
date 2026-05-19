@@ -5,10 +5,11 @@
 Allow specifying `org/repo/commit[/target/path/...]` directly in the request
 URL path (e.g. `GET /actions/checkout/<sha>/action.yml`, or with nested
 targets like `.github/workflows/ci.yml`), and require a commit SHA whenever
-`repo` mode is used. The `commit` parameter accepts 7–64 hex characters;
-short SHAs are technically ambiguous with same-shape branch/tag names
-(e.g. `deadbee`), so callers needing guaranteed immutability should pass
-the full 40-char SHA. Branch names and tags are rejected outright. Path
+`repo` mode is used. The `commit` parameter accepts 7–64 hex characters,
+so non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected outright.
+Hex-shaped refs are still accepted at face value, so an all-hex branch or
+tag (e.g. `deadbee`) can collide with a short-SHA-shaped commit; callers
+needing guaranteed immutability should pass the full 40-char SHA. Path
 segments that don't match the repo-mode shape are ignored, so the Worker
 can be served under arbitrary path prefixes (`/api/...`, `/favicon.ico`,
 etc.) without bricking unrelated requests. Responses in `repo` mode now
