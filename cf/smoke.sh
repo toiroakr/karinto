@@ -62,19 +62,33 @@ else
 fi
 
 # 4. repo without commit -> 400
-res=$(curl -sS "$URL?repo=actions/checkout&targets=action.yml")
-if jq -e '.ok == false and (.error | test("`commit` is required"))' >/dev/null <<<"$res"; then
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&targets=action.yml")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` is required"))' >/dev/null <<<"$res"; then
   ok "repo without commit -> 400"
 else
-  bad "repo without commit: $res"
+  bad "repo without commit (status=$code): $res"
 fi
 
-# 5. repo + non-hex commit -> 400 (branch/tag names rejected)
-res=$(curl -sS "$URL?repo=actions/checkout&commit=main&targets=action.yml")
-if jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
+# 5. repo + short hex commit -> 400 (ambiguous with a branch/tag of the same shape)
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=deadbee&targets=action.yml")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
+  ok "repo + short hex commit -> 400"
+else
+  bad "repo + short hex commit (status=$code): $res"
+fi
+
+# 5b. repo + non-hex commit (branch name) -> 400
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=main&targets=action.yml")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
   ok "repo + branch name commit -> 400"
 else
-  bad "repo + branch name: $res"
+  bad "repo + branch name (status=$code): $res"
 fi
 
 # 6. path /<owner>/<repo>/<commit>/<target> resolves to a real lint
@@ -91,6 +105,16 @@ if [ "$code" = "400" ]; then
   ok "path /owner/repo (no commit) -> 400"
 else
   bad "path /owner/repo returned $code"
+fi
+
+# 8. path-traversal in targets -> 400 (must not escape the pinned commit prefix)
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=../main/action.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
+  ok "targets with .. segment -> 400"
+else
+  bad "targets with .. segment (status=$code): $res"
 fi
 
 exit "$failed"

@@ -33,7 +33,7 @@ body beats query, query beats path on conflict.
 | `content` | string | The YAML source |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Branch names and tags are rejected — pin to a commit. |
+| `commit` | full 40-char hex SHA | **Required** whenever `repo` is set. Short SHAs, branch names, and tags are rejected — pin to a specific commit. |
 | `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 

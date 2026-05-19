@@ -56,7 +56,7 @@ export default {
         disable: params.disable || "",
         repo: params.repo || "",
         commit: params.commit || "",
-        targets: params.targets || "",
+        targets: params.targets || params._pathTarget || "",
         content_lines: params.content ? params.content.split("\n").length : 0,
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
@@ -302,9 +302,11 @@ async function readParams(request) {
   return params;
 }
 
-// `/owner/repo/commit[/target/...]` → `{ repo, commit, targets? }`.
-// Trailing segments past the commit form a single target path; multi-target
-// requests still need to come through the `targets=` query/body field.
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, _pathTarget? }`.
+// Trailing segments past the commit form a single target path. We store it
+// under a private key so a literal comma in the path is not split into
+// multiple targets the way the comma-delimited `targets=` field is.
+// Multi-target requests still need to come through `targets=` query/body.
 function parsePath(pathname) {
   const segments = pathname.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
   if (segments.length === 0) return {};
@@ -315,7 +317,7 @@ function parsePath(pathname) {
   }
   const [owner, repo, commit, ...rest] = segments;
   const out = { repo: `${owner}/${repo}`, commit };
-  if (rest.length > 0) out.targets = rest.join("/");
+  if (rest.length > 0) out._pathTarget = rest.join("/");
   return out;
 }
 
@@ -454,6 +456,28 @@ function countChar(s, ch) {
   return n;
 }
 
+// Reject target paths that could escape the pinned commit prefix once
+// interpolated into `https://raw.githubusercontent.com/<repo>/<commit>/<path>`.
+// `..` segments would be URL-normalized by fetch / GitHub's edge and let a
+// caller fetch from a different ref entirely; `\` and absolute paths likewise
+// undermine the prefix.
+function validateTargetPath(path) {
+  if (typeof path !== "string" || path.length === 0) {
+    throw httpError("target path must be a non-empty string", 400);
+  }
+  if (path.length > 256) {
+    throw httpError(`target path too long (max 256 chars): ${truncatePreview(path)}`, 400);
+  }
+  if (path.startsWith("/") || path.includes("\\")) {
+    throw httpError(`invalid target path: ${truncatePreview(path)}`, 400);
+  }
+  for (const seg of path.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") {
+      throw httpError(`invalid target path: ${truncatePreview(path)}`, 400);
+    }
+  }
+}
+
 async function handleRepo(params, disable, type, useOsv, worker) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
@@ -461,19 +485,30 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   }
   const commit = params.commit || "";
   if (!commit) {
-    throw new Error("`commit` is required with `repo` (full or short commit SHA)");
+    throw new Error("`commit` is required with `repo` (full 40-char commit SHA)");
   }
-  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
-    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
+  // Require the full SHA. Any shorter hex string is ambiguous with a branch
+  // or tag of the same shape (e.g. `deadbee`), which `raw.githubusercontent.com`
+  // would happily resolve as a mutable ref — defeating the whole point of
+  // requiring `commit`.
+  if (!/^[0-9a-fA-F]{40}$/.test(commit)) {
+    throw new Error(`invalid commit: ${commit} (expected 40 hex characters)`);
   }
-  const rawTargets = params.targets ?? "";
-  if (typeof rawTargets !== "string") {
-    throw httpError("`targets` must be a string", 400);
+  let targets;
+  if (Object.prototype.hasOwnProperty.call(params, "targets")) {
+    const rawTargets = params.targets ?? "";
+    if (typeof rawTargets !== "string") {
+      throw httpError("`targets` must be a string", 400);
+    }
+    targets = rawTargets
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else if (params._pathTarget) {
+    targets = [params._pathTarget];
+  } else {
+    targets = [];
   }
-  const targets = rawTargets
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
   if (targets.length === 0) {
     throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
   }
@@ -483,6 +518,7 @@ async function handleRepo(params, disable, type, useOsv, worker) {
       400,
     );
   }
+  for (const path of targets) validateTargetPath(path);
 
   const files = [];
   for (const path of targets) {
