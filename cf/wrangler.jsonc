@@ -1,5 +1,15 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
+	// Top-level config is what PR preview Workers deploy against
+	// (`wrangler deploy --env="" --name karinto-pr-<N>`). It intentionally
+	// omits `r2_buckets` so previews can't write into the captures bucket,
+	// and omits `triggers` so previews don't all run the daily /meta cron
+	// (production refreshes the shared KV for everyone). KV + per-IP rate
+	// limit ARE included so previews stay protected and can read the
+	// cached GitHub Actions IP list.
+	//
+	// Production must be deployed via `wrangler deploy --env production`
+	// so the CAPTURES binding and cron trigger are attached.
 	"name": "karinto",
 	"main": "index.js",
 	"compatibility_date": "2026-05-01",
@@ -22,7 +32,7 @@
 			}
 		]
 	},
-	// KV holds the cached `api.github.com/meta` payload. The cron trigger
+	// KV holds the cached `api.github.com/meta` payload. Production's cron
 	// refreshes it daily; request path reads from KV (with a one-shot
 	// direct-fetch fallback for the cold-deploy case before the first cron).
 	// Shared by all envs — the data is the GitHub-published public IP list.
@@ -33,17 +43,46 @@
 			"remote": true
 		}
 	],
-	"triggers": {
-		"crons": [
-			"0 2 * * *"
-		]
-	},
-	// Named envs do NOT inherit `kv_namespaces`, `unsafe`, or `triggers`
-	// from the top-level config, so we duplicate them here. KV id is shared
-	// because the /meta payload is GitHub-published and identical for every
-	// env; the rate-limit namespace_id is distinct so staging traffic can't
-	// burn the prod token bucket.
+	// Named envs do NOT inherit `kv_namespaces`, `unsafe`, `triggers`, or
+	// `r2_buckets` from the top-level config, so we duplicate them here.
+	// KV id is shared because the /meta payload is GitHub-published and
+	// identical for every env; the rate-limit namespace_id is distinct for
+	// staging so its traffic can't burn the prod token bucket.
 	"env": {
+		"production": {
+			"name": "karinto",
+			"unsafe": {
+				"bindings": [
+					{
+						"name": "RATE_LIMITER_IP",
+						"type": "ratelimit",
+						"namespace_id": "1002",
+						"simple": {
+							"limit": 60,
+							"period": 60
+						}
+					}
+				]
+			},
+			"kv_namespaces": [
+				{
+					"binding": "KV",
+					"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+					"remote": true
+				}
+			],
+			"triggers": {
+				"crons": [
+					"0 2 * * *"
+				]
+			},
+			"r2_buckets": [
+				{
+					"binding": "CAPTURES",
+					"bucket_name": "karinto-captures"
+				}
+			]
+		},
 		"staging": {
 			"name": "karinto-staging",
 			"unsafe": {
