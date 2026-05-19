@@ -117,12 +117,32 @@ function sigv4Headers(method, url, accessKey, secretKey) {
 // R2 S3 calls
 // ---------------------------------------------------------------------------
 
+// Per-request network timeout so a stuck DNS/TLS/connection can't leave a
+// CI job hanging until the workflow-level timeout fires. Each fetch site
+// (`r2List`, `r2Get`, `replayOne`) goes through `fetchWithTimeout`.
+const FETCH_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`request to ${url} timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function r2List(env, prefix, continuationToken) {
   const params = new URLSearchParams({ "list-type": "2", prefix });
   if (continuationToken) params.set("continuation-token", continuationToken);
   const url = `${env.endpoint}/${env.bucket}?${params}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetch(url, { headers });
+  const res = await fetchWithTimeout(url, { headers });
   if (!res.ok) {
     throw new Error(`R2 list failed (${res.status}): ${await res.text()}`);
   }
@@ -132,7 +152,7 @@ async function r2List(env, prefix, continuationToken) {
 async function r2Get(env, key) {
   const url = `${env.endpoint}/${env.bucket}/${encodeURI(key)}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetch(url, { headers });
+  const res = await fetchWithTimeout(url, { headers });
   if (!res.ok) {
     throw new Error(`R2 get ${key} failed (${res.status})`);
   }
@@ -236,7 +256,7 @@ async function replayOne(targetUrl, request) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
-  const res = await fetch(targetUrl, {
+  const res = await fetchWithTimeout(targetUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),

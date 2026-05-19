@@ -58,11 +58,17 @@ export default {
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
       });
-      ctx.waitUntil(
-        captureRequest(env, params, result, request.headers).catch((err) => {
-          log("capture_error", { message: String(err?.message ?? err) });
-        }),
-      );
+      // Only register the waitUntil promise when CAPTURES is actually bound
+      // (production env). Preview/staging skip the wrapper entirely so
+      // non-production traffic doesn't pay the Promise/catch overhead on
+      // the hot path.
+      if (env?.CAPTURES) {
+        ctx.waitUntil(
+          captureRequest(env, params, result, request.headers).catch((err) => {
+            log("capture_error", { message: String(err?.message ?? err) });
+          }),
+        );
+      }
       return json(result);
     } catch (err) {
       const status = err?.status ?? 400;
