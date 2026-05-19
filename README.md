@@ -78,6 +78,17 @@ Or with explicit query parameters and multiple targets:
 curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11&targets=action.yml,.github/workflows/test.yml"
 ```
 
+### Limits
+
+- **Request body**: 1 MiB. Direct payloads over the cap short-circuit with
+  `413 Payload Too Large` before reaching the parser. In `repo` mode the
+  request still returns `200` and the oversized file is surfaced as
+  `files[].error` so the rest of the batch is unaffected.
+- **Per-IP rate limit**: 60 requests / minute. Over-limit traffic gets `429`.
+  Requests originating from GitHub-hosted Actions runners are exempted (their
+  egress IPs are shared across unrelated tenants), so noisy CI tenants can't
+  collateral-429 other CI traffic.
+
 ### Response
 
 ```json
@@ -126,7 +137,9 @@ reach prod. To opt out per-request, send either:
 - HTTP header `X-Karinto-No-Capture: 1`
 
 Requests using `osv=1` or `repo=` are never captured; nor are requests
-whose body exceeds 100 KiB.
+whose `content` exceeds the per-deployment cap (default 100 KiB, tunable
+via the `CAPTURE_CONTENT_LIMIT_KIB` Worker variable — see
+[`DEVELOPMENT.md`](DEVELOPMENT.md#optional-github-variables)).
 
 ## Development
 

@@ -110,7 +110,15 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Production | `karinto` | `https://karinto.toiroakr.workers.dev` | merging the auto-generated "chore: release" PR |
 | Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
-| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7 GiB, the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under 7 GiB are left to the lifecycle rule. |
+| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
+
+Both the production and staging Workers also carry a daily cron
+(`0 2 * * *`) that refreshes the cached `api.github.com/meta` payload in
+KV. The request path consults that cache to exempt GitHub-hosted Actions
+runner IPs from the per-IP rate limit. Preview Workers inherit neither
+the cron nor the R2 binding (the top-level `cf/wrangler.jsonc` omits both
+on purpose), so they read from the shared KV but never refresh it and
+can't write into the captures bucket.
 
 GitHub Actions wiring:
 
@@ -265,8 +273,8 @@ endpoint, authenticated with bucket-scoped read-only access keys.
 - **Retention**: configure an R2 lifecycle rule on the `karinto-captures`
   bucket to delete objects older than 30 days. The `karinto-captures`
   Worker's `scheduled` handler runs every 6 hours as a secondary guard that
-  prunes oldest-first when the bucket grows past 7 GiB, cutting it back
-  down to ≈ 4.79 GiB.
+  prunes oldest-first when the bucket grows past ≈ 6.84 GiB (7000 MiB),
+  cutting it back down to ≈ 4.79 GiB.
 
 ### Bootstrapping a fresh deployment
 
