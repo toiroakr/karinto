@@ -344,8 +344,14 @@ function mergeBody(params, raw, ct) {
       // fall through to other strategies
     }
   }
-  // Try form-encoded only when at least one known key appears as `key=...`.
-  if (KNOWN_KEYS_RE.test(raw)) {
+  // Try form-encoded only when the body looks like a single-line querystring
+  // with at least one known key. The newline guard prevents a YAML body that
+  // happens to contain `no_capture=` (or any other known key) on some line
+  // from being parsed via URLSearchParams — form bodies don't span lines.
+  // We can't fall back to Content-Type alone because `curl --data-binary`
+  // (the documented usage) sends `application/x-www-form-urlencoded` even
+  // when the payload is raw YAML.
+  if (!raw.includes("\n") && KNOWN_KEYS_RE.test(raw)) {
     const sp = new URLSearchParams(raw);
     let matched = false;
     for (const [k, v] of sp) {
