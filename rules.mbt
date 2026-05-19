@@ -829,8 +829,6 @@ fn check_steps_id_unique_pre(
   }
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Rule: permissions-write-all-forbidden deny_write_all_permission
 // ---------------------------------------------------------------------------
@@ -938,8 +936,8 @@ fn is_full_sha_after(s : String, at_idx : Int) -> Bool {
     match s.get_char(i) {
       Some(c) =>
         if !((c >= '0' && c <= '9') ||
-        (c >= 'a' && c <= 'f') ||
-        (c >= 'A' && c <= 'F')) {
+          (c >= 'a' && c <= 'f') ||
+          (c >= 'A' && c <= 'F')) {
           return false
         }
       None => return false
@@ -1480,10 +1478,7 @@ fn check_misfeature(
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_dependabot_cooldown(
-  ctx : WalkCtx,
-  out : Array[Diagnostic],
-) -> Unit {
+fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   for um in ctx.updates {
     if !um.contains("cooldown") {
       add_diag(
@@ -1535,13 +1530,17 @@ fn is_id_cont(c : Char) -> Bool {
 ///|
 fn matches_pattern(s : String, ident_check : (Char) -> Bool) -> Bool {
   let len = s.length()
-  if len == 0 { return false }
+  if len == 0 {
+    return false
+  }
   let mut i = 0
   while i < len {
     match s.get_char(i) {
       Some(c) => {
         let ok = if i == 0 { is_ident_start(c) } else { ident_check(c) }
-        if !ok { return false }
+        if !ok {
+          return false
+        }
       }
       None => return false
     }
@@ -1644,7 +1643,9 @@ fn check_github_app_limit_repos(
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  if !is_github_app_token_step(step) { return }
+  if !is_github_app_token_step(step) {
+    return
+  }
   let has = match step.with_ {
     Some(w) => w.contains("repositories")
     None => false
@@ -1665,7 +1666,9 @@ fn check_github_app_limit_perms(
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  if !is_github_app_token_step(step) { return }
+  if !is_github_app_token_step(step) {
+    return
+  }
   let has = match step.with_ {
     Some(w) => w.contains("permissions")
     None => false
@@ -1696,7 +1699,12 @@ fn flag_creds_password(
         Some(String(s)) =>
           if !s.contains("${{") {
             let suffix = "`credentials.password` is a literal; reference `${{ secrets.* }}` instead"
-            add_diag(out, "hardcoded-container-credentials", Error, "\{loc} \{suffix}")
+            add_diag(
+              out,
+              "hardcoded-container-credentials",
+              Error,
+              "\{loc} \{suffix}",
+            )
           }
         _ => ()
       }
@@ -1732,9 +1740,7 @@ fn check_hardcoded_container_creds(
 
 ///|
 fn is_hex_char(c : Char) -> Bool {
-  (c >= '0' && c <= '9') ||
-  (c >= 'a' && c <= 'f') ||
-  (c >= 'A' && c <= 'F')
+  (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 ///|
@@ -1833,7 +1839,7 @@ fn check_deprecated_workflow_commands(
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) => {
+    Some(r) =>
       if r.contains("::set-output") {
         add_diag(
           out,
@@ -1856,7 +1862,6 @@ fn check_deprecated_workflow_commands(
           "deprecated workflow command `::save-state`; use `$GITHUB_STATE` instead",
         )
       }
-    }
     None => ()
   }
 }
@@ -1866,10 +1871,7 @@ fn check_deprecated_workflow_commands(
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_invalid_env_var_name(
-  ctx : WalkCtx,
-  out : Array[Diagnostic],
-) -> Unit {
+fn check_invalid_env_var_name(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let check_env = fn(env : Map[String, @yaml.Yaml]) -> Unit {
     env.each(fn(k, _v) {
       if !is_valid_env_name(k) {
@@ -1911,12 +1913,7 @@ fn check_invalid_env_var_name(
 ///|
 fn step_repo_prefix(s : StepInfo) -> String? {
   match s.uses {
-    Some(u) =>
-      if s.at_idx > 0 {
-        Some(u[:s.at_idx].to_owned())
-      } else {
-        None
-      }
+    Some(u) => if s.at_idx > 0 { Some(u[:s.at_idx].to_owned()) } else { None }
     None => None
   }
 }
@@ -1970,19 +1967,14 @@ fn check_superfluous_actions(
 
 ///|
 fn find_untrusted_in_text(t : String) -> String? {
-  if !t.contains("${{") { return None }
+  if !t.contains("${{") {
+    return None
+  }
   let patterns = [
-    "github.event.pull_request.body",
-    "github.event.pull_request.title",
-    "github.event.pull_request.head.ref",
-    "github.event.pull_request.head.label",
-    "github.event.issue.title",
-    "github.event.issue.body",
-    "github.event.comment.body",
-    "github.event.review.body",
-    "github.event.review_comment.body",
-    "github.event.workflow_run.head_branch",
-    "github.head_ref",
+    "github.event.pull_request.body", "github.event.pull_request.title", "github.event.pull_request.head.ref",
+    "github.event.pull_request.head.label", "github.event.issue.title", "github.event.issue.body",
+    "github.event.comment.body", "github.event.review.body", "github.event.review_comment.body",
+    "github.event.workflow_run.head_branch", "github.head_ref",
   ]
   for p in patterns {
     if t.contains(p) {
@@ -2033,7 +2025,9 @@ fn step_uses_secrets(s : StepInfo) -> Bool {
           _ => ()
         }
       })
-      if found { return true }
+      if found {
+        return true
+      }
     }
     None => ()
   }
@@ -2046,7 +2040,9 @@ fn check_secrets_outside_env(
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  if job.raw.contains("environment") { return }
+  if job.raw.contains("environment") {
+    return
+  }
   for s in job.steps {
     if step_uses_secrets(s) {
       add_diag(
@@ -2140,7 +2136,9 @@ fn workflow_runs_on_release(ctx : WalkCtx) -> Bool {
     Some(Map(om)) => {
       let mut found = false
       om.each(fn(name, v) {
-        if name == "release" { found = true }
+        if name == "release" {
+          found = true
+        }
         if name == "push" {
           match v {
             Map(pm) => if pm.contains("tags") { found = true }
@@ -2165,7 +2163,9 @@ fn step_is_cache_restore(s : StepInfo) -> Bool {
 
 ///|
 fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  if !workflow_runs_on_release(ctx) { return }
+  if !workflow_runs_on_release(ctx) {
+    return
+  }
   for j in ctx.jobs {
     let mut hit = false
     for s in j.steps {
@@ -2193,7 +2193,9 @@ fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 ///|
 fn run_has_pipe_to_shell(r : String) -> Bool {
   let has_fetch = r.contains("curl ") || r.contains("wget ")
-  if !has_fetch { return false }
+  if !has_fetch {
+    return false
+  }
   r.contains("| bash") ||
   r.contains("|bash") ||
   r.contains("| sh") ||
@@ -2318,7 +2320,10 @@ fn check_job_step_id_naming(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
   match y {
     String(s) => f(s)
-    Array(arr) => for v in arr { walk_strings(v, f) }
+    Array(arr) =>
+      for v in arr {
+        walk_strings(v, f)
+      }
     Map(m) => m.each(fn(_k, v) { walk_strings(v, f) })
     _ => ()
   }
@@ -2329,7 +2334,9 @@ fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
 fn count_substr(s : String, sub : String) -> Int {
   let sl = s.length()
   let subl = sub.length()
-  if subl == 0 || sl < subl { return 0 }
+  if subl == 0 || sl < subl {
+    return 0
+  }
   let sa = s.to_array()
   let ba = sub.to_array()
   let mut count = 0
@@ -2359,8 +2366,12 @@ fn count_substr(s : String, sub : String) -> Int {
 fn edit_distance(a : String, b : String) -> Int {
   let la = a.length()
   let lb = b.length()
-  if la == 0 { return lb }
-  if lb == 0 { return la }
+  if la == 0 {
+    return lb
+  }
+  if lb == 0 {
+    return la
+  }
   let aa = a.to_array()
   let bb = b.to_array()
   let prev : Array[Int] = []
@@ -2388,10 +2399,14 @@ fn edit_distance(a : String, b : String) -> Int {
       let m1 = if del < ins { del } else { ins }
       let best = if m1 < sub_cost { m1 } else { sub_cost }
       curr[j] = best
-      if best < row_min { row_min = best }
+      if best < row_min {
+        row_min = best
+      }
       j = j + 1
     }
-    if row_min > 4 { return 5 }
+    if row_min > 4 {
+      return 5
+    }
     let mut k = 0
     while k <= lb {
       prev[k] = curr[k]
@@ -2419,7 +2434,9 @@ fn suggest(word : String, candidates : Array[String]) -> String? {
 ///|
 fn array_contains_string(arr : Array[String], target : String) -> Bool {
   for s in arr {
-    if s == target { return true }
+    if s == target {
+      return true
+    }
   }
   false
 }
@@ -2429,10 +2446,7 @@ fn array_contains_string(arr : Array[String], target : String) -> Bool {
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_missing_required_keys(
-  ctx : WalkCtx,
-  out : Array[Diagnostic],
-) -> Unit {
+fn check_missing_required_keys(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
       // Trust the resolved file kind when caller supplied one; otherwise
@@ -2487,14 +2501,12 @@ fn check_missing_required_keys(
 ///|
 fn known_events() -> Array[String] {
   [
-    "branch_protection_rule", "check_run", "check_suite", "create", "delete",
-    "deployment", "deployment_status", "discussion", "discussion_comment",
-    "fork", "gollum", "issue_comment", "issues", "label", "merge_group",
-    "milestone", "page_build", "project", "project_card", "project_column",
-    "public", "pull_request", "pull_request_review",
-    "pull_request_review_comment", "pull_request_target", "push",
-    "registry_package", "release", "repository_dispatch", "schedule", "status",
-    "watch", "workflow_call", "workflow_dispatch", "workflow_run",
+    "branch_protection_rule", "check_run", "check_suite", "create", "delete", "deployment",
+    "deployment_status", "discussion", "discussion_comment", "fork", "gollum", "issue_comment",
+    "issues", "label", "merge_group", "milestone", "page_build", "project", "project_card",
+    "project_column", "public", "pull_request", "pull_request_review", "pull_request_review_comment",
+    "pull_request_target", "push", "registry_package", "release", "repository_dispatch",
+    "schedule", "status", "watch", "workflow_call", "workflow_dispatch", "workflow_run",
   ]
 }
 
@@ -2592,7 +2604,9 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let reported = { "unterminated": false, "stray": false }
   walk_strings(ctx.doc, fn(s) {
-    if !s.contains("${{") && !s.contains("}}") { return }
+    if !s.contains("${{") && !s.contains("}}") {
+      return
+    }
     let opens = count_substr(s, "${{")
     let closes = count_substr(s, "}}")
     if opens > closes && !reported.get("unterminated").unwrap() {
@@ -2622,8 +2636,8 @@ fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 ///|
 fn known_contexts() -> Array[String] {
   [
-    "github", "env", "vars", "secrets", "inputs", "needs", "steps", "job",
-    "jobs", "runner", "matrix", "strategy",
+    "github", "env", "vars", "secrets", "inputs", "needs", "steps", "job", "jobs",
+    "runner", "matrix", "strategy",
   ]
 }
 
@@ -2632,7 +2646,9 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let contexts = known_contexts()
   let seen : Map[String, Bool] = {}
   walk_strings(ctx.doc, fn(s) {
-    if !s.contains("${{") { return }
+    if !s.contains("${{") {
+      return
+    }
     let chars = s.to_array()
     let n = chars.length()
     let mut i = 0
@@ -2666,10 +2682,11 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
               }
               if j < n && chars[j] == '.' {
                 if !array_contains_string(contexts, ident) &&
-                   !seen.contains(ident) {
+                  !seen.contains(ident) {
                   seen[ident] = true
                   let msg = match suggest(ident, contexts) {
-                    Some(c2) => "unknown context `\{ident}` (did you mean `\{c2}`?)"
+                    Some(c2) =>
+                      "unknown context `\{ident}` (did you mean `\{c2}`?)"
                     None => "unknown context `\{ident}`"
                   }
                   add_diag(out, "unknown-context-or-function", Error, msg)
@@ -2708,7 +2725,9 @@ fn check_github_env(
     Some(r) => {
       let to_env = r.contains("$GITHUB_ENV") || r.contains("${GITHUB_ENV}")
       let to_path = r.contains("$GITHUB_PATH") || r.contains("${GITHUB_PATH}")
-      if !to_env && !to_path { return }
+      if !to_env && !to_path {
+        return
+      }
       match find_untrusted_in_text(r) {
         Some(p) => {
           let target = if to_path { "$GITHUB_PATH" } else { "$GITHUB_ENV" }
@@ -2738,7 +2757,9 @@ fn check_unredacted_secrets(
 ) -> Unit {
   match step.run {
     Some(r) => {
-      if !contains_secrets_ref(r) { return }
+      if !contains_secrets_ref(r) {
+        return
+      }
       let transforms = [
         ("base64", "base64"),
         ("xxd", "xxd"),
@@ -2772,7 +2793,9 @@ fn check_unredacted_secrets(
 ///|
 fn runner_os_of(s : String) -> String {
   let lo = s.to_lower()
-  if lo.contains("windows") { return "windows" }
+  if lo.contains("windows") {
+    return "windows"
+  }
   if lo.contains("macos") || lo.contains("mac-") || lo.contains("darwin") {
     return "macos"
   }
@@ -2858,11 +2881,10 @@ fn flag_empty_map(
 ///|
 fn check_empty_mappings_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
-    Some(m) => {
+    Some(m) =>
       for k in ["jobs", "env", "defaults", "concurrency", "outputs"] {
         flag_empty_map(m, k, "workflow", out)
       }
-    }
     None => ()
   }
 }
@@ -2925,7 +2947,7 @@ fn is_constant_if(s : String) -> String? {
       let c0 = inner.get_char(0)
       let cn = inner.get_char(inner.length() - 1)
       if (c0 == Some('\'') && cn == Some('\'')) ||
-         (c0 == Some('"') && cn == Some('"')) {
+        (c0 == Some('"') && cn == Some('"')) {
         return Some(inner)
       }
     }
@@ -2985,9 +3007,9 @@ fn check_constant_if_step(
 ///|
 fn valid_perm_scopes() -> Array[String] {
   [
-    "actions", "attestations", "checks", "contents", "deployments",
-    "discussions", "id-token", "issues", "models", "packages", "pages",
-    "pull-requests", "repository-projects", "security-events", "statuses",
+    "actions", "attestations", "checks", "contents", "deployments", "discussions",
+    "id-token", "issues", "models", "packages", "pages", "pull-requests", "repository-projects",
+    "security-events", "statuses",
   ]
 }
 
@@ -3064,7 +3086,9 @@ fn check_permissions_syntax_job(
 
 ///|
 fn workflow_top_keys() -> Array[String] {
-  ["name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs"]
+  [
+    "name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs",
+  ]
 }
 
 ///|
@@ -3075,18 +3099,17 @@ fn action_top_keys() -> Array[String] {
 ///|
 fn job_keys() -> Array[String] {
   [
-    "name", "needs", "if", "runs-on", "environment", "concurrency",
-    "outputs", "env", "defaults", "steps", "strategy", "container",
-    "services", "secrets", "uses", "with", "permissions",
-    "continue-on-error", "timeout-minutes",
+    "name", "needs", "if", "runs-on", "environment", "concurrency", "outputs", "env",
+    "defaults", "steps", "strategy", "container", "services", "secrets", "uses",
+    "with", "permissions", "continue-on-error", "timeout-minutes",
   ]
 }
 
 ///|
 fn step_keys() -> Array[String] {
   [
-    "id", "name", "if", "run", "uses", "shell", "working-directory",
-    "env", "with", "continue-on-error", "timeout-minutes",
+    "id", "name", "if", "run", "uses", "shell", "working-directory", "env", "with",
+    "continue-on-error", "timeout-minutes",
   ]
 }
 
@@ -3123,7 +3146,11 @@ fn check_unexpected_keys_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         Workflow => false
         _ => m.contains("runs")
       }
-      let allowed = if is_action { action_top_keys() } else { workflow_top_keys() }
+      let allowed = if is_action {
+        action_top_keys()
+      } else {
+        workflow_top_keys()
+      }
       let location = if is_action { "action" } else { "workflow" }
       validate_keys(m, allowed, location, out)
     }
@@ -3236,7 +3263,10 @@ fn validate_cron_piece(piece : String, lo : Int, hi : Int) -> String? {
   // Split off `/step` suffix.
   let slash = index_of_char(piece, '/')
   let (range_part, step_part) = if slash >= 0 {
-    (piece.substring(start=0, end=slash), Some(piece.substring(start=slash + 1)))
+    (
+      piece.substring(start=0, end=slash),
+      Some(piece.substring(start=slash + 1)),
+    )
   } else {
     (piece, None)
   }
@@ -3312,7 +3342,7 @@ fn check_cron(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match m.get("on") {
         Some(Map(on)) =>
           match on.get("schedule") {
-            Some(Array(arr)) => {
+            Some(Array(arr)) =>
               for entry in arr {
                 match entry {
                   Map(em) =>
@@ -3333,7 +3363,6 @@ fn check_cron(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
                   _ => ()
                 }
               }
-            }
             _ => ()
           }
         _ => ()
@@ -3601,17 +3630,15 @@ fn known_runner_labels() -> Array[String] {
     // GitHub-hosted x64 Linux
     "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04",
     // Arm Linux (preview)
-    "ubuntu-22.04-arm", "ubuntu-24.04-arm",
+     "ubuntu-22.04-arm", "ubuntu-24.04-arm",
     // macOS
-    "macos-latest", "macos-15", "macos-14", "macos-13", "macos-12",
-    "macos-latest-large", "macos-latest-xlarge",
-    "macos-14-large", "macos-14-xlarge",
-    "macos-15-large", "macos-15-xlarge",
+     "macos-latest", "macos-15", "macos-14", "macos-13", "macos-12", "macos-latest-large",
+    "macos-latest-xlarge", "macos-14-large", "macos-14-xlarge", "macos-15-large",
+    "macos-15-xlarge",
     // Windows
-    "windows-latest", "windows-2025", "windows-2022", "windows-2019",
-    "windows-11-arm",
+     "windows-latest", "windows-2025", "windows-2022", "windows-2019", "windows-11-arm",
     // Common meta labels
-    "self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm",
+     "self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm",
   ]
 }
 
@@ -3630,8 +3657,8 @@ fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
   // label only if it looks like a GitHub-hosted runner family OR there is a
   // close known-label suggestion (catches typos like `ubunto-latest`).
   let looks_hosted = label.has_prefix("ubuntu-") ||
-                     label.has_prefix("macos-") ||
-                     label.has_prefix("windows-")
+    label.has_prefix("macos-") ||
+    label.has_prefix("windows-")
   if !looks_hosted && hint is None {
     return
   }
@@ -3672,8 +3699,12 @@ fn check_unknown_runner_label(
 fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
-      if m.contains("concurrency") { return }
-      if !triggers_warrant_concurrency(m) { return }
+      if m.contains("concurrency") {
+        return
+      }
+      if !triggers_warrant_concurrency(m) {
+        return
+      }
       let mut any_job = false
       let mut missing = false
       for j in ctx.jobs {
@@ -3724,10 +3755,7 @@ fn triggers_warrant_concurrency(m : Map[String, @yaml.Yaml]) -> Bool {
 ///|
 /// Walk every `${{ ... }}` interpolation and report obvious always-true /
 /// always-false comparisons (literal == literal, identifier == itself).
-fn check_meaningless_comparison(
-  ctx : WalkCtx,
-  out : Array[Diagnostic],
-) -> Unit {
+fn check_meaningless_comparison(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let seen : Map[String, Bool] = {}
   walk_strings(ctx.doc, fn(s) {
     if !s.contains("${{") {
@@ -3885,8 +3913,7 @@ fn check_glob_filter(
   out : Array[Diagnostic],
 ) -> Unit {
   let keys = [
-    "branches", "branches-ignore", "tags", "tags-ignore",
-    "paths", "paths-ignore",
+    "branches", "branches-ignore", "tags", "tags-ignore", "paths", "paths-ignore",
   ]
   for k in keys {
     match filter.get(k) {
@@ -3934,12 +3961,10 @@ fn glob_pattern_error(p : String) -> String? {
       if c == '}' {
         in_brace = false
       }
-    } else {
-      if c == '[' {
-        in_class = true
-      } else if c == '{' {
-        in_brace = true
-      }
+    } else if c == '[' {
+      in_class = true
+    } else if c == '{' {
+      in_brace = true
     }
     i = i + 1
   }
@@ -4114,9 +4139,10 @@ fn check_avail_in_node(
   out : Array[Diagnostic],
 ) -> Unit {
   match node {
-    Some(y) => walk_strings(y, fn(s) {
-      check_avail_in_string(s, location, forbidden, seen, out)
-    })
+    Some(y) =>
+      walk_strings(y, fn(s) {
+        check_avail_in_string(s, location, forbidden, seen, out)
+      })
     None => ()
   }
 }
@@ -4212,7 +4238,7 @@ fn check_action_yml_metadata(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         Some(Map(inputs)) =>
           inputs.each(fn(name, def) {
             match def {
-              Map(d) => {
+              Map(d) =>
                 match d.get("description") {
                   Some(String(_)) => ()
                   _ =>
@@ -4223,7 +4249,6 @@ fn check_action_yml_metadata(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
                       "action.yml input `\{name}` is missing `description:`",
                     )
                 }
-              }
               _ =>
                 add_diag(
                   out,
@@ -4255,8 +4280,7 @@ fn check_action_runs(
   match runs.get("using") {
     Some(String(u)) => {
       let known = [
-        "composite", "docker",
-        "node12", "node16", "node20", "node22", "node24",
+        "composite", "docker", "node12", "node16", "node20", "node22", "node24",
       ]
       if !array_contains_string(known, u) {
         let hint = match suggest(u, known) {
@@ -4436,12 +4460,24 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     for body in extract_expr_bodies(s) {
       let norm = normalize_ws(body)
       let patterns = [
-        ("always() && success()", "`always() && success()` is always equivalent to `always()`"),
-        ("success() && always()", "`success() && always()` is always equivalent to `always()`"),
-        ("always() && !cancelled()", "`always() && !cancelled()` simplifies to `!cancelled()`"),
-        ("!cancelled() && always()", "`!cancelled() && always()` simplifies to `!cancelled()`"),
-        ("success() || failure()", "`success() || failure()` ignores cancellation; prefer `!cancelled()`"),
-        ("failure() || success()", "`failure() || success()` ignores cancellation; prefer `!cancelled()`"),
+        (
+          "always() && success()", "`always() && success()` is always equivalent to `always()`",
+        ),
+        (
+          "success() && always()", "`success() && always()` is always equivalent to `always()`",
+        ),
+        (
+          "always() && !cancelled()", "`always() && !cancelled()` simplifies to `!cancelled()`",
+        ),
+        (
+          "!cancelled() && always()", "`!cancelled() && always()` simplifies to `!cancelled()`",
+        ),
+        (
+          "success() || failure()", "`success() || failure()` ignores cancellation; prefer `!cancelled()`",
+        ),
+        (
+          "failure() || success()", "`failure() || success()` ignores cancellation; prefer `!cancelled()`",
+        ),
         ("always() || success()", "`always() || X` is always true"),
         ("success() || always()", "`X || always()` is always true"),
       ]
@@ -4514,9 +4550,15 @@ fn find_unsound_contains_calls(expr : String) -> Array[String] {
   let mut i = 0
   while i + 9 < n {
     // Look for the literal substring `contains(` (case-sensitive).
-    if chars[i] == 'c' && chars[i + 1] == 'o' && chars[i + 2] == 'n' &&
-       chars[i + 3] == 't' && chars[i + 4] == 'a' && chars[i + 5] == 'i' &&
-       chars[i + 6] == 'n' && chars[i + 7] == 's' && chars[i + 8] == '(' {
+    if chars[i] == 'c' &&
+      chars[i + 1] == 'o' &&
+      chars[i + 2] == 'n' &&
+      chars[i + 3] == 't' &&
+      chars[i + 4] == 'a' &&
+      chars[i + 5] == 'i' &&
+      chars[i + 6] == 'n' &&
+      chars[i + 7] == 's' &&
+      chars[i + 8] == '(' {
       let arg_start = i + 9
       // Find the matching `)` while honoring nested parens / quotes.
       let mut depth = 1
@@ -4532,17 +4574,19 @@ fn find_unsound_contains_calls(expr : String) -> Array[String] {
             j = j + 1
           }
         } else if in_double {
-          if c == '"' { in_double = false }
-        } else {
-          if c == '\'' {
-            in_single = true
-          } else if c == '"' {
-            in_double = true
-          } else if c == '(' {
-            depth = depth + 1
-          } else if c == ')' {
-            depth = depth - 1
-            if depth == 0 { break }
+          if c == '"' {
+            in_double = false
+          }
+        } else if c == '\'' {
+          in_single = true
+        } else if c == '"' {
+          in_double = true
+        } else if c == '(' {
+          depth = depth + 1
+        } else if c == ')' {
+          depth = depth - 1
+          if depth == 0 {
+            break
           }
         }
         j = j + 1
@@ -4591,23 +4635,35 @@ fn split_top_level_comma(s : String) -> (String, String)? {
   while i < n {
     let c = chars[i]
     if in_single {
-      if c == '\'' { in_single = false }
-    } else if in_double {
-      if c == '"' { in_double = false }
-    } else {
-      if c == '\'' { in_single = true }
-      else if c == '"' { in_double = true }
-      else if c == '(' { depth = depth + 1 }
-      else if c == ')' { depth = depth - 1 }
-      else if c == ',' && depth == 0 {
-        let lhs = StringBuilder::new()
-        let mut p = 0
-        while p < i { lhs.write_char(chars[p]); p = p + 1 }
-        let rhs = StringBuilder::new()
-        let mut q = i + 1
-        while q < n { rhs.write_char(chars[q]); q = q + 1 }
-        return Some((lhs.to_string(), rhs.to_string()))
+      if c == '\'' {
+        in_single = false
       }
+    } else if in_double {
+      if c == '"' {
+        in_double = false
+      }
+    } else if c == '\'' {
+      in_single = true
+    } else if c == '"' {
+      in_double = true
+    } else if c == '(' {
+      depth = depth + 1
+    } else if c == ')' {
+      depth = depth - 1
+    } else if c == ',' && depth == 0 {
+      let lhs = StringBuilder::new()
+      let mut p = 0
+      while p < i {
+        lhs.write_char(chars[p])
+        p = p + 1
+      }
+      let rhs = StringBuilder::new()
+      let mut q = i + 1
+      while q < n {
+        rhs.write_char(chars[q])
+        q = q + 1
+      }
+      return Some((lhs.to_string(), rhs.to_string()))
     }
     i = i + 1
   }
@@ -4616,7 +4672,9 @@ fn split_top_level_comma(s : String) -> (String, String)? {
 
 ///|
 fn looks_like_literal(s : String) -> Bool {
-  if s == "" { return false }
+  if s == "" {
+    return false
+  }
   match s.get_char(0) {
     Some('\'') => true
     Some('"') => true

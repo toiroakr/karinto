@@ -319,57 +319,10 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
   })
 }
 
-///|
-#skip("not implemented yet")
-test "shellcheck: SC2086 unquoted variable in run" {
-  let yaml =
-    #|on: push
-    #|jobs:
-    #|  build:
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - run: echo $UNSAFE
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "shellcheck",
-        "severity": "warning",
-        "message": "shellcheck SC2086: Double quote to prevent globbing and word splitting",
-      },
-    ],
-  })
-}
-
-///|
-#skip("not implemented yet")
-test "pyflakes: undefined variable in python run" {
-  let yaml =
-    #|on: push
-    #|jobs:
-    #|  build:
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - shell: python
-    #|        run: print(undefined_var)
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
-    "diagnostics": [
-      {
-        "rule": "pyflakes",
-        "severity": "warning",
-        "message": "pyflakes: undefined name `undefined_var`",
-      },
-    ],
-  })
-}
-
+// `shellcheck` and `pyflakes` are catalogued as NotPlanned — karinto runs
+// in a Cloudflare Worker and cannot ship native shellcheck / pyflakes
+// binaries. See rules_catalog.mbt.
+//
 // actionlint's `script-injection` is consolidated into `template-injection`
 // (see rules_catalog.mbt). Its fixture lives in zizmor_rules_test.mbt.
 

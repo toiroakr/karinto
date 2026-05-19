@@ -501,12 +501,12 @@ test "known-vulnerable-actions: OSV-supplied via context list" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@v3
-  let res = @karinto.lint(
-    yaml,
-    vuln_uses=["actions/checkout@v3"],
-    disabled=["unpinned-uses", "checkout-persist-credentials-false"],
-  )
-  let hits = res.diagnostics.filter(fn(d) { d.rule == "known-vulnerable-actions" })
+  let res = @karinto.lint(yaml, vuln_uses=["actions/checkout@v3"], disabled=[
+    "unpinned-uses", "checkout-persist-credentials-false",
+  ])
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "known-vulnerable-actions"
+  })
   inspect(hits.length(), content="1")
 }
 
@@ -598,30 +598,9 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
   })
 }
 
-///|
-#skip("not implemented yet")
-test "ref-confusion: tag and branch share a name" {
-  let yaml =
-    #|on: push
-    #|jobs:
-    #|  build:
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - uses: org/repo@main
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "ref-confusion",
-        "severity": "warning",
-        "message": "ref `main` is both a branch and a tag in `org/repo`",
-      },
-    ],
-  })
-}
+// `ref-confusion` is catalogued as NotPlanned — karinto's `unpinned-uses`
+// already mandates SHA pins, so confusable tag/branch refs cannot occur in
+// compliant workflows. See rules_catalog.mbt.
 
 ///|
 #skip("not implemented yet")
@@ -721,30 +700,9 @@ test "self-hosted-runner: job runs on self-hosted runner" {
   })
 }
 
-///|
-#skip("not implemented yet")
-test "stale-action-refs: SHA pin has no matching tag" {
-  let yaml =
-    #|on: push
-    #|jobs:
-    #|  build:
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "stale-action-refs",
-        "severity": "info",
-        "message": "pinned SHA `1234567…` has no matching tag in `actions/checkout`",
-      },
-    ],
-  })
-}
+// `stale-action-refs` is catalogued as NotPlanned — would require a
+// GitHub API call to enumerate tags reachable from a SHA, and the upstream
+// signal is only informational. See rules_catalog.mbt.
 
 ///|
 test "superfluous-actions: setup-node duplicated across steps" {

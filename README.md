@@ -11,12 +11,14 @@ Public endpoint: `https://karinto.toiroakr.workers.dev`
 
 ## Coverage
 
-62 of 84 catalogued rules are active. They cover syntax, expression typing
+61 of 82 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
 triggers, and more). The full catalogue with status, severity, and upstream
-origins lives in [`rules_catalog.mbt`](rules_catalog.mbt).
+origins lives in [`rules_catalog.md`](rules_catalog.md) (human-readable
+mirror of the in-code source of truth at
+[`rules_catalog.mbt`](rules_catalog.mbt)).
 
 ## API
 
@@ -29,10 +31,10 @@ body beats query, query beats path on conflict.
 | --- | --- | --- |
 | `type` | `workflow` \| `action` \| *(omit)* | Optional; auto-detected when blank |
 | `content` | string | The YAML source |
-| `disable` | string | Comma-separated glob patterns of rule IDs to skip |
+| `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
 | `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Branch names and tags are rejected — pin to a commit. |
-| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. |
+| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 
 ### Examples

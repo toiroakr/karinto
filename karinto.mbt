@@ -258,40 +258,43 @@ fn is_disabled(rule_id : String, disabled : Array[String]) -> Bool {
 }
 
 ///|
-/// Simple glob matching supporting `*` (any chars) and exact match.
+/// Glob match with `*` (any run) and `?` (single char). Two-pointer with
+/// last-star backtrack — eliminates exponential blowup (e.g. `*a*a*…*b`
+/// vs `aaaa…`); worst case is O(m·n) when the post-`*` suffix has to be
+/// rescanned at each text position (`*aaab` vs `aaaa…`). The Worker caps
+/// `disable=` patterns at 128 chars / 64 entries so the bound is small
+/// enough that DoS via this path is not feasible.
 fn glob_match(pat : String, s : String) -> Bool {
-  glob_match_chars(pat.to_array(), 0, s.to_array(), 0)
-}
-
-///|
-fn glob_match_chars(
-  pat : Array[Char],
-  pi : Int,
-  s : Array[Char],
-  si : Int,
-) -> Bool {
-  if pi >= pat.length() {
-    return si >= s.length()
-  }
-  let pc = pat[pi]
-  if pc == '*' {
-    // Try matching zero or more chars.
-    let mut k = si
-    while k <= s.length() {
-      if glob_match_chars(pat, pi + 1, s, k) {
-        return true
-      }
-      k = k + 1
-    }
-    false
-  } else {
-    if si >= s.length() {
+  let p = pat.to_array()
+  let t = s.to_array()
+  let m = p.length()
+  let n = t.length()
+  let mut i = 0
+  let mut j = 0
+  let mut star = -1
+  let mut restart = 0
+  while j < n {
+    // Wildcard must be checked before the literal/`?` branch — otherwise
+    // a text char that happens to equal `*` would be consumed as a
+    // literal instead of recording the wildcard position.
+    if i < m && p[i] == '*' {
+      star = i
+      restart = j
+      i = i + 1
+    } else if i < m && (p[i] == '?' || p[i] == t[j]) {
+      i = i + 1
+      j = j + 1
+    } else if star >= 0 {
+      // Rewind to the last `*` and advance the text cursor by one.
+      i = star + 1
+      restart = restart + 1
+      j = restart
+    } else {
       return false
     }
-    if pc == '?' || pc == s[si] {
-      glob_match_chars(pat, pi + 1, s, si + 1)
-    } else {
-      false
-    }
   }
+  while i < m && p[i] == '*' {
+    i = i + 1
+  }
+  i == m
 }
