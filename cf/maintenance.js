@@ -84,7 +84,7 @@ export default {
 
     objects.sort((a, b) => new Date(a.uploaded) - new Date(b.uploaded));
     // First collect the keys we want to delete, then issue them in batches.
-    // We stop collecting once `total - freed < target` OR the per-run cap is
+    // We stop collecting once `total - freed <= target` OR the per-run cap is
     // hit, whichever comes first.
     const toDelete = [];
     let freed = 0;
@@ -96,7 +96,7 @@ export default {
       }
       toDelete.push(obj.key);
       freed += obj.size;
-      if (total - freed < target) break;
+      if (total - freed <= target) break;
     }
     for (let i = 0; i < toDelete.length; i += DELETE_BATCH_SIZE) {
       await env.CAPTURES.delete(toDelete.slice(i, i + DELETE_BATCH_SIZE));

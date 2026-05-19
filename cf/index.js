@@ -625,13 +625,17 @@ async function captureRequest(env, params, result, headers) {
   if (params.repo) return;
   if (!params.content) return;
   if (!result?.ok) return;
+  // Opt-out checks run before the TextEncoder pass so opted-out requests
+  // (replay traffic, callers that pass `no_capture=1` or
+  // `x-karinto-no-capture`) skip the byte-length encode entirely on the
+  // hot path.
+  if (isTrue(params.no_capture)) return;
+  if (isTrue(headers?.get("x-karinto-no-capture"))) return;
   const limitKib = positiveNumber(env.CAPTURE_CONTENT_LIMIT_KIB, DEFAULT_CAPTURE_CONTENT_LIMIT_KIB);
   // length counts UTF-16 code units; capture size is determined by UTF-8
   // bytes, so non-ASCII YAML would otherwise sneak past the limit.
   const byteLen = new TextEncoder().encode(params.content).byteLength;
   if (byteLen > limitKib * 1024) return;
-  if (isTrue(params.no_capture)) return;
-  if (isTrue(headers?.get("x-karinto-no-capture"))) return;
 
   const normalized = normalizeRequest(params);
   const hash = await sha256Hex(JSON.stringify(normalized));
