@@ -41,9 +41,14 @@ const TOOLS = [
     name: "ghalint",
     miseKey: "aqua:suzuki-shunsuke/ghalint",
     repo: "suzuki-shunsuke/ghalint",
-    // ghalint scatters per-policy testdata under pkg/policy/; vendor the
-    // whole pkg/ tree and let the comparison engine pick up .yml files.
-    vendor: [{ from: "pkg", to: "pkg" }],
+    // ghalint stores its policy test cases as inline Go string literals in
+    // *_test.go (no yaml under pkg/), so the only redistributable fixtures
+    // are the two dogfood files at the repo root that exercise the linter
+    // against intentionally-violating workflow/action definitions.
+    vendor: [
+      { from: "test-workflow.yaml", to: "test-workflow.yaml" },
+      { from: "test-action.yaml", to: "test-action.yaml" },
+    ],
   },
 ];
 

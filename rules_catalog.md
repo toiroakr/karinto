@@ -14,9 +14,14 @@ below).
 ## Status legend
 
 - **Implemented** — rule logic lives in [`rules.mbt`](rules.mbt); fixtures
-  are active in the per-source `*_rules_test.mbt`.
-- **Planned** — scaffolded as `#skip("not implemented yet")` test cases with
-  fixture YAML and expected JSON; implementation pending.
+  are active in the per-source `*_rules_test.mbt` and karinto matches the
+  upstream's full firing scope (verified by `upstream-parity`).
+- **Planned** — implementation pending or *preview-quality*. A `Planned`
+  entry can mean either (a) only `#skip("not implemented yet")` fixtures
+  exist, or (b) `rules.mbt` ships a narrower implementation that fires on a
+  subset of the upstream's cases. `upstream-parity` gates `Planned` rules
+  out of the hard-divergence count; promote back to `Implemented` once the
+  gap to upstream is closed.
 - **Not planned** — deliberately out of scope (runtime constraint, or
   already covered by another karinto rule). No fixture is kept.
 - **Consolidated** — the upstream check is fully covered by another karinto
@@ -105,16 +110,16 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `dangerous-triggers` | [`zizmor:dangerous-triggers`](https://docs.zizmor.sh/audits/#dangerous-triggers) | error | Implemented | |
 | `dependabot-cooldown` | [`zizmor:dependabot-cooldown`](https://docs.zizmor.sh/audits/#dependabot-cooldown) | info | Implemented | Applies to `dependabot.yml` only — neither workflow nor action. |
 | `dependabot-execution` | [`zizmor:dependabot-execution`](https://docs.zizmor.sh/audits/#dependabot-execution) | error | Planned | Fixtures in place. |
-| `excessive-permissions` | [`zizmor:excessive-permissions`](https://docs.zizmor.sh/audits/#excessive-permissions) | warning | Implemented | |
+| `excessive-permissions` | [`zizmor:excessive-permissions`](https://docs.zizmor.sh/audits/#excessive-permissions) | warning | Planned | Preview implementation lives in `rules.mbt` but the permissions inheritance / read-write semantics are narrower than upstream. |
 | `forbidden-uses` | [`zizmor:forbidden-uses`](https://docs.zizmor.sh/audits/#forbidden-uses) | warning | Planned | Natural fit for karinto: thread a per-request allow/denylist (e.g. `?forbidden=org/*,bad-action/*`) through the stateless API — no server-side config store needed. |
 | `github-app` | [`zizmor:github-app`](https://docs.zizmor.sh/audits/#github-app) | warning | Planned | Detection heuristics still being refined; fixtures in place. |
-| `github-env` | [`zizmor:github-env`](https://docs.zizmor.sh/audits/#github-env) | error | Implemented | |
+| `github-env` | [`zizmor:github-env`](https://docs.zizmor.sh/audits/#github-env) | error | Planned | Preview implementation; upstream tracks tainted writes to `$GITHUB_ENV`, karinto currently only `run:` grep. |
 | `hardcoded-container-credentials` | [`zizmor:hardcoded-container-credentials`](https://docs.zizmor.sh/audits/#hardcoded-container-credentials) + `actionlint:hardcoded-credentials` | error | Implemented | **Consolidated** — absorbs the matching actionlint check. |
 | `impostor-commit` | [`zizmor:impostor-commit`](https://docs.zizmor.sh/audits/#impostor-commit) | error | Planned | Requires GitHub API access to verify SHA membership; fixtures in place. |
-| `insecure-commands` | [`zizmor:insecure-commands`](https://docs.zizmor.sh/audits/#insecure-commands) | warning | Implemented | |
+| `insecure-commands` | [`zizmor:insecure-commands`](https://docs.zizmor.sh/audits/#insecure-commands) | warning | Planned | Preview implementation; narrower than upstream's full env-inheritance traversal. |
 | `known-vulnerable-actions` | [`zizmor:known-vulnerable-actions`](https://docs.zizmor.sh/audits/#known-vulnerable-actions) | error | Implemented | Optional OSV.dev lookup via `osv=1` query parameter. |
-| `misfeature` | [`zizmor:misfeature`](https://docs.zizmor.sh/audits/#misfeature) | info | Implemented | |
-| `obfuscation` | [`zizmor:obfuscation`](https://docs.zizmor.sh/audits/#obfuscation) | warning | Implemented | |
+| `misfeature` | [`zizmor:misfeature`](https://docs.zizmor.sh/audits/#misfeature) | info | Planned | Preview implementation; upstream catalog of misfeatures grows over time. |
+| `obfuscation` | [`zizmor:obfuscation`](https://docs.zizmor.sh/audits/#obfuscation) | warning | Planned | Preview implementation; full coverage of upstream's obfuscation taxonomy pending. |
 | `overprovisioned-secrets` | [`zizmor:overprovisioned-secrets`](https://docs.zizmor.sh/audits/#overprovisioned-secrets) | warning | Implemented | |
 | `ref-confusion` | [`zizmor:ref-confusion`](https://docs.zizmor.sh/audits/#ref-confusion) | warning | Not planned | The hazard (a `uses:` ref that could mean a tag or a branch) cannot arise in workflows that already comply with karinto's `unpinned-uses` SHA-pin requirement. |
 | `ref-version-mismatch` | [`zizmor:ref-version-mismatch`](https://docs.zizmor.sh/audits/#ref-version-mismatch) | warning | Planned | Requires GitHub API to resolve tag → SHA; fixtures in place. |
@@ -122,16 +127,16 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `secrets-outside-env` | [`zizmor:secrets-outside-env`](https://docs.zizmor.sh/audits/#secrets-outside-env) | warning | Implemented | |
 | `self-hosted-runner` | [`zizmor:self-hosted-runner`](https://docs.zizmor.sh/audits/#self-hosted-runner) | warning | Implemented | |
 | `stale-action-refs` | [`zizmor:stale-action-refs`](https://docs.zizmor.sh/audits/#stale-action-refs) | info | Not planned | Would require a GitHub API call to enumerate tags reachable from a SHA. The signal is only informational (severity `info`); the API/latency/rate-limit cost is not worth it. |
-| `superfluous-actions` | [`zizmor:superfluous-actions`](https://docs.zizmor.sh/audits/#superfluous-actions) | info | Implemented | |
-| `template-injection` | [`zizmor:template-injection`](https://docs.zizmor.sh/audits/#template-injection) + `actionlint:script-injection` | error | Implemented | **Consolidated** — absorbs the matching actionlint taint check. |
+| `superfluous-actions` | [`zizmor:superfluous-actions`](https://docs.zizmor.sh/audits/#superfluous-actions) | info | Planned | Preview implementation with a short allowlist; upstream maintains a fuller setup-* ↔ runner-tooling mapping. |
+| `template-injection` | [`zizmor:template-injection`](https://docs.zizmor.sh/audits/#template-injection) + `actionlint:script-injection` | error | Planned | **Consolidated** — absorbs the matching actionlint taint check. Preview implementation matches simple `${{ … }}` patterns; full upstream parity needs an expression parser + uses-sink catalogue. |
 | `undocumented-permissions` | [`zizmor:undocumented-permissions`](https://docs.zizmor.sh/audits/#undocumented-permissions) | info | Planned | Stylistic; fixtures in place. |
-| `unpinned-images` | [`zizmor:unpinned-images`](https://docs.zizmor.sh/audits/#unpinned-images) + [`ghalint:ghl-007`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/007.md) | warning | Implemented | **Consolidated** — absorbs ghalint `deny_job_container_latest_image`. |
-| `unpinned-tools` | [`zizmor:unpinned-tools`](https://docs.zizmor.sh/audits/#unpinned-tools) | warning | Implemented | |
+| `unpinned-images` | [`zizmor:unpinned-images`](https://docs.zizmor.sh/audits/#unpinned-images) + [`ghalint:ghl-007`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/007.md) | warning | Planned | **Consolidated** — absorbs ghalint `deny_job_container_latest_image`. Preview implementation covers `container.image`; upstream additionally handles `services:` and `docker://` forms. |
+| `unpinned-tools` | [`zizmor:unpinned-tools`](https://docs.zizmor.sh/audits/#unpinned-tools) | warning | Planned | Preview implementation; upstream maintains a fuller catalogue of `curl | sh`-style installers. |
 | `unpinned-uses` | [`zizmor:unpinned-uses`](https://docs.zizmor.sh/audits/#unpinned-uses) + [`ghalint:ghl-008`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/008.md) | warning | Implemented | **Consolidated** — absorbs ghalint `action_ref_should_be_full_length_commit_sha`. |
-| `unredacted-secrets` | [`zizmor:unredacted-secrets`](https://docs.zizmor.sh/audits/#unredacted-secrets) | error | Implemented | |
-| `unsound-condition` | [`zizmor:unsound-condition`](https://docs.zizmor.sh/audits/#unsound-condition) | warning | Implemented | |
+| `unredacted-secrets` | [`zizmor:unredacted-secrets`](https://docs.zizmor.sh/audits/#unredacted-secrets) | error | Planned | Preview implementation. |
+| `unsound-condition` | [`zizmor:unsound-condition`](https://docs.zizmor.sh/audits/#unsound-condition) | warning | Planned | Preview implementation; upstream uses full expression evaluation. |
 | `unsound-contains` | [`zizmor:unsound-contains`](https://docs.zizmor.sh/audits/#unsound-contains) | warning | Implemented | |
-| `use-trusted-publishing` | [`zizmor:use-trusted-publishing`](https://docs.zizmor.sh/audits/#use-trusted-publishing) | info | Implemented | |
+| `use-trusted-publishing` | [`zizmor:use-trusted-publishing`](https://docs.zizmor.sh/audits/#use-trusted-publishing) | info | Planned | Preview implementation; upstream catalogues more package-manager publish workflows. |
 
 ## ghalint family
 

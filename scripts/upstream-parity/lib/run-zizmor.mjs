@@ -7,7 +7,8 @@ import { spawnSync } from "node:child_process";
 export function lintFixture({ bin, file }) {
   // --format sarif emits a single JSON document on stdout; --no-online-audits
   // keeps the run hermetic (no GitHub API calls). --pedantic surfaces every
-  // severity tier so we don't silently drop info-level findings.
+  // persona — karinto does not model the Pedantic-vs-Default split and aims
+  // to match zizmor's full coverage, so we always run pedantic.
   const r = spawnSync(
     bin,
     [

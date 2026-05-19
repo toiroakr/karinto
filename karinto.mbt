@@ -99,6 +99,13 @@ pub impl ToJson for LintResult with to_json(self) {
 /// - `content`: the YAML source.
 /// - `kind`: explicit file kind. `Unknown` triggers heuristic detection.
 /// - `disabled`: glob patterns of rule IDs to skip.
+///
+/// Inline comments of the form `# karinto: ignore[a, b]`,
+/// `# zizmor: ignore[a]`, `# ghalint: ignore[a]`, or `# actionlint: ignore[a]`
+/// found anywhere in `content` extend `disabled` for the file. Karinto
+/// honours every upstream's syntax so vendored workflows lint cleanly when
+/// the author already opted out of a specific finding with the tool that
+/// originally fired it.
 pub fn lint(
   content : String,
   kind? : FileKind = Unknown,
@@ -106,6 +113,7 @@ pub fn lint(
   vuln_uses? : Array[String] = [],
 ) -> LintResult {
   let lines = count_lines(content)
+  let merged_disabled = merge_inline_ignores(content, disabled)
   let docs = try? @yaml.Yaml::load_from_string(content)
   match docs {
     Err(e) =>
@@ -122,10 +130,82 @@ pub fn lint(
         _ => kind
       }
       let stats = compute_stats(doc, lines)
-      let diagnostics = run_rules(doc, resolved_kind, disabled, vuln_uses)
+      let diagnostics = run_rules(
+        doc, resolved_kind, merged_disabled, vuln_uses,
+      )
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
   }
+}
+
+///|
+/// Scans `content` for `# <tool>: ignore[a, b]` directives and returns the
+/// union of `disabled` with the collected rule IDs. Tool names accepted:
+/// karinto, zizmor, ghalint, actionlint. Rule IDs are trimmed; empty
+/// brackets and missing comments are no-ops.
+fn merge_inline_ignores(
+  content : String,
+  disabled : Array[String],
+) -> Array[String] {
+  let extra : Array[String] = []
+  let tools = ["karinto", "zizmor", "ghalint", "actionlint"]
+  for line in content.split("\n") {
+    let s = line.to_string()
+    for tool in tools {
+      let needle = tool + ": ignore["
+      match index_of(s, needle) {
+        Some(i) => {
+          let after = s.substring(start=i + needle.length())
+          match index_of(after, "]") {
+            Some(j) => {
+              let inner = after.substring(start=0, end=j)
+              for part in inner.split(",") {
+                let trimmed = trim_ws(part.to_string())
+                if trimmed.length() > 0 {
+                  extra.push(trimmed)
+                }
+              }
+            }
+            None => ()
+          }
+        }
+        None => ()
+      }
+    }
+  }
+  if extra.length() == 0 {
+    return disabled
+  }
+  let merged : Array[String] = []
+  for d in disabled {
+    merged.push(d)
+  }
+  for d in extra {
+    merged.push(d)
+  }
+  merged
+}
+
+///|
+fn index_of(s : String, needle : String) -> Int? {
+  let n = s.length()
+  let m = needle.length()
+  if m == 0 || m > n {
+    return None
+  }
+  let mut i = 0
+  while i + m <= n {
+    if s.substring(start=i, end=i + m) == needle {
+      return Some(i)
+    }
+    i = i + 1
+  }
+  None
+}
+
+///|
+fn trim_ws(s : String) -> String {
+  s.trim(chars=" \t\r").to_string()
 }
 
 ///|
