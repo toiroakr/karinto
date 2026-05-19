@@ -177,10 +177,15 @@ async function fetchCaptures(env, limit) {
   if (truncated) {
     console.warn(
       `captures/ list truncated at ${MAX_LIST_PAGES} pages (${all.length} objects); ` +
-      `picking newest ${limit} from the listed subset.`,
+      `picking the most recently first-seen ${limit} from the listed subset.`,
     );
   }
 
+  // Captures are content-addressed and written with `etagDoesNotMatch: "*"`
+  // for dedup, so `lastModified` is the timestamp we *first* saw a request
+  // hash — repeats don't bump it. Sorting picks the most recently first-seen
+  // unique requests, which favors new traffic patterns over repeats. That's
+  // what we want for replay: cover the freshest distinct surface area.
   all.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
   const slice = all.slice(0, limit);
 
@@ -318,10 +323,12 @@ function computeDiff(captured, replayed) {
   return diffs;
 }
 
-// Stable stringify that matches JSON.stringify's handling of `undefined`:
-// drop it from object values (so `{a:1, b:undefined}` and `{a:1}` canonicalize
-// identically) and serialize it as `null` inside arrays (matching
-// `JSON.stringify([1,undefined,2]) === "[1,null,2]"`).
+// Stable stringify for metadata diff comparison. The main purpose is to sort
+// object keys so insertion order doesn't show up as a diff. Inside objects we
+// drop `undefined` values (matching JSON.stringify) so `{a:1, b:undefined}`
+// canonicalizes identically to `{a:1}`. Inside arrays — and at the top level —
+// we emit `"null"` instead of JSON.stringify's literal `undefined`/`null`
+// asymmetry, so any pair of inputs always produces a comparable string.
 function canonicalJson(value) {
   if (value === undefined) return "null";
   if (value === null || typeof value !== "object") return JSON.stringify(value);
