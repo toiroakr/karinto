@@ -71,17 +71,7 @@ else
   bad "repo without commit (status=$code): $res"
 fi
 
-# 5. repo + short hex commit -> 400 (ambiguous with a branch/tag of the same shape)
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=deadbee&targets=action.yml")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
-  ok "repo + short hex commit -> 400"
-else
-  bad "repo + short hex commit (status=$code): $res"
-fi
-
-# 5b. repo + non-hex commit (branch name) -> 400
+# 5. repo + non-hex commit (branch name) -> 400
 res_body=$(mktemp)
 code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=main&targets=action.yml")
 res=$(cat "$res_body"); rm -f "$res_body"
@@ -99,12 +89,15 @@ else
   bad "path-based repo lint: $res"
 fi
 
-# 7. path with too few segments -> 400
-code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/actions/checkout")
-if [ "$code" = "400" ]; then
-  ok "path /owner/repo (no commit) -> 400"
+# 7. unrelated path (`/favicon.ico`) is ignored, so the body-less request
+#    falls through to the standard `missing content or repo` 400.
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/favicon.ico")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("missing"))' >/dev/null <<<"$res"; then
+  ok "non-repo path falls through to missing-content 400"
 else
-  bad "path /owner/repo returned $code"
+  bad "non-repo path (status=$code): $res"
 fi
 
 # 8. path-traversal in targets -> 400 (must not escape the pinned commit prefix)
@@ -115,6 +108,16 @@ if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target
   ok "targets with .. segment -> 400"
 else
   bad "targets with .. segment (status=$code): $res"
+fi
+
+# 9. percent-encoded path-traversal -> 400 (defense-in-depth)
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=%2e%2e%2fmain%2faction.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
+  ok "percent-encoded traversal -> 400"
+else
+  bad "percent-encoded traversal (status=$code): $res"
 fi
 
 exit "$failed"

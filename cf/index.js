@@ -56,7 +56,9 @@ export default {
         disable: params.disable || "",
         repo: params.repo || "",
         commit: params.commit || "",
-        targets: params.targets || params._pathTarget || "",
+        targets: Object.prototype.hasOwnProperty.call(params, "targets")
+          ? String(params.targets ?? "")
+          : params._pathTarget || "",
         content_lines: params.content ? params.content.split("\n").length : 0,
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
@@ -303,19 +305,22 @@ async function readParams(request) {
 }
 
 // `/owner/repo/commit[/target/...]` → `{ repo, commit, _pathTarget? }`.
-// Trailing segments past the commit form a single target path. We store it
-// under a private key so a literal comma in the path is not split into
-// multiple targets the way the comma-delimited `targets=` field is.
-// Multi-target requests still need to come through `targets=` query/body.
+// Segments after the commit are joined as a single target path (so nested
+// paths like `.github/workflows/ci.yml` work) and stored under a private
+// key, so a literal `,` in the path is not split into multiple targets the
+// way the comma-delimited `targets=` field is. Multi-target requests still
+// need to come through `targets=` query/body.
+//
+// Only paths that look like the repo-mode pattern are interpreted; anything
+// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`) is left to
+// the regular content/repo body parameters. This keeps the Worker mountable
+// under arbitrary path prefixes without bricking unrelated requests.
 function parsePath(pathname) {
   const segments = pathname.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
-  if (segments.length === 0) return {};
-  if (segments.length < 3) {
-    throw new Error(
-      `request path must be /<owner>/<repo>/<commit>[/<target>], got /${segments.join("/")}`,
-    );
-  }
+  if (segments.length < 3) return {};
   const [owner, repo, commit, ...rest] = segments;
+  if (!/^[A-Za-z0-9_.\-]+$/.test(owner) || !/^[A-Za-z0-9_.\-]+$/.test(repo)) return {};
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) return {};
   const out = { repo: `${owner}/${repo}`, commit };
   if (rest.length > 0) out._pathTarget = rest.join("/");
   return out;
@@ -460,7 +465,10 @@ function countChar(s, ch) {
 // interpolated into `https://raw.githubusercontent.com/<repo>/<commit>/<path>`.
 // `..` segments would be URL-normalized by fetch / GitHub's edge and let a
 // caller fetch from a different ref entirely; `\` and absolute paths likewise
-// undermine the prefix.
+// undermine the prefix. We also reject `%` so percent-encoded variants like
+// `%2e%2e%2f` can't bypass the segment check (path-from-path-prefix is already
+// decoded, path-from-body/query is forwarded verbatim into the URL — easier
+// to disallow `%` outright than to track two normalization layers).
 function validateTargetPath(path) {
   if (typeof path !== "string" || path.length === 0) {
     throw httpError("target path must be a non-empty string", 400);
@@ -468,7 +476,7 @@ function validateTargetPath(path) {
   if (path.length > 256) {
     throw httpError(`target path too long (max 256 chars): ${truncatePreview(path)}`, 400);
   }
-  if (path.startsWith("/") || path.includes("\\")) {
+  if (path.startsWith("/") || path.includes("\\") || path.includes("%")) {
     throw httpError(`invalid target path: ${truncatePreview(path)}`, 400);
   }
   for (const seg of path.split("/")) {
@@ -485,14 +493,15 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   }
   const commit = params.commit || "";
   if (!commit) {
-    throw new Error("`commit` is required with `repo` (full 40-char commit SHA)");
+    throw new Error("`commit` is required with `repo` (commit SHA, full or abbreviated)");
   }
-  // Require the full SHA. Any shorter hex string is ambiguous with a branch
-  // or tag of the same shape (e.g. `deadbee`), which `raw.githubusercontent.com`
-  // would happily resolve as a mutable ref — defeating the whole point of
-  // requiring `commit`.
-  if (!/^[0-9a-fA-F]{40}$/.test(commit)) {
-    throw new Error(`invalid commit: ${commit} (expected 40 hex characters)`);
+  // Accept the same range Git itself uses for abbreviated SHAs (7-64 hex).
+  // An all-hex value of this shape could technically collide with a branch
+  // or tag of the same name (e.g. `deadbee`); we accept that trade-off for
+  // ergonomics. Callers who need ironclad immutability should pass the full
+  // 40-char SHA.
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
+    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
   }
   let targets;
   if (Object.prototype.hasOwnProperty.call(params, "targets")) {

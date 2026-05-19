@@ -23,9 +23,12 @@ mirror of the in-code source of truth at
 ## API
 
 `GET` or `POST`. Parameters can come from the URL path
-(`/<owner>/<repo>/<commit>[/<target>]`), the query string, the request
-body (raw `key=value&...`, JSON, or a plain YAML blob), or any mix —
-body beats query, query beats path on conflict.
+(`/<owner>/<repo>/<commit>[/<target/path/...>]` — segments after the
+commit are joined into a single nested target path), the query string,
+the request body (raw `key=value&...`, JSON, or a plain YAML blob), or
+any mix — body beats query, query beats path on conflict. Paths that
+don't match the repo-mode shape are ignored so the Worker can be served
+under arbitrary path prefixes.
 
 | Key | Type | Notes |
 | --- | --- | --- |
@@ -33,7 +36,7 @@ body beats query, query beats path on conflict.
 | `content` | string | The YAML source |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `commit` | full 40-char hex SHA | **Required** whenever `repo` is set. Short SHAs, branch names, and tags are rejected — pin to a specific commit. |
+| `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Branch names and tags are rejected. Short SHAs are accepted but technically ambiguous with a same-shape branch/tag — use the full 40-char SHA for guaranteed immutability. |
 | `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 
