@@ -309,12 +309,22 @@ function computeDiff(captured, replayed) {
   // a PR could regress documented response metadata without failing here.
   const capMeta = stripDiagnostics(captured);
   const repMeta = stripDiagnostics(replayed);
-  const capMetaJson = JSON.stringify(capMeta);
-  const repMetaJson = JSON.stringify(repMeta);
-  if (capMetaJson !== repMetaJson) {
+  // Use a canonical stringify (sorted object keys) so a different insertion
+  // order between prod and PR does not register as a metadata diff — we only
+  // want to flag semantic differences.
+  if (canonicalJson(capMeta) !== canonicalJson(repMeta)) {
     diffs.push({ kind: "metadata", captured: capMeta, replayed: repMeta });
   }
   return diffs;
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalJson).join(",") + "]";
+  }
+  const keys = Object.keys(value).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
 }
 
 function stripDiagnostics(resp) {
