@@ -30,6 +30,61 @@ import { lintFixture as lintActionlint } from "./lib/run-actionlint.mjs";
 import { lintFixture as lintZizmor } from "./lib/run-zizmor.mjs";
 import { lintFixture as lintGhalint } from "./lib/run-ghalint.mjs";
 
+// actionlint's `Kind` field is coarse — one Kind covers several karinto
+// rules — so we can't go fully per-rule. But mapping Kind → candidate
+// karinto IDs lets us filter out findings karinto explicitly doesn't
+// implement (shellcheck/pyflakes are NotPlanned by design). A fixture
+// that only fires those Kinds shouldn't count as "upstream fired, karinto
+// silent". Each Kind lists every karinto rule that could plausibly catch
+// the same finding; the aggregate check uses the catalog status to filter.
+const ACTIONLINT_KIND_TO_KARINTO = {
+  "syntax-check": [
+    "unexpected-keys",
+    "missing-required-keys",
+    "empty-mappings",
+    "invalid-mapping-values",
+    "meaningless-comparison",
+    "permissions-syntax",
+    "uses-syntax",
+    "yaml-anchor-issues",
+    "action-yml-metadata",
+    "duplicate-job-step-ids",
+    "invalid-env-var-name",
+    "reusable-workflow-definition",
+  ],
+  "expression": [
+    "expression-syntax",
+    "expression-type-mismatch",
+    "unknown-context-or-function",
+    "context-availability",
+    "expression-steps-type",
+    "expression-matrix-type",
+    "expression-needs-type",
+  ],
+  "events": ["webhook-events", "workflow-dispatch-inputs", "cron-and-timezone"],
+  "workflow-call": ["reusable-workflow-definition", "local-action-inputs"],
+  "runner-label": ["unknown-runner-label"],
+  "glob": ["glob-patterns"],
+  "if-cond": ["constant-if-condition"],
+  "permissions": ["permissions-syntax"],
+  "matrix": ["matrix-values"],
+  "shellcheck": [],
+  "pyflakes": [],
+  "action": [
+    "popular-action-inputs",
+    "outdated-action-version",
+    "action-yml-metadata",
+    "uses-syntax",
+    "deprecated-action-inputs",
+  ],
+  "id": ["job-step-id-naming", "duplicate-job-step-ids"],
+  "credentials": ["hardcoded-container-credentials"],
+  "job-needs": ["job-needs-graph"],
+  "deprecated-commands": ["deprecated-workflow-commands"],
+  "shell-name": ["shell-name-per-os"],
+  "env-var": ["invalid-env-var-name"],
+};
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
 
@@ -108,12 +163,17 @@ function classify(source, file, karinto, upstream) {
     const upstreamHits = new Set(upstream.ok ? upstream.ruleIds : []);
     const karintoHits = new Set(karinto.ok ? karinto.ruleIds : []);
 
-    // Rules with an origin in this source.
-    const inSource = new Set();
-    for (const [, entry] of m) inSource.add(entry.id);
+    // Rules with a this-source origin, partitioned by status. Planned
+    // rules drop from both `expected` and `actual` so preview-quality
+    // implementations don't drive hard divergences in either direction
+    // (matching the semantics documented in rules_catalog.md).
+    const inSourceImplemented = new Set();
+    const inSourcePlanned = new Set();
+    for (const [, entry] of m) {
+      if (entry.status === "Implemented") inSourceImplemented.add(entry.id);
+      else if (entry.status === "Planned") inSourcePlanned.add(entry.id);
+    }
 
-    // Expected karinto IDs: upstream fired a rule that maps to a karinto
-    // Implemented rule.
     const expected = new Set();
     const planned = new Set();
     const unmapped = new Set();
@@ -126,8 +186,14 @@ function classify(source, file, karinto, upstream) {
       if (hit.status === "Implemented") expected.add(hit.id);
       else planned.add(`${hit.id} (${hit.status})`);
     }
-    // Actual karinto IDs we count: only rules that have a this-source origin.
-    const actual = new Set([...karintoHits].filter((id) => inSource.has(id)));
+    const actual = new Set(
+      [...karintoHits].filter((id) => inSourceImplemented.has(id)),
+    );
+    // Note any karinto-fired Planned rules in this source for visibility
+    // (without counting them as hard divergences).
+    for (const id of karintoHits) {
+      if (inSourcePlanned.has(id)) planned.add(`${id} (Planned, karinto)`);
+    }
 
     const missing = [...expected].filter((id) => !actual.has(id)); // karinto should fire but didn't
     const extra = [...actual].filter((id) => !expected.has(id));   // karinto fired but upstream didn't
@@ -147,13 +213,47 @@ function classify(source, file, karinto, upstream) {
     };
   }
 
-  // Aggregate for actionlint.
-  const upstreamFired = upstream.ok && upstream.findings && upstream.findings.length > 0;
-  const inSource = new Set();
+  // actionlint: kind-aware aggregate. `Kind` is too coarse for per-rule
+  // (one Kind covers several karinto rules), but mapping Kind to candidate
+  // karinto IDs lets us drop findings karinto explicitly doesn't implement
+  // (shellcheck/pyflakes/etc., catalogued NotPlanned) and findings whose
+  // karinto counterparts are all Planned. A fixture is hard only if
+  // actionlint fires at least one finding whose Kind maps to an Implemented
+  // karinto rule, yet karinto fires none of its Implemented actionlint
+  // rules — and vice versa.
+  const findings = upstream.ok ? (upstream.findings ?? []) : [];
+  const inSourceImplemented = new Set();
+  const inSourcePlanned = new Set();
   for (const [, entry] of catalog.bySource.actionlint) {
-    if (entry.status === "Implemented") inSource.add(entry.id);
+    if (entry.status === "Implemented") inSourceImplemented.add(entry.id);
+    else if (entry.status === "Planned") inSourcePlanned.add(entry.id);
   }
-  const karintoFired = karinto.ok && (karinto.ruleIds ?? []).some((id) => inSource.has(id));
+  let expectedFire = false;
+  const plannedKinds = new Set();
+  const unmappedKinds = new Set();
+  for (const f of findings) {
+    const candidates = ACTIONLINT_KIND_TO_KARINTO[f.kind];
+    if (candidates == null) {
+      unmappedKinds.add(f.kind ?? "?");
+      continue;
+    }
+    if (candidates.length === 0) continue; // NotPlanned by design
+    let mappedToImplemented = false;
+    let mappedToPlanned = false;
+    for (const id of candidates) {
+      if (inSourceImplemented.has(id)) mappedToImplemented = true;
+      else if (inSourcePlanned.has(id)) mappedToPlanned = true;
+    }
+    if (mappedToImplemented) expectedFire = true;
+    else if (mappedToPlanned) plannedKinds.add(f.kind);
+  }
+  const karintoImplementedFired = karinto.ok
+    ? (karinto.ruleIds ?? []).filter((id) => inSourceImplemented.has(id))
+    : [];
+  const karintoPlannedFired = karinto.ok
+    ? (karinto.ruleIds ?? []).filter((id) => inSourcePlanned.has(id))
+    : [];
+  const karintoFired = karintoImplementedFired.length > 0;
 
   const allow = allowlist.byFile.get(file);
   const expectUpstreamOnly = allow?.has("upstream-only");
@@ -164,18 +264,21 @@ function classify(source, file, karinto, upstream) {
   let mismatch = null;
   if (ignore) {
     // allowlisted
-  } else if (upstreamFired && !karintoFired && !expectUpstreamOnly) {
+  } else if (expectedFire && !karintoFired && !expectUpstreamOnly) {
     hard = true;
     mismatch = "upstream-fired-karinto-silent";
-  } else if (!upstreamFired && karintoFired && !expectKarintoOnly) {
+  } else if (!expectedFire && karintoFired && !expectKarintoOnly) {
     hard = true;
     mismatch = "karinto-fired-upstream-silent";
   }
   return {
     hard,
     mismatch,
-    upstreamFindings: upstreamFired ? upstream.findings.length : 0,
-    karintoRules: karinto.ok ? (karinto.ruleIds ?? []).filter((id) => inSource.has(id)) : [],
+    upstreamFindings: findings.length,
+    karintoRules: karintoImplementedFired,
+    plannedKinds: [...plannedKinds],
+    plannedKarinto: karintoPlannedFired,
+    unmappedKinds: [...unmappedKinds],
     mode: "aggregate",
   };
 }
@@ -275,7 +378,16 @@ function renderMarkdown(reports) {
     }
     const hard = r.results.filter((x) => x.hard);
     const soft = r.results.filter(
-      (x) => !x.hard && (x.missing?.length || x.extra?.length || x.planned?.length || x.unmapped?.length || x.mismatch),
+      (x) =>
+        !x.hard &&
+        (x.missing?.length ||
+          x.extra?.length ||
+          x.planned?.length ||
+          x.unmapped?.length ||
+          x.plannedKinds?.length ||
+          x.plannedKarinto?.length ||
+          x.unmappedKinds?.length ||
+          x.mismatch),
     );
     lines.push(`- fixtures: ${r.count}`);
     lines.push(`- hard divergences: ${hard.length}`);
@@ -308,6 +420,9 @@ function renderRow(x) {
     if (x.mismatch) parts.push(x.mismatch);
     if (x.upstreamFindings) parts.push(`upstream=${x.upstreamFindings}`);
     if (x.karintoRules?.length) parts.push(`karinto=[${x.karintoRules.join(", ")}]`);
+    if (x.plannedKinds?.length) parts.push(`planned-kinds=[${x.plannedKinds.join(", ")}]`);
+    if (x.plannedKarinto?.length) parts.push(`planned-karinto=[${x.plannedKarinto.join(", ")}]`);
+    if (x.unmappedKinds?.length) parts.push(`unmapped-kinds=[${x.unmappedKinds.join(", ")}]`);
   }
   if (x.karinto && x.karinto.ok === false) parts.push(`karinto-error=${x.karinto.error}`);
   if (x.upstream && x.upstream.ok === false) parts.push(`upstream-error=${x.upstream.error}`);

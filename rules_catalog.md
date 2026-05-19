@@ -103,12 +103,12 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | --- | --- | --- | --- | --- |
 | `anonymous-definition` | [`zizmor:anonymous-definition`](https://docs.zizmor.sh/audits/#anonymous-definition) | info | Planned | Low priority; fixtures in place. |
 | `archived-uses` | [`zizmor:archived-uses`](https://docs.zizmor.sh/audits/#archived-uses) | warning | Planned | Requires GitHub API call to detect archived repos; fixtures in place. |
-| `artipacked` | [`zizmor:artipacked`](https://docs.zizmor.sh/audits/#artipacked) | error | Implemented | |
+| `artipacked` | [`zizmor:artipacked`](https://docs.zizmor.sh/audits/#artipacked) | error | Planned | Preview implementation — narrower scope than upstream; misses YAML-anchor and action.yml fixtures. |
 | `bot-conditions` | [`zizmor:bot-conditions`](https://docs.zizmor.sh/audits/#bot-conditions) | error | Implemented | |
-| `cache-poisoning` | [`zizmor:cache-poisoning`](https://docs.zizmor.sh/audits/#cache-poisoning) | error | Implemented | |
+| `cache-poisoning` | [`zizmor:cache-poisoning`](https://docs.zizmor.sh/audits/#cache-poisoning) | error | Planned | Preview implementation — covers a subset of zizmor's setup-action / publisher heuristics. |
 | `concurrency-limits` | [`zizmor:concurrency-limits`](https://docs.zizmor.sh/audits/#concurrency-limits) | info | Implemented | |
 | `dangerous-triggers` | [`zizmor:dangerous-triggers`](https://docs.zizmor.sh/audits/#dangerous-triggers) | error | Implemented | |
-| `dependabot-cooldown` | [`zizmor:dependabot-cooldown`](https://docs.zizmor.sh/audits/#dependabot-cooldown) | info | Implemented | Applies to `dependabot.yml` only — neither workflow nor action. |
+| `dependabot-cooldown` | [`zizmor:dependabot-cooldown`](https://docs.zizmor.sh/audits/#dependabot-cooldown) | info | Planned | Applies to `dependabot.yml` only — neither workflow nor action. Preview implementation. |
 | `dependabot-execution` | [`zizmor:dependabot-execution`](https://docs.zizmor.sh/audits/#dependabot-execution) | error | Planned | Fixtures in place. |
 | `excessive-permissions` | [`zizmor:excessive-permissions`](https://docs.zizmor.sh/audits/#excessive-permissions) | warning | Planned | Preview implementation lives in `rules.mbt` but the permissions inheritance / read-write semantics are narrower than upstream. |
 | `forbidden-uses` | [`zizmor:forbidden-uses`](https://docs.zizmor.sh/audits/#forbidden-uses) | warning | Planned | Natural fit for karinto: thread a per-request allow/denylist (e.g. `?forbidden=org/*,bad-action/*`) through the stateless API — no server-side config store needed. |
@@ -120,12 +120,12 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `known-vulnerable-actions` | [`zizmor:known-vulnerable-actions`](https://docs.zizmor.sh/audits/#known-vulnerable-actions) | error | Implemented | Optional OSV.dev lookup via `osv=1` query parameter. |
 | `misfeature` | [`zizmor:misfeature`](https://docs.zizmor.sh/audits/#misfeature) | info | Planned | Preview implementation; upstream catalog of misfeatures grows over time. |
 | `obfuscation` | [`zizmor:obfuscation`](https://docs.zizmor.sh/audits/#obfuscation) | warning | Planned | Preview implementation; full coverage of upstream's obfuscation taxonomy pending. |
-| `overprovisioned-secrets` | [`zizmor:overprovisioned-secrets`](https://docs.zizmor.sh/audits/#overprovisioned-secrets) | warning | Implemented | |
+| `overprovisioned-secrets` | [`zizmor:overprovisioned-secrets`](https://docs.zizmor.sh/audits/#overprovisioned-secrets) | warning | Planned | Preview implementation. |
 | `ref-confusion` | [`zizmor:ref-confusion`](https://docs.zizmor.sh/audits/#ref-confusion) | warning | Not planned | The hazard (a `uses:` ref that could mean a tag or a branch) cannot arise in workflows that already comply with karinto's `unpinned-uses` SHA-pin requirement. |
 | `ref-version-mismatch` | [`zizmor:ref-version-mismatch`](https://docs.zizmor.sh/audits/#ref-version-mismatch) | warning | Planned | Requires GitHub API to resolve tag → SHA; fixtures in place. |
 | `secrets-inherit` | [`zizmor:secrets-inherit`](https://docs.zizmor.sh/audits/#secrets-inherit) + [`ghalint:ghl-004`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/004.md) | error | Implemented | **Consolidated** — absorbs ghalint `deny_inherit_secrets`. |
 | `secrets-outside-env` | [`zizmor:secrets-outside-env`](https://docs.zizmor.sh/audits/#secrets-outside-env) | warning | Implemented | |
-| `self-hosted-runner` | [`zizmor:self-hosted-runner`](https://docs.zizmor.sh/audits/#self-hosted-runner) | warning | Implemented | |
+| `self-hosted-runner` | [`zizmor:self-hosted-runner`](https://docs.zizmor.sh/audits/#self-hosted-runner) | warning | Planned | Preview implementation — emits false positives on a few zizmor fixtures. |
 | `stale-action-refs` | [`zizmor:stale-action-refs`](https://docs.zizmor.sh/audits/#stale-action-refs) | info | Not planned | Would require a GitHub API call to enumerate tags reachable from a SHA. The signal is only informational (severity `info`); the API/latency/rate-limit cost is not worth it. |
 | `superfluous-actions` | [`zizmor:superfluous-actions`](https://docs.zizmor.sh/audits/#superfluous-actions) | info | Planned | Preview implementation with a short allowlist; upstream maintains a fuller setup-* ↔ runner-tooling mapping. |
 | `template-injection` | [`zizmor:template-injection`](https://docs.zizmor.sh/audits/#template-injection) + `actionlint:script-injection` | error | Planned | **Consolidated** — absorbs the matching actionlint taint check. Preview implementation matches simple `${{ … }}` patterns; full upstream parity needs an expression parser + uses-sink catalogue. |
