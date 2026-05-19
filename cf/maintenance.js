@@ -19,7 +19,8 @@
 
 // Defaults: prune trigger at ~7 GiB (leaves ~3 GiB headroom under the 10 GiB
 // free tier for write bursts between 6-hour cron firings), shrink back to
-// ~70% (≈ 4.9 GiB). Overridable via the `CAPTURES_SIZE_LIMIT_MIB` and
+// ~70% (≈ 4.79 GiB; 7000 MiB × 0.7 / 1024). Overridable via the
+// `CAPTURES_SIZE_LIMIT_MIB` and
 // `CAPTURES_RECOVERY_RATIO` Worker vars (set in release-publish.sh from
 // GitHub repository variables).
 const DEFAULT_SIZE_LIMIT_MIB = 7000;
@@ -32,7 +33,7 @@ const MAX_LIST_PAGES = 200;
 // R2's binding takes up to 1000 keys per `delete()` call. Batching shrinks
 // tens of thousands of sequential round-trips down to a handful of bulk
 // requests so the scheduled invocation finishes well within CPU/wall-time
-// limits even on a worst-case shrink from ~7 GiB down to ~4.9 GiB.
+// limits even on a worst-case shrink from ~7 GiB down to ~4.79 GiB.
 const DELETE_BATCH_SIZE = 1000;
 // Hard cap on deletes per run so a pathological state can't consume the
 // whole CPU budget. The cron fires every 6 hours and pruning is idempotent;

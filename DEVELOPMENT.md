@@ -110,7 +110,7 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Production | `karinto` | `https://karinto.toiroakr.workers.dev` | merging the auto-generated "chore: release" PR |
 | Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
-| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7 GiB, the Worker prunes oldest-first back to ≈ 4.9 GiB. Buckets with many small objects whose listed subset stays under 7 GiB are left to the lifecycle rule. |
+| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7 GiB, the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under 7 GiB are left to the lifecycle rule. |
 
 GitHub Actions wiring:
 
@@ -266,7 +266,7 @@ endpoint, authenticated with bucket-scoped read-only access keys.
   bucket to delete objects older than 30 days. The `karinto-captures`
   Worker's `scheduled` handler runs every 6 hours as a secondary guard that
   prunes oldest-first when the bucket grows past 7 GiB, cutting it back
-  down to ≈ 4.8 GiB.
+  down to ≈ 4.79 GiB.
 
 ### Bootstrapping a fresh deployment
 
