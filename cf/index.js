@@ -47,8 +47,8 @@ export default {
     const started = Date.now();
     try {
       await enforceRateLimit(request, env, ctx);
-      const params = await readParams(request);
-      const result = await handle(params, env);
+      const { params, pathTarget } = await readParams(request);
+      const result = await handle(params, env, pathTarget);
       const elapsed = Date.now() - started;
       log("request", {
         method: request.method,
@@ -58,7 +58,7 @@ export default {
         commit: params.commit || "",
         targets: Object.prototype.hasOwnProperty.call(params, "targets")
           ? String(params.targets ?? "")
-          : params._pathTarget || "",
+          : pathTarget || "",
         content_lines: params.content ? params.content.split("\n").length : 0,
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
@@ -283,8 +283,10 @@ function httpError(message, status) {
 
 async function readParams(request) {
   const url = new URL(request.url);
+  const path = parsePath(url.pathname);
   const params = {};
-  Object.assign(params, parsePath(url.pathname));
+  if (path.repo) params.repo = path.repo;
+  if (path.commit) params.commit = path.commit;
   for (const [k, v] of url.searchParams) params[k] = v;
 
   const cl = Number(request.headers.get("content-length"));
@@ -301,28 +303,34 @@ async function readParams(request) {
     const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
-  return params;
+  return { params, pathTarget: path.pathTarget };
 }
 
-// `/owner/repo/commit[/target/...]` → `{ repo, commit, _pathTarget? }`.
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`.
 // Segments after the commit are joined as a single target path (so nested
-// paths like `.github/workflows/ci.yml` work) and stored under a private
-// key, so a literal `,` in the path is not split into multiple targets the
-// way the comma-delimited `targets=` field is. Multi-target requests still
-// need to come through `targets=` query/body.
+// paths like `.github/workflows/ci.yml` work). Returned separately from the
+// `params` map so a client cannot inject `pathTarget` via query / body.
+// Multi-target requests still need to come through `targets=` query/body.
 //
 // Only paths that look like the repo-mode pattern are interpreted; anything
-// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`) is left to
-// the regular content/repo body parameters. This keeps the Worker mountable
+// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`, malformed
+// percent-encoding) returns `{}` so the request falls through to the
+// regular content/repo body parameters. This keeps the Worker mountable
 // under arbitrary path prefixes without bricking unrelated requests.
 function parsePath(pathname) {
-  const segments = pathname.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
-  if (segments.length < 3) return {};
+  const rawSegments = pathname.split("/").filter(Boolean);
+  if (rawSegments.length < 3) return {};
+  let segments;
+  try {
+    segments = rawSegments.map((s) => decodeURIComponent(s));
+  } catch {
+    return {};
+  }
   const [owner, repo, commit, ...rest] = segments;
   if (!/^[A-Za-z0-9_.\-]+$/.test(owner) || !/^[A-Za-z0-9_.\-]+$/.test(repo)) return {};
   if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) return {};
   const out = { repo: `${owner}/${repo}`, commit };
-  if (rest.length > 0) out._pathTarget = rest.join("/");
+  if (rest.length > 0) out.pathTarget = rest.join("/");
   return out;
 }
 
@@ -395,14 +403,14 @@ function mergeBody(params, raw, ct) {
 
 const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv)=/;
 
-async function handle(params, env) {
+async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
 
   if (params.repo) {
-    return await handleRepo(params, disable, type, useOsv, worker);
+    return await handleRepo(params, pathTarget, disable, type, useOsv, worker);
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
@@ -486,7 +494,7 @@ function validateTargetPath(path) {
   }
 }
 
-async function handleRepo(params, disable, type, useOsv, worker) {
+async function handleRepo(params, pathTarget, disable, type, useOsv, worker) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
@@ -513,8 +521,8 @@ async function handleRepo(params, disable, type, useOsv, worker) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-  } else if (params._pathTarget) {
-    targets = [params._pathTarget];
+  } else if (pathTarget) {
+    targets = [pathTarget];
   } else {
     targets = [];
   }
@@ -531,7 +539,11 @@ async function handleRepo(params, disable, type, useOsv, worker) {
 
   const files = [];
   for (const path of targets) {
-    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${path}`;
+    // Encode each segment so a `?` / `#` / `%` / space in a filename cannot
+    // be reinterpreted as a URL delimiter by fetch; keep `/` as the segment
+    // separator so nested paths still address one file.
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${encodedPath}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
