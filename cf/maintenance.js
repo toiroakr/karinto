@@ -29,6 +29,15 @@ const DEFAULT_RECOVERY_RATIO = 0.7;
 // rule (30 days, configured in the dashboard) is the primary retention
 // mechanism; this Worker is just a soft cap on top.
 const MAX_LIST_PAGES = 200;
+// R2's binding takes up to 1000 keys per `delete()` call. Batching shrinks
+// tens of thousands of sequential round-trips down to a handful of bulk
+// requests so the scheduled invocation finishes well within CPU/wall-time
+// limits even on a worst-case shrink from ~7 GiB down to ~4.9 GiB.
+const DELETE_BATCH_SIZE = 1000;
+// Hard cap on deletes per run so a pathological state can't consume the
+// whole CPU budget. The cron fires every 6 hours and pruning is idempotent;
+// subsequent firings continue from the new state.
+const MAX_DELETES_PER_RUN = 50000;
 
 function positiveNumber(raw, fallback) {
   const n = Number(raw);
@@ -74,13 +83,23 @@ export default {
     const target = truncated ? total * recoveryRatio : sizeLimit * recoveryRatio;
 
     objects.sort((a, b) => new Date(a.uploaded) - new Date(b.uploaded));
+    // First collect the keys we want to delete, then issue them in batches.
+    // We stop collecting once `total - freed < target` OR the per-run cap is
+    // hit, whichever comes first.
+    const toDelete = [];
     let freed = 0;
-    let deleted = 0;
+    let capped = false;
     for (const obj of objects) {
-      await env.CAPTURES.delete(obj.key);
+      if (toDelete.length >= MAX_DELETES_PER_RUN) {
+        capped = true;
+        break;
+      }
+      toDelete.push(obj.key);
       freed += obj.size;
-      deleted++;
       if (total - freed < target) break;
+    }
+    for (let i = 0; i < toDelete.length; i += DELETE_BATCH_SIZE) {
+      await env.CAPTURES.delete(toDelete.slice(i, i + DELETE_BATCH_SIZE));
     }
 
     console.log(
@@ -88,10 +107,11 @@ export default {
         event: "maintenance",
         action: "prune",
         total,
-        deleted,
+        deleted: toDelete.length,
         freed,
         remaining: total - freed,
         listTruncated: truncated,
+        deleteCapped: capped,
       }),
     );
   },

@@ -318,13 +318,23 @@ function computeDiff(captured, replayed) {
   return diffs;
 }
 
+// Stable stringify that matches JSON.stringify's handling of `undefined`:
+// drop it from object values (so `{a:1, b:undefined}` and `{a:1}` canonicalize
+// identically) and serialize it as `null` inside arrays (matching
+// `JSON.stringify([1,undefined,2]) === "[1,null,2]"`).
 function canonicalJson(value) {
+  if (value === undefined) return "null";
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) {
     return "[" + value.map(canonicalJson).join(",") + "]";
   }
-  const keys = Object.keys(value).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
+  const parts = [];
+  for (const k of Object.keys(value).sort()) {
+    const v = value[k];
+    if (v === undefined) continue;
+    parts.push(JSON.stringify(k) + ":" + canonicalJson(v));
+  }
+  return "{" + parts.join(",") + "}";
 }
 
 function stripDiagnostics(resp) {
