@@ -43,7 +43,11 @@ export function lintFixture({ bin, file }) {
   const ids = new Set();
   for (const run of parsed.runs ?? []) {
     for (const res of run.results ?? []) {
-      if (res.ruleId) ids.add(res.ruleId);
+      if (!res.ruleId) continue;
+      // SARIF emits `zizmor/<audit>` — strip the namespace so the id lines up
+      // with karinto's `zizmor:<audit>` origin keys.
+      const id = res.ruleId.startsWith("zizmor/") ? res.ruleId.slice("zizmor/".length) : res.ruleId;
+      ids.add(id);
     }
   }
   return { ok: true, ruleIds: [...ids] };
