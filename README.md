@@ -37,7 +37,7 @@ under arbitrary path prefixes.
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
 | `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Branch names and tags are rejected. Short SHAs are accepted but technically ambiguous with a same-shape branch/tag — use the full 40-char SHA for guaranteed immutability. |
-| `targets` | string | Comma-separated literal file paths (required with `repo`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
+| `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 
 ### Examples

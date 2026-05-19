@@ -11,7 +11,9 @@
 //   - disable   comma-separated rule-ID glob patterns to skip
 //   - repo      "owner/name" — fetch files from a public GitHub repo
 //   - commit    commit SHA (7-64 hex chars); required whenever `repo` is set
-//   - targets   comma-separated literal paths (required with `repo`)
+//   - targets   comma-separated literal paths. With `repo`, either
+//               `targets=` or a single target via the URL path
+//               (`/owner/repo/commit/target/...`) must be supplied
 //   - osv       "1" / "true" → query OSV.dev for known-vulnerable actions
 //               (adds ~50-300ms latency depending on action count)
 //
@@ -473,10 +475,11 @@ function countChar(s, ch) {
 // interpolated into `https://raw.githubusercontent.com/<repo>/<commit>/<path>`.
 // `..` segments would be URL-normalized by fetch / GitHub's edge and let a
 // caller fetch from a different ref entirely; `\` and absolute paths likewise
-// undermine the prefix. We also reject `%` so percent-encoded variants like
-// `%2e%2e%2f` can't bypass the segment check (path-from-path-prefix is already
-// decoded, path-from-body/query is forwarded verbatim into the URL — easier
-// to disallow `%` outright than to track two normalization layers).
+// undermine the prefix. We also reject `%` as defense-in-depth: even though
+// the per-segment `encodeURIComponent` in `handleRepo` already neutralizes
+// percent-encoded escapes like `%2e%2e%2f` (they become literal filename
+// bytes), bailing out at validation time keeps the error clear instead of
+// silently fetching a nonsense path.
 function validateTargetPath(path) {
   if (typeof path !== "string" || path.length === 0) {
     throw httpError("target path must be a non-empty string", 400);
