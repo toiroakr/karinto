@@ -2,6 +2,8 @@ name: test
 
 on:
   pull_request:
+    # `labeled`/`unlabeled` so `skip-changeset` re-evaluates without a dummy commit.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
