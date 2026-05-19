@@ -2,7 +2,12 @@
 //
 // R2 lifecycle rules (configured in the dashboard, see DEVELOPMENT.md) handle
 // the "delete after N days" case. This Worker is a secondary safety net that
-// prunes oldest-first when the bucket grows past a soft size limit.
+// prunes oldest-first across the listed subset when the bucket grows past a
+// soft size limit. R2 returns objects in lexicographic key order (sha256
+// hashes, which are not time-correlated), so if listing hits the page cap
+// (`truncated=true`) the loop deletes the oldest captures *within that
+// subset*, not the bucket's globally-oldest. The 30-day lifecycle rule
+// remains the only guarantee on the unlisted tail.
 //
 // There is intentionally no `fetch` handler: captures are read directly from
 // the R2 S3 endpoint by `scripts/replay.mjs`, so this Worker exposes no
