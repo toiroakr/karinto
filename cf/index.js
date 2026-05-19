@@ -65,6 +65,17 @@ export default {
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
       });
+      // Only register the waitUntil promise when CAPTURES is actually bound
+      // (production env). Preview/staging skip the wrapper entirely so
+      // non-production traffic doesn't pay the Promise/catch overhead on
+      // the hot path.
+      if (env?.CAPTURES) {
+        ctx.waitUntil(
+          captureRequest(env, params, result, request.headers).catch((err) => {
+            log("capture_error", { message: String(err?.message ?? err) });
+          }),
+        );
+      }
       return json(result);
     } catch (err) {
       const status = err?.status ?? 400;
@@ -374,6 +385,7 @@ const KNOWN_KEYS = new Set([
   "commit",
   "targets",
   "osv",
+  "no_capture",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -385,8 +397,14 @@ function mergeBody(params, raw, ct) {
       // fall through to other strategies
     }
   }
-  // Try form-encoded only when at least one known key appears as `key=...`.
-  if (KNOWN_KEYS_RE.test(raw)) {
+  // Try form-encoded only when the body looks like a single-line querystring
+  // with at least one known key. The newline guard prevents a YAML body that
+  // happens to contain `no_capture=` (or any other known key) on some line
+  // from being parsed via URLSearchParams — form bodies don't span lines.
+  // We can't fall back to Content-Type alone because `curl --data-binary`
+  // (the documented usage) sends `application/x-www-form-urlencoded` even
+  // when the payload is raw YAML.
+  if (!raw.includes("\n") && KNOWN_KEYS_RE.test(raw)) {
     const sp = new URLSearchParams(raw);
     let matched = false;
     for (const [k, v] of sp) {
@@ -403,7 +421,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -683,6 +701,83 @@ function json(body, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+// Dark-launch capture: persist successful prod requests + their canonical
+// response to R2 so PR Workers can replay them and diff for regressions.
+// Only runs when `env.CAPTURES` is bound (production env). Skipped for:
+//   - `osv=1` (external state),
+//   - `repo` mode (external GitHub state),
+//   - content > CAPTURE_CONTENT_LIMIT_KIB (free-tier hygiene; default 100),
+//   - opt-out via `no_capture=1` param or `X-Karinto-No-Capture` header.
+const DEFAULT_CAPTURE_CONTENT_LIMIT_KIB = 100;
+
+// Numeric tuning vars come in from wrangler `--var` as strings. Treat
+// missing / non-finite / non-positive values as "use the default" so a
+// malformed GitHub variable can't silently disable the guard.
+function positiveNumber(raw, fallback) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+async function captureRequest(env, params, result, headers) {
+  if (!env?.CAPTURES) return;
+  if (isTrue(params.osv)) return;
+  if (params.repo) return;
+  if (!params.content) return;
+  if (!result?.ok) return;
+  // Opt-out checks run before the TextEncoder pass so opted-out requests
+  // (replay traffic, callers that pass `no_capture=1` or
+  // `x-karinto-no-capture`) skip the byte-length encode entirely on the
+  // hot path.
+  if (isTrue(params.no_capture)) return;
+  if (isTrue(headers?.get("x-karinto-no-capture"))) return;
+  const limitKib = positiveNumber(env.CAPTURE_CONTENT_LIMIT_KIB, DEFAULT_CAPTURE_CONTENT_LIMIT_KIB);
+  // length counts UTF-16 code units; capture size is determined by UTF-8
+  // bytes, so non-ASCII YAML would otherwise sneak past the limit.
+  const byteLen = new TextEncoder().encode(params.content).byteLength;
+  if (byteLen > limitKib * 1024) return;
+
+  const normalized = normalizeRequest(params);
+  const hash = await sha256Hex(JSON.stringify(normalized));
+  const key = `captures/${hash}.json`;
+
+  const payload = JSON.stringify({
+    request: normalized,
+    response: result,
+    first_seen: new Date().toISOString(),
+  });
+
+  // R2's `put` with `onlyIf: etagDoesNotMatch: "*"` returns `null` (no throw)
+  // when the precondition fails because the key already exists. That's the
+  // expected dedup path — same normalized request was seen before — so we
+  // don't log it. Real put errors still surface via the caller's `.catch`.
+  await env.CAPTURES.put(key, payload, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+
+function normalizeRequest(params) {
+  const out = { content: params.content };
+  if (params.type) out.type = params.type;
+  if (params.disable) {
+    out.disable = params.disable
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }
+  return out;
+}
+
+async function sha256Hex(str) {
+  const buf = new TextEncoder().encode(str);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function log(event, data) {

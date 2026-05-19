@@ -39,6 +39,7 @@ under arbitrary path prefixes.
 | `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected. Hex-shaped refs are accepted at face value — a short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
 | `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
+| `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 
 ### Examples
 
@@ -112,6 +113,20 @@ In `repo` mode the result is wrapped:
 
 For private repos pass `content` directly. The Worker does not handle
 `GITHUB_TOKEN`-authenticated `repo`-mode fetches.
+
+## Privacy
+
+The production deployment persists successful requests (the `content`
+plus a few non-secret query parameters) and the corresponding response
+into a private bucket for up to 30 days. These captures are used to
+replay traffic against PR previews and detect regressions before they
+reach prod. To opt out per-request, send either:
+
+- query / form parameter `no_capture=1`, **or**
+- HTTP header `X-Karinto-No-Capture: 1`
+
+Requests using `osv=1` or `repo=` are never captured; nor are requests
+whose body exceeds 100 KiB.
 
 ## Development
 

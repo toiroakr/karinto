@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Cron-only Worker. `workers_dev: false` disables the public workers.dev
+  // URL so this Worker has no HTTP surface — captures are read directly
+  // from R2 via the S3 API by CI (`scripts/replay.mjs`). Deployed once per
+  // release by `scripts/release-publish.sh`.
+  "name": "karinto-captures",
+  "main": "maintenance.js",
+  "compatibility_date": "2026-05-01",
+  "workers_dev": false,
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  },
+  "r2_buckets": [
+    { "binding": "CAPTURES", "bucket_name": "karinto-captures" }
+  ]
+}

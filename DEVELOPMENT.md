@@ -103,13 +103,14 @@ and the test fixtures stay in sync.
 
 ## Environments and release flow
 
-Three Workers, one per environment:
+Three application Workers, one per environment, plus a maintenance Worker:
 
 | Environment | Worker name | URL | Trigger |
 | --- | --- | --- | --- |
 | Production | `karinto` | `https://karinto.toiroakr.workers.dev` | merging the auto-generated "chore: release" PR |
 | Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
+| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7 GiB, the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under 7 GiB are left to the lifecycle rule. |
 
 GitHub Actions wiring:
 
@@ -165,6 +166,26 @@ action keeps a "chore: release" PR open that previews the next version.
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
+| `R2_ACCESS_KEY_ID` (optional) | Created in CF Dashboard → R2 → Manage R2 API Tokens. Scoped to **read-only** on the `karinto-captures` bucket. Enables the PR dark-launch replay step. |
+| `R2_SECRET_ACCESS_KEY` (optional) | The matching secret from the same R2 API token. |
+
+### Optional GitHub variables
+
+Tuning knobs for the dark-launch flow. All are repo-level **variables** (not
+secrets — non-sensitive integers), set under Settings → Secrets and
+variables → Actions → Variables. Unset values fall back to the defaults
+hardcoded in the Worker / workflow.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `REPLAY_LIMIT` | 200 | Captures replayed per CI run (both auto-on-open and label-triggered). |
+| `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
+| `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
+| `CAPTURES_RECOVERY_RATIO` | 0.7 | When pruning fires, shrink to this fraction of the size limit (default → ≈ 4.79 GiB target). |
+
+The last three take effect on the next release deploy (they're applied via
+`wrangler deploy --var` in `scripts/release-publish.sh`). `REPLAY_LIMIT` is
+read directly by the workflows, so it applies immediately.
 
 ### Required repository settings
 
@@ -197,3 +218,125 @@ it to activate the schedule.
 > Repo settings already configured: `allow_auto_merge: true`,
 > `delete_branch_on_merge: true`, and Actions are allowed to create + approve
 > PRs (needed for `changesets/action`).
+
+## Dark-launch (capture & replay)
+
+Production captures the requests it serves into an R2 bucket. On demand
+(by labelling a PR `regression-test`), recent captures are replayed
+against that PR's preview Worker and diffed against the recorded prod
+responses. Unexpected diffs fail the run and the result is posted as a
+sticky PR comment.
+
+### How it works
+
+```
+        prod request                          PR opened / `regression-test` label added
+            │                                                 │
+            ▼                                                 │
+     ┌───────────┐    ctx.waitUntil    ┌────────────────┐     │
+     │  karinto  │ ───────────────────▶│ R2: captures/  │     │
+     │  (prod)   │  PUT If-None-Match  │  <hash>.json   │     │
+     └───────────┘                     └───────┬────────┘     │
+                                               │              │
+                                               │ R2 S3 API    │
+                                               │ (sigv4)      │
+                                               ▼              ▼
+                                      scripts/replay.mjs ─▶ POST same request
+                                          (CI runner)        (karinto-pr-<N>)
+                                               │
+                                               ▼
+                                      diff + apply
+                                      scripts/diff-rules/*.mjs
+                                               │
+                                               ▼
+                                      sticky PR comment +
+                                      fail check on unmatched diff
+
+The `karinto-captures` Worker is cron-only (`workers_dev: false`); it has
+no public HTTP surface. CI reads the bucket directly via R2's S3-compatible
+endpoint, authenticated with bucket-scoped read-only access keys.
+```
+
+- **Capture key** = `sha256(canonical(normalized_request))`. `If-None-Match: *`
+  prevents repeat writes for the same request — true content dedup.
+- **Skipped at capture time**: `osv=1` (external state), `repo` mode (external
+  state), content larger than 100 KiB, and opt-out (caller passes
+  `no_capture=1` or sends `X-Karinto-No-Capture: 1`).
+- **Retention**: configure an R2 lifecycle rule on the `karinto-captures`
+  bucket to delete objects older than 30 days. The `karinto-captures`
+  Worker's `scheduled` handler runs every 6 hours as a secondary guard that
+  prunes oldest-first when the bucket grows past 7 GiB, cutting it back
+  down to ≈ 4.79 GiB.
+
+### Bootstrapping a fresh deployment
+
+> One-time, owner-only. Run these steps once when first setting this up on
+> a Cloudflare account (or when forking the repo into a different account).
+> Regular contributors don't need any of this — secrets and the bucket
+> already exist on the upstream deployment.
+
+```sh
+# 1. Build the MoonBit → JS bundle that the Worker imports. The release
+#    workflow does this automatically, but a manual first-time deploy
+#    needs it explicitly:
+moon update
+moon build --target js --release
+
+cd cf
+# 2. Create the bucket
+npx wrangler r2 bucket create karinto-captures
+
+# 3. In the Cloudflare dashboard: R2 → karinto-captures → Lifecycle rules
+#    Add: "Delete objects older than 30 days", prefix `captures/`.
+
+# 4. Create an R2 API token (Dashboard → R2 → Manage R2 API Tokens →
+#    "Create API Token"). Scope it to **Object Read only** on the
+#    `karinto-captures` bucket. Save the Access Key ID + Secret Access Key
+#    as GitHub repo secrets:
+gh secret set R2_ACCESS_KEY_ID     -b "<access key id>"
+gh secret set R2_SECRET_ACCESS_KEY -b "<secret access key>"
+
+# 5. Deploy the prod linter (with binding) + captures Worker. Normally this
+#    happens via the release workflow, but the first time you can run:
+npm ci
+npx wrangler deploy --env production
+npx wrangler deploy --config wrangler.maintenance.jsonc
+```
+
+`CLOUDFLARE_ACCOUNT_ID` is reused as `R2_ACCOUNT_ID` by the replay step
+(both workflows pass it in via `env`).
+
+### Adding an intentional-diff ignore rule
+
+When a PR deliberately changes linter output (new rule, message rewording,
+severity change, etc.), add a `scripts/diff-rules/*.mjs` file in the same PR.
+See `scripts/diff-rules/README.md` for the rule contract and conventions.
+
+### Triggering a replay on a PR
+
+- **Automatic** on the first deploy of a PR: when the PR is opened or
+  reopened, `deploy-preview.yml` runs replay against the freshly-deployed
+  preview Worker once the build finishes.
+- **On-demand** on subsequent commits: add the **`regression-test`** label.
+  `replay-on-label.yml` waits for the preview to be reachable, replays,
+  posts the sticky comment, and removes the label. Re-add the label to run
+  again.
+
+Both paths use the same `scripts/replay.mjs` and post under the
+`dark-launch-replay` sticky-comment header, so the comment updates in
+place rather than stacking.
+
+### Running replay locally
+
+```sh
+export R2_ACCESS_KEY_ID=<access key>
+export R2_SECRET_ACCESS_KEY=<secret>
+export R2_ACCOUNT_ID=<cloudflare account id>
+node scripts/replay.mjs --target https://karinto-staging.toiroakr.workers.dev --limit 30
+```
+
+The script fetches captures directly from R2 via its S3-compatible API
+(sigv4-signed) and runs the diff entirely in this process — no Worker-side
+replay endpoint is involved. `REPLAY_SUMMARY_PATH=/tmp/out.md` will
+additionally write a markdown summary to that path (used by the PR
+sticky-comment step).
