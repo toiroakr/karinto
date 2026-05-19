@@ -201,6 +201,20 @@ read directly by the workflows, so it applies immediately.
 | --- | --- | --- |
 | Workflow permissions: **Read and write**, **Allow GitHub Actions to create and approve pull requests** | Settings → Actions → General | So `changesets/action` can push to `changeset-release/main` and open the "chore: release" PR. |
 
+### Required repository labels
+
+The workflows match on these label names verbatim, so they must exist
+before the corresponding flow fires. Create them once via `gh label
+create` (or the GitHub UI):
+
+| Label | Used by | Purpose |
+| --- | --- | --- |
+| `skip-changeset` | `.github/workflows/test.yml` | Bypasses the changeset CI gate for PRs with no user-visible impact (CI tweaks, internal scripts, doc-only changes). |
+| `regression-test` | `.github/workflows/replay-on-label.yml` | Triggers a dark-launch replay against this PR's preview Worker on demand. Auto-removed by the workflow when it finishes. |
+
+Renovate's own labels (`dependencies`, `security`) are created
+automatically on first use, so no pre-provisioning is needed for them.
+
 ## Dependency updates
 
 [Renovate](https://docs.renovatebot.com/) handles dependency PRs (config in
