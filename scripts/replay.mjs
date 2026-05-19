@@ -154,14 +154,32 @@ function parseListObjects(xml) {
   return out;
 }
 
+// Safety cap on list pages (1000 objects/page). The bucket is capped at
+// ~7 GiB by `cf/maintenance.js`, so in steady state this fits in ~hundreds
+// of pages at most, but bound it explicitly so a runaway bucket can't make
+// a CI replay job list forever / OOM.
+const MAX_LIST_PAGES = 200;
+
 async function fetchCaptures(env, limit) {
   let cursor = null;
   const all = [];
-  do {
-    const page = await r2List(env, "captures/", cursor);
-    all.push(...page.objects);
-    cursor = page.isTruncated ? page.nextToken : null;
-  } while (cursor);
+  let truncated = false;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const res = await r2List(env, "captures/", cursor);
+    all.push(...res.objects);
+    if (!res.isTruncated) {
+      cursor = null;
+      break;
+    }
+    cursor = res.nextToken;
+    if (page === MAX_LIST_PAGES - 1) truncated = true;
+  }
+  if (truncated) {
+    console.warn(
+      `captures/ list truncated at ${MAX_LIST_PAGES} pages (${all.length} objects); ` +
+      `picking newest ${limit} from the listed subset.`,
+    );
+  }
 
   all.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
   const slice = all.slice(0, limit);

@@ -56,6 +56,15 @@ export default {
       return;
     }
 
+    // When listing was truncated, `total` is only the size of the listed
+    // subset (a lower bound on the bucket). Comparing against an absolute
+    // `sizeLimit * recoveryRatio` would stop the prune early — the actual
+    // bucket is still over the limit by the unlisted tail. Fall back to
+    // shrinking the listed subset by `(1 - recoveryRatio)` so each cron
+    // firing makes guaranteed progress; the lifecycle rule covers the
+    // unlisted tail.
+    const target = truncated ? total * recoveryRatio : sizeLimit * recoveryRatio;
+
     objects.sort((a, b) => new Date(a.uploaded) - new Date(b.uploaded));
     let freed = 0;
     let deleted = 0;
@@ -63,7 +72,7 @@ export default {
       await env.CAPTURES.delete(obj.key);
       freed += obj.size;
       deleted++;
-      if (total - freed < sizeLimit * recoveryRatio) break;
+      if (total - freed < target) break;
     }
 
     console.log(
@@ -89,8 +98,11 @@ async function listCapped(bucket, prefix, maxPages) {
     if (!res.truncated) return { objects: out, truncated: false };
     cursor = res.cursor;
   }
-  // Hit the page cap — let the caller log it. The next cron run will continue
-  // pruning oldest-first since R2 returns objects in lexicographic key order
-  // (hashes), but the lifecycle rule remains the primary retention.
+  // Hit the page cap. R2 returns objects in lexicographic key order (sha256
+  // hashes), which is unrelated to upload time, so subsequent cron firings
+  // will see the SAME first `maxPages * 1000` objects rather than naturally
+  // "continuing" toward older keys. Caller compensates by pruning the listed
+  // subset by `(1 - recoveryRatio)` per run; the dashboard R2 lifecycle rule
+  // (30 days) remains the primary retention for the unlisted tail.
   return { objects: out, truncated: true };
 }
