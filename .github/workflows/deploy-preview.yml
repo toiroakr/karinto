@@ -93,8 +93,11 @@ jobs:
           REPLAY_SUMMARY_PATH: ${{ github.workspace }}/replay-summary.md
           REPLAY_LIMIT: ${{ vars.REPLAY_LIMIT || '200' }}
         run: |
-          if [ -z "${R2_ACCESS_KEY_ID:-}" ]; then
-            echo "R2_ACCESS_KEY_ID not set; skipping replay."
+          # All three are required by scripts/replay.mjs — fail fast and
+          # skip the step cleanly if any is missing, instead of letting
+          # node throw mid-flight.
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
+            echo "R2 credentials not fully set; skipping replay."
             exit 0
           fi
           node scripts/replay.mjs --target "$WORKER_URL" --limit "$REPLAY_LIMIT"

@@ -631,6 +631,10 @@ async function captureRequest(env, params, result, headers) {
     first_seen: new Date().toISOString(),
   });
 
+  // R2's `put` with `onlyIf: etagDoesNotMatch: "*"` returns `null` (no throw)
+  // when the precondition fails because the key already exists. That's the
+  // expected dedup path — same normalized request was seen before — so we
+  // don't log it. Real put errors still surface via the caller's `.catch`.
   await env.CAPTURES.put(key, payload, {
     onlyIf: { etagDoesNotMatch: "*" },
     httpMetadata: { contentType: "application/json" },

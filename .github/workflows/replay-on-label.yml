@@ -24,6 +24,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # `gh pr edit --remove-label` goes through the Issues API (labels are
+      # an Issues surface), so pull-requests scope alone isn't enough.
+      issues: write
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       WORKER_URL: https://karinto-pr-${{ github.event.pull_request.number }}.toiroakr.workers.dev
@@ -69,8 +72,8 @@ jobs:
           REPLAY_SUMMARY_PATH: ${{ github.workspace }}/replay-summary.md
           REPLAY_LIMIT: ${{ vars.REPLAY_LIMIT || '200' }}
         run: |
-          if [ -z "${R2_ACCESS_KEY_ID:-}" ]; then
-            echo "::error::R2_ACCESS_KEY_ID secret is not set. See DEVELOPMENT.md for setup."
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
+            echo "::error::R2 credentials not fully set (need R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID). See DEVELOPMENT.md for setup."
             exit 1
           fi
           node scripts/replay.mjs --target "$WORKER_URL" --limit "$REPLAY_LIMIT"

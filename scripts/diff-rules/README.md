@@ -47,6 +47,12 @@ export function matches(capture, replayed, diff) {
   onlyInCaptured: Array<{ file?: string, rule: string, severity: string, message: string }>,
   onlyInReplayed: Array<{ file?: string, rule: string, severity: string, message: string }>,
 }
+
+// Response-metadata difference. Catches everything the response exposes
+// outside `diagnostics` (`result.kind`, `result.stats`, per-file ok/error,
+// parse-error details, etc.) — emitted when the JSON-stringified, diagnostics-
+// stripped response differs.
+{ kind: "metadata", captured: object, replayed: object }
 ```
 
 `file` is set only for `repo`-mode captures (currently skipped at capture
