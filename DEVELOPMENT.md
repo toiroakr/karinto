@@ -110,7 +110,15 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Production | `karinto` | `https://karinto.toiroakr.workers.dev` | merging the auto-generated "chore: release" PR |
 | Staging | `karinto-staging` | `https://karinto-staging.toiroakr.workers.dev` | `push: main` |
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
-| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7 GiB, the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under 7 GiB are left to the lifecycle rule. |
+| Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
+
+Both the production and staging Workers also carry a daily cron
+(`0 2 * * *`) that refreshes the cached `api.github.com/meta` payload in
+KV. The request path consults that cache to exempt GitHub-hosted Actions
+runner IPs from the per-IP rate limit. Preview Workers inherit neither
+the cron nor the R2 binding (the top-level `cf/wrangler.jsonc` omits both
+on purpose), so they read from the shared KV but never refresh it and
+can't write into the captures bucket.
 
 GitHub Actions wiring:
 
@@ -193,6 +201,20 @@ read directly by the workflows, so it applies immediately.
 | --- | --- | --- |
 | Workflow permissions: **Read and write**, **Allow GitHub Actions to create and approve pull requests** | Settings → Actions → General | So `changesets/action` can push to `changeset-release/main` and open the "chore: release" PR. |
 
+### Required repository labels
+
+The workflows match on these label names verbatim, so they must exist
+before the corresponding flow fires. Create them once via `gh label
+create` (or the GitHub UI):
+
+| Label | Used by | Purpose |
+| --- | --- | --- |
+| `skip-changeset` | `.github/workflows/test.yml` | Bypasses the changeset CI gate for PRs with no user-visible impact (CI tweaks, internal scripts, doc-only changes). |
+| `regression-test` | `.github/workflows/replay-on-label.yml` | Triggers a dark-launch replay against this PR's preview Worker on demand. Auto-removed by the workflow when it finishes. |
+
+Renovate's own labels (`dependencies`, `security`) are created
+automatically on first use, so no pre-provisioning is needed for them.
+
 ## Dependency updates
 
 [Renovate](https://docs.renovatebot.com/) handles dependency PRs (config in
@@ -265,8 +287,8 @@ endpoint, authenticated with bucket-scoped read-only access keys.
 - **Retention**: configure an R2 lifecycle rule on the `karinto-captures`
   bucket to delete objects older than 30 days. The `karinto-captures`
   Worker's `scheduled` handler runs every 6 hours as a secondary guard that
-  prunes oldest-first when the bucket grows past 7 GiB, cutting it back
-  down to ≈ 4.79 GiB.
+  prunes oldest-first when the bucket grows past ≈ 6.84 GiB (7000 MiB),
+  cutting it back down to ≈ 4.79 GiB.
 
 ### Bootstrapping a fresh deployment
 

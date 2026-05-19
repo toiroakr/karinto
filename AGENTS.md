@@ -29,7 +29,7 @@ You can browse and install extra skills here:
 - `moon fmt` is used to format your code properly.
 
 - `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
-  `find-references`. See $moonbit-agent-guide for details.
+  `find-references`. See <https://github.com/moonbitlang/skills> for details.
 
 - `moon info` is used to update the generated interface of the package, each
   package has a generated interface file `.mbti`, it is a brief formal
