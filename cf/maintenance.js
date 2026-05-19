@@ -44,25 +44,28 @@ export default {
     const { objects, truncated } = await listCapped(env.CAPTURES, "captures/", MAX_LIST_PAGES);
     const total = objects.reduce((s, o) => s + o.size, 0);
 
-    if (total < sizeLimit && !truncated) {
+    // Prune only when we have a definite over-limit signal (`total >= sizeLimit`).
+    // When the listing is truncated, `total` is only a lower bound on the bucket,
+    // so the true size might still be over `sizeLimit` — but pruning on truncation
+    // alone could delete captures from a bucket that's actually under the limit
+    // (e.g. 200k small objects). The R2 dashboard lifecycle rule (30 days) is the
+    // backstop for the unlisted tail; we just log a warning and wait it out.
+    if (total < sizeLimit) {
       console.log(
         JSON.stringify({
           event: "maintenance",
-          action: "skip",
+          action: truncated ? "skip-truncated" : "skip",
           total,
           count: objects.length,
+          listTruncated: truncated,
         }),
       );
       return;
     }
 
-    // When listing was truncated, `total` is only the size of the listed
-    // subset (a lower bound on the bucket). Comparing against an absolute
-    // `sizeLimit * recoveryRatio` would stop the prune early — the actual
-    // bucket is still over the limit by the unlisted tail. Fall back to
-    // shrinking the listed subset by `(1 - recoveryRatio)` so each cron
-    // firing makes guaranteed progress; the lifecycle rule covers the
-    // unlisted tail.
+    // total >= sizeLimit: prune. When the listing was truncated, shrink the
+    // listed subset by `(1 - recoveryRatio)` so the cron makes guaranteed
+    // progress against the listed slice; the lifecycle rule handles the tail.
     const target = truncated ? total * recoveryRatio : sizeLimit * recoveryRatio;
 
     objects.sort((a, b) => new Date(a.uploaded) - new Date(b.uploaded));
