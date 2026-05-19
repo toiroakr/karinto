@@ -1,0 +1,17 @@
+# Pins the upstream linter binaries used by the parity check
+# (.github/workflows/upstream-parity.yml). The tag on each entry is paired
+# with vendored test fixtures from the same tag under `fixtures/upstream/`.
+#
+# The weekly refresh workflow (.github/workflows/upstream-refresh.yml) bumps
+# this file and the vendored fixtures together when a new upstream release
+# is available.
+#
+# Backends:
+#   aqua:  uses the aqua-registry's per-package install recipe
+#   ubi:   downloads the matching asset from GitHub Releases directly
+# zizmor isn't in the aqua standard registry, so it goes through ubi.
+
+[tools]
+"aqua:rhysd/actionlint" = "1.7.12"
+"ubi:zizmorcore/zizmor" = "1.25.2"
+"aqua:suzuki-shunsuke/ghalint" = "1.5.6"

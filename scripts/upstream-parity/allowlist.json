@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Per-fixture suppressions for the upstream-parity check.",
+    "Each entry suppresses specific divergence kinds on a single fixture file.",
+    "",
+    "Schema:",
+    "  entries[].file    path relative to the repo root (e.g. 'fixtures/upstream/zizmor/tests/.../foo.yml')",
+    "  entries[].expect  array of allowed-divergence tags:",
+    "",
+    "  Per-rule mode (zizmor/ghalint):",
+    "    'missing:<rule-id>'    karinto won't fire <rule-id>; suppress.",
+    "    'extra:<rule-id>'      karinto fires <rule-id> but upstream doesn't; suppress.",
+    "",
+    "  Aggregate mode (actionlint):",
+    "    'upstream-only'  upstream fires; karinto silent. Suppress (e.g. shellcheck-only finding).",
+    "    'karinto-only'   karinto fires; upstream silent. Suppress.",
+    "    'ignore'         suppress any divergence on this file.",
+    "",
+    "  Always include a 'reason' field so future readers can see why it's here."
+  ],
+  "entries": []
+}
