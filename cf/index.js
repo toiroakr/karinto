@@ -1,15 +1,19 @@
 // Cloudflare Workers entry point for karinto.
 //
-// Accepts GET or POST. Parameters can come from the URL query string,
-// the request body (raw `key=value&...`, JSON, or a YAML blob as the whole
-// body), or a mix of both.
+// Accepts GET or POST. Parameters can come from the URL path
+// (`/owner/repo/commit[/target]`), the URL query string, the request body
+// (raw `key=value&...`, JSON, or a YAML blob as the whole body), or a mix
+// of all three. Body > query > path on conflicts.
 //
 // Keys:
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
 //   - repo      "owner/name" — fetch files from a public GitHub repo
-//   - targets   comma-separated literal paths (required with `repo`)
+//   - commit    commit SHA (7-64 hex chars); required whenever `repo` is set
+//   - targets   comma-separated literal paths. With `repo`, either
+//               `targets=` or a single target via the URL path
+//               (`/owner/repo/commit/target/...`) must be supplied
 //   - osv       "1" / "true" → query OSV.dev for known-vulnerable actions
 //               (adds ~50-300ms latency depending on action count)
 //
@@ -45,15 +49,18 @@ export default {
     const started = Date.now();
     try {
       await enforceRateLimit(request, env, ctx);
-      const params = await readParams(request);
-      const result = await handle(params, env);
+      const { params, pathTarget } = await readParams(request);
+      const result = await handle(params, env, pathTarget);
       const elapsed = Date.now() - started;
       log("request", {
         method: request.method,
         type: params.type || "(auto)",
         disable: params.disable || "",
         repo: params.repo || "",
-        targets: params.targets || "",
+        commit: params.commit || "",
+        targets: Object.prototype.hasOwnProperty.call(params, "targets")
+          ? String(params.targets ?? "")
+          : pathTarget || "",
         content_lines: params.content ? params.content.split("\n").length : 0,
         files: result.files?.length ?? (params.content ? 1 : 0),
         elapsed_ms: elapsed,
@@ -289,7 +296,10 @@ function httpError(message, status) {
 
 async function readParams(request) {
   const url = new URL(request.url);
+  const path = parsePath(url.pathname);
   const params = {};
+  if (path.repo) params.repo = path.repo;
+  if (path.commit) params.commit = path.commit;
   for (const [k, v] of url.searchParams) params[k] = v;
 
   const cl = Number(request.headers.get("content-length"));
@@ -306,7 +316,35 @@ async function readParams(request) {
     const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
-  return params;
+  return { params, pathTarget: path.pathTarget };
+}
+
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`.
+// Segments after the commit are joined as a single target path (so nested
+// paths like `.github/workflows/ci.yml` work). Returned separately from the
+// `params` map so a client cannot inject `pathTarget` via query / body.
+// Multi-target requests still need to come through `targets=` query/body.
+//
+// Only paths that look like the repo-mode pattern are interpreted; anything
+// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`, malformed
+// percent-encoding) returns `{}` so the request falls through to the
+// regular content/repo body parameters. This keeps the Worker mountable
+// under arbitrary path prefixes without bricking unrelated requests.
+function parsePath(pathname) {
+  const rawSegments = pathname.split("/").filter(Boolean);
+  if (rawSegments.length < 3) return {};
+  let segments;
+  try {
+    segments = rawSegments.map((s) => decodeURIComponent(s));
+  } catch {
+    return {};
+  }
+  const [owner, repo, commit, ...rest] = segments;
+  if (!/^[A-Za-z0-9_.\-]+$/.test(owner) || !/^[A-Za-z0-9_.\-]+$/.test(repo)) return {};
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) return {};
+  const out = { repo: `${owner}/${repo}`, commit };
+  if (rest.length > 0) out.pathTarget = rest.join("/");
+  return out;
 }
 
 // Stream the body and abort once `MAX_BODY_BYTES` is exceeded so a client
@@ -339,7 +377,16 @@ async function readBoundedStream(body, label) {
   return out;
 }
 
-const KNOWN_KEYS = new Set(["content", "type", "disable", "repo", "targets", "osv", "no_capture"]);
+const KNOWN_KEYS = new Set([
+  "content",
+  "type",
+  "disable",
+  "repo",
+  "commit",
+  "targets",
+  "osv",
+  "no_capture",
+]);
 
 function mergeBody(params, raw, ct) {
   if (ct.includes("application/json") || raw.trimStart().startsWith("{")) {
@@ -374,16 +421,16 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|targets|osv|no_capture)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture)=/;
 
-async function handle(params, env) {
+async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
 
   if (params.repo) {
-    return await handleRepo(params, disable, type, useOsv, worker);
+    return await handleRepo(params, pathTarget, disable, type, useOsv, worker);
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
@@ -442,19 +489,67 @@ function countChar(s, ch) {
   return n;
 }
 
-async function handleRepo(params, disable, type, useOsv, worker) {
+// Reject target paths that could escape the pinned commit prefix once
+// interpolated into `https://raw.githubusercontent.com/<repo>/<commit>/<path>`.
+// `..` segments would be URL-normalized by fetch / GitHub's edge and let a
+// caller fetch from a different ref entirely; `\` and absolute paths likewise
+// undermine the prefix. We also reject `%` as defense-in-depth: even though
+// the per-segment `encodeURIComponent` in `handleRepo` already neutralizes
+// percent-encoded escapes like `%2e%2e%2f` (they become literal filename
+// bytes), bailing out at validation time keeps the error clear instead of
+// silently fetching a nonsense path.
+function validateTargetPath(path) {
+  if (typeof path !== "string" || path.length === 0) {
+    throw httpError("target path must be a non-empty string", 400);
+  }
+  if (path.length > 256) {
+    throw httpError(`target path too long (max 256 chars): ${truncatePreview(path)}`, 400);
+  }
+  if (path.startsWith("/") || path.includes("\\") || path.includes("%")) {
+    throw httpError(`invalid target path: ${truncatePreview(path)}`, 400);
+  }
+  for (const seg of path.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") {
+      throw httpError(`invalid target path: ${truncatePreview(path)}`, 400);
+    }
+  }
+}
+
+async function handleRepo(params, pathTarget, disable, type, useOsv, worker) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
   }
-  const rawTargets = params.targets ?? "";
-  if (typeof rawTargets !== "string") {
-    throw httpError("`targets` must be a string", 400);
+  if (params.commit !== undefined && typeof params.commit !== "string") {
+    throw httpError("`commit` must be a string", 400);
   }
-  const targets = rawTargets
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const commit = params.commit || "";
+  if (!commit) {
+    throw new Error("`commit` is required with `repo` (commit SHA, full or abbreviated)");
+  }
+  // Accept the same range Git itself uses for abbreviated SHAs (7-64 hex).
+  // An all-hex value of this shape could technically collide with a branch
+  // or tag of the same name (e.g. `deadbee`); we accept that trade-off for
+  // ergonomics. Callers who need ironclad immutability should pass the full
+  // 40-char SHA.
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
+    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
+  }
+  let targets;
+  if (Object.prototype.hasOwnProperty.call(params, "targets")) {
+    const rawTargets = params.targets ?? "";
+    if (typeof rawTargets !== "string") {
+      throw httpError("`targets` must be a string", 400);
+    }
+    targets = rawTargets
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else if (pathTarget) {
+    targets = [pathTarget];
+  } else {
+    targets = [];
+  }
   if (targets.length === 0) {
     throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
   }
@@ -464,10 +559,15 @@ async function handleRepo(params, disable, type, useOsv, worker) {
       400,
     );
   }
+  for (const path of targets) validateTargetPath(path);
 
   const files = [];
   for (const path of targets) {
-    const url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
+    // Encode each segment so a `?` / `#` / `%` / space in a filename cannot
+    // be reinterpreted as a URL delimiter by fetch; keep `/` as the segment
+    // separator so nested paths still address one file.
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${encodedPath}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
@@ -492,6 +592,7 @@ async function handleRepo(params, disable, type, useOsv, worker) {
   return {
     ok: files.every((f) => f.ok !== false),
     repo,
+    commit,
     targets,
     files,
   };
