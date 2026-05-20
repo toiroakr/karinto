@@ -2,9 +2,10 @@
 /// JS entry point for the Cloudflare Worker.
 ///
 /// Takes the YAML content, file kind hint (`"workflow"` | `"action"` | `""`),
-/// a comma-separated `disable` glob list, and a CSV of `uses:` refs the
-/// caller already knows are vulnerable (e.g. fetched from OSV.dev). Returns
-/// a JSON string with the lint diagnostics and metadata.
+/// a comma-separated `disable` glob list, a CSV of `uses:` refs the caller
+/// already knows are vulnerable (e.g. fetched from OSV.dev), and a CSV of
+/// `forbidden-uses` glob patterns (denylist). Returns a JSON string with
+/// the lint diagnostics and metadata.
 
 ///|
 pub fn lint_string(
@@ -12,6 +13,7 @@ pub fn lint_string(
   kind_str : String,
   disable_str : String,
   vuln_uses_str : String,
+  forbidden_uses_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -20,7 +22,14 @@ pub fn lint_string(
   }
   let disabled = split_csv(disable_str)
   let vuln_uses = split_csv(vuln_uses_str)
-  let result = @karinto.lint(content, kind~, disabled~, vuln_uses~)
+  let forbidden_uses = split_csv(forbidden_uses_str)
+  let result = @karinto.lint(
+    content,
+    kind~,
+    disabled~,
+    vuln_uses~,
+    forbidden_uses~,
+  )
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),
     "result": result.to_json(),

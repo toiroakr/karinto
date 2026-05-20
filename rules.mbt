@@ -55,6 +55,12 @@ pub(all) struct WalkCtx {
   // Optional caller-supplied context: `uses:` refs known to be vulnerable
   // (typically populated from OSV.dev queries by the worker before linting).
   vuln_uses : Array[String]
+  // Optional caller-supplied denylist of `uses:` patterns. Each entry is a
+  // glob (`*`/`?`) matched against the step's `uses:` value — either the
+  // bare `owner/repo[/subpath]` or `owner/repo[/subpath]@ref`. Empty list
+  // keeps `forbidden-uses` dormant, matching zizmor's "no config → silent"
+  // default.
+  forbidden_uses : Array[String]
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
@@ -142,6 +148,7 @@ pub fn prewalk(
   vuln_uses? : Array[String] = [],
   kind? : FileKind = Unknown,
   source? : String = "",
+  forbidden_uses? : Array[String] = [],
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -230,6 +237,7 @@ pub fn prewalk(
     vuln_uses,
     kind,
     source,
+    forbidden_uses,
   }
 }
 
@@ -787,6 +795,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: Some(check_undocumented_permissions),
       on_job: no_job(),
       on_step: no_step(),
+    },
+    Rule::{
+      id: "forbidden-uses",
+      title: "`uses:` matches a caller-supplied denylist",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_forbidden_uses),
     },
   ]
 }
@@ -3985,6 +4001,48 @@ fn comment_text(after_pound : String?) -> String {
   match after_pound {
     Some(s) => trim_ws(s)
     None => ""
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: forbidden-uses (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `forbidden-uses` (deny-list mode): flag any step whose
+/// `uses:` matches a caller-supplied glob pattern. Patterns can target the
+/// bare action (`owner/repo`) or a specific ref (`owner/repo@v1`); we test
+/// both forms so callers do not have to know which one the workflow used.
+/// Empty list keeps the rule dormant — zizmor's default config is also a
+/// no-op, so parity holds without a config plumbed through.
+fn check_forbidden_uses(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.forbidden_uses.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) => {
+      let bare = if step.at_idx >= 0 {
+        u.substring(start=0, end=step.at_idx).to_string()
+      } else {
+        u
+      }
+      for pat in ctx.forbidden_uses {
+        if glob_match(pat, u) || glob_match(pat, bare) {
+          add_diag(
+            out,
+            "forbidden-uses",
+            Warning,
+            "uses `\{u}` matches forbidden pattern `\{pat}`",
+          )
+          break
+        }
+      }
+    }
+    None => ()
   }
 }
 

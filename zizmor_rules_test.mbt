@@ -410,8 +410,10 @@ test "excessive-permissions: job grants more than it needs" {
 }
 
 ///|
-#skip("not implemented yet")
-test "forbidden-uses: action not in allowlist" {
+test "forbidden-uses: action matches caller-supplied denylist" {
+  // karinto threads the denylist through the worker boundary as a CSV
+  // (`?forbidden=…`). When the caller doesn't supply one, the rule is
+  // dormant — matching zizmor's "no config → silent" default.
   let yaml =
     #|on: push
     #|jobs:
@@ -421,17 +423,27 @@ test "forbidden-uses: action not in allowlist" {
     #|      contents: read
     #|    steps:
     #|      - uses: third-party/disallowed-action@v1
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "forbidden-uses",
-        "severity": "warning",
-        "message": "uses `third-party/disallowed-action`: not in the allowlist",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml, forbidden_uses=["third-party/*"], disabled=[
+    "unpinned-uses",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "forbidden-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "forbidden-uses: dormant when no denylist provided" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: third-party/disallowed-action@v1
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "forbidden-uses" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
