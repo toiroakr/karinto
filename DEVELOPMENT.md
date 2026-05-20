@@ -138,6 +138,15 @@ GitHub Actions wiring:
   builds, deploys to the production Worker, runs `cf/smoke.sh`, tags
   `vX.Y.Z`, and creates a GitHub Release whose body is the new CHANGELOG
   section.
+- `.github/workflows/upstream-parity.yml` — runs karinto against the
+  vendored upstream fixtures and the matching upstream linter binary, and
+  compares the diagnostics they emit (per-rule for zizmor / ghalint, source-
+  level aggregate for actionlint). Fails PRs on divergence; on `main` runs
+  in soft mode (informational only).
+- `.github/workflows/upstream-refresh.yml` — weekly cron (Monday 00:00 UTC)
+  that checks GitHub for newer actionlint / zizmor / ghalint releases. When
+  found, bumps `mise.toml` and re-vendors `fixtures/upstream/<tool>/` from
+  the matching tag, then opens a PR labelled `dependencies` + `skip-changeset`.
 
 ### Per-PR changesets
 
@@ -362,3 +371,80 @@ The script fetches captures directly from R2 via its S3-compatible API
 replay endpoint is involved. `REPLAY_SUMMARY_PATH=/tmp/out.md` will
 additionally write a markdown summary to that path (used by the PR
 sticky-comment step).
+
+## Upstream parity check
+
+`upstream-parity.yml` runs karinto and the three upstream linters
+(actionlint / zizmor / ghalint) over a shared, vendored set of test
+fixtures and compares the rule IDs each side emits. The point is to
+detect when karinto drifts from the upstream behaviour it claims to
+implement.
+
+```
+fixtures/upstream/
+├── actionlint/    # vendored from rhysd/actionlint @ matching release tag
+├── zizmor/        # vendored from zizmorcore/zizmor @ matching release tag
+└── ghalint/       # vendored from suzuki-shunsuke/ghalint @ matching release tag
+```
+
+Pins (binary version + fixture tag) live in `mise.toml`. The CI installs
+the binaries via [mise](https://mise.jdx.dev/) (`aqua:` backend for
+actionlint + ghalint, `ubi:` backend for zizmor since it isn't in the aqua
+standard registry). Locally:
+
+```sh
+mise install
+moon build --target js --release
+node scripts/upstream-parity/compare.mjs \
+  --actionlint "$(mise which actionlint)" \
+  --zizmor     "$(mise which zizmor)" \
+  --ghalint    "$(mise which ghalint)"
+```
+
+### How diffs are classified
+
+For each fixture file, the script runs both karinto and the matching
+upstream linter and compares.
+
+- **zizmor / ghalint** — per-rule. Their rule IDs map 1:1 to entries in
+  `rules_catalog.mbt` `origins`. The comparison expects:
+  - upstream fires `T:foo` → karinto fires the rule with `T:foo` origin
+    (if its status is `Implemented`);
+  - karinto fires a rule with `T:foo` origin → upstream fires `T:foo`.
+- **actionlint** — source-level aggregate. actionlint's JSON `Kind` field
+  is a coarse category (e.g. `syntax-check`) that doesn't disambiguate
+  individual karinto rules, so the comparison is: "did either side fire on
+  this file at all?". Per-rule precision is left as future work — message-
+  regex tables would need to be added per actionlint Kind.
+
+Status-driven exemptions:
+
+- `Implemented` rules participate in the diff. A miss is a hard failure.
+- `Planned` / `NotPlanned` rules don't participate; upstream firings that
+  map to them are reported in the soft-divergence section as informational.
+- Upstream firings that don't map to any karinto rule (e.g.
+  `actionlint:shellcheck-on-run` — explicitly `NotPlanned`) are reported as
+  `unmapped` and don't fail the check.
+
+### When parity legitimately diverges
+
+When upstream and karinto are intentionally different on a specific
+fixture (e.g. the fixture exercises a rule we deliberately don't ship),
+add an entry to `scripts/upstream-parity/allowlist.json`. Schema lives in
+the file's leading `_comment` block. Be specific — match by rule ID, not
+by file alone, so the allowlist degrades gracefully as fixtures change.
+
+### Weekly refresh
+
+`upstream-refresh.yml` runs every Monday at 00:00 UTC (and on
+`workflow_dispatch`). It:
+
+1. Reads the current pins from `mise.toml`.
+2. Queries `gh api repos/<owner>/<repo>/releases/latest` for each tool.
+3. For tools with a newer release: bumps `mise.toml`, shallow-clones the
+   new tag, and replaces `fixtures/upstream/<tool>/` with the vendored
+   testdata subdirs (see `TOOLS[].vendor` in `refresh.mjs`).
+4. Opens a PR via `peter-evans/create-pull-request` labelled
+   `dependencies` + `skip-changeset`. Auto-merge is intentionally not
+   enabled — a refresh is exactly when `upstream-parity.yml` is most
+   likely to surface real regressions, so a human should look.

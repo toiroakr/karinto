@@ -1,0 +1,1367 @@
+{
+  "_comment": [
+    "Per-fixture suppressions for the upstream-parity check.",
+    "Each entry suppresses specific divergence kinds on a single fixture file.",
+    "",
+    "Schema:",
+    "  entries[].file    path relative to the repo root (e.g. 'fixtures/upstream/zizmor/tests/.../foo.yml')",
+    "  entries[].expect  array of allowed-divergence tags:",
+    "",
+    "  Per-rule mode (zizmor/ghalint):",
+    "    'missing:<rule-id>'    karinto won't fire <rule-id>; suppress.",
+    "    'extra:<rule-id>'      karinto fires <rule-id> but upstream doesn't; suppress.",
+    "",
+    "  Aggregate mode (actionlint):",
+    "    'upstream-only'  upstream fires; karinto silent. Suppress (e.g. shellcheck-only finding).",
+    "    'karinto-only'   karinto fires; upstream silent. Suppress.",
+    "    'ignore'         suppress any divergence on this file.",
+    "",
+    "  Always include a 'reason' field so future readers can see why it's here."
+  ],
+  "entries": [
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/action-yaml/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/action-yml/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/branding/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/broken/action.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/composite/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/deprecated/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/docker/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/empty/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/input-duplicate/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/node24/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/output-duplicate/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/action_metadata/uppercase/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/config/broken.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/config/ok.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/config/projects/err/.github/actionlint.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/config/projects/ok/.github/actionlint.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/config/projects/yml/.github/actionlint.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/.github/workflows/called-workflow.yml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/cron_5minutes_limit.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/dedup_errors.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/deprecated_action_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/docker_specific_inputs_with_normal_action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/duplicate_keys.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/empty_on.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/empty.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/env_context_banned.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/exclusive_webhook_filters.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/expr_check_in_credentials.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/expr_check_in_matrix_row_assign.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/expr_check_in_services.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/expr_in_default_input.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/github_script_untrusted_input.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/inputs_without_workflow_call_event.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/invalid_comparisons.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/invalid_event_filters.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/invalid_float_at_timeout_minutes.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/invalid_int_at_max_parallel.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/invalid_json_in_fromjson.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue-610_recursive_raw_yaml_value.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue102.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue151_child_of_child_job.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue155_env_in_job_level_if.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue193.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue207_work_dir_with_uses.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/issue558_read_write_none_are_not_always_valid_permissions.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/macos12_runner.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/minimal_cycle_in_needs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/nested_untrusted_input.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/object_at_runner_label.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/one_error.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/outdated_actions.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/outdated_popular_action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/outputs_map_object.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/outputs_of_action_skipping_inputs_check.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/pyflakes_step_shell.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/random_order_cycle_in_needs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/reusable_workflow_empty_secrets.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/run_name_check_expr.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/runner_labels_conflict_matrix.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/schedule_event_with_no_config_1.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/schedule_event_with_no_config_2.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/shellcheck_default_shell_detection.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/special_function_availability.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/undefined_anchor.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/upper_case_duplicate_keys.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/variables_type_check.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_event.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_invalid_secrets.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_outputs_sema.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_outputs_syntax.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_call_secrets.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_dispatch_more_than_25_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/workflow_dispatch_type_check_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/yaml_syntax_error.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/.github/actions/my-action-with-output/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/.github/actions/my-action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/broken_yaml.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/builtin_func_special_checks.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/comparison_strict_checks.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/contexts_and_builtin_funcs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/contexts_special_functions_availability.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/contextual_matrix_values.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/contextual_needs_object.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/contextual_steps_outputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/cyclic_deps_needs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/dangling_alias.yaml",
+      "expect": [
+        "upstream-only",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/deprecated_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/detect_outdated_popular_actions.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/expression_syntax_error.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/glob.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/local_action_outputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/missing_required_keys.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/not_persistent_matrix_values.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/popular_action_inputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/popular_action_outputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/runner_label_conflict.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/type_checks.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/unexpected_mapping_values.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/untrusted_input.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/workflow_call_jobs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/workflow_inputs_secrets_types.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/find_project/.github/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/format/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/anchors.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/custom_images.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/dynamic_shell_name.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/events_with_no_config.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/image_version_event_names_only.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/image_version_event_versions_only.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/image_version_event.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-205-closing-braces-in-string.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-280_runs_on.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-285_expr_assign_at_matrix_row.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-312_expression_in_env_var.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-87.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/pyflakes_python_shell.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/reusable_workflow_inherit_secrets.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/shell_name_case_insensitive.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/shellcheck_step_shell.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/snapshot_image_name_only.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/snapshot_name_and_version.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/valid_comparisons.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/workflow_call_outputs.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/workflow_dispatch_upper_case_inputs.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_local_action/action/broken_input/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_local_action/action/broken_output/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_local_action/action/duplicate_input/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_local_action/action/duplicate_output/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_local_action/action/multiple_unmarshal_errors/action.yml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_reusable_workflow/reusable/broken_secrets.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/broken_reusable_workflow/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/config_variables/actionlint.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/docker_specific_inputs/action_none/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/example_inputs_secrets_in_workflow_call/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/example_workflow_call_outputs_downstream_jobs/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/issue-136/workflows/reusable.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/issue-136/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/issue173/action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_branding/action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_case_insensitive/action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_empty/action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_invalid_runners/missing_runs/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_invalid/branding/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_invalid/no_desc/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_invalid/no_name/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_composite_action/all_invalid_keys/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_composite_action/ok/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/all_invalid_keys/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/invalid_dockerfile/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/missing_files/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/missing_image/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_all_keys/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_docker_docker.io/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_docker_ghcr.io/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_dockerfile_subdir/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_dockerfile/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_docker_action/ok_registry/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_javascript_action/all_invalid_keys/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_javascript_action/invalid_if_sections/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_javascript_action/missing_files/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_javascript_action/ok_all_optional/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_javascript_action/ok/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/paths_config/actionlint.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/recursive_workflow_call/workflows/recursive.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/user_defined_runner_label/actionlint.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/user_defined_runner_label/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_inherit_secrets/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_input_type_check/workflows/reusable.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_input_type_check/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_missing_required/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_not_found/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_ok/workflows/empty1.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_ok/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_undefined/workflows/test.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/reusable/lower.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/reusable/upper.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/workflows/missing.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/workflows/ok_lower.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/workflows/ok_upper.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/workflows/output.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/workflow_call_upper_case/workflows/undefined.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/yaml_anchor_in_action/action/action.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/ghalint/test-action.yaml",
+      "expect": [
+        "missing:github-app-limit-repositories",
+        "missing:github-app-limit-permissions",
+        "missing:checkout-persist-credentials-false"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=ghalint. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/dangerous-triggers/actions-labeler.yml",
+      "expect": [
+        "extra:dangerous-triggers"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/invalid/invalid-workflow.yml",
+      "expect": [
+        "extra:concurrency-limits",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/issue-1065.yml",
+      "expect": [
+        "missing:unpinned-uses",
+        "missing:concurrency-limits",
+        "ignore"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/secrets-inherit.yml",
+      "expect": [
+        "missing:unpinned-uses"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/template-injection/issue-1664-repro.yml",
+      "expect": [
+        "missing:concurrency-limits"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/unpinned-uses/reusable-workflow-unpinned.yml",
+      "expect": [
+        "missing:unpinned-uses"
+      ],
+      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    }
+  ]
+}

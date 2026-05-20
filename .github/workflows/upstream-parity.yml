@@ -1,0 +1,77 @@
+name: upstream-parity
+
+# Runs karinto on the vendored upstream fixtures alongside the matching
+# upstream linter and compares per-rule (zizmor / ghalint) or per-source
+# aggregate (actionlint). See scripts/upstream-parity/compare.mjs for the
+# diff classification. Tool versions and fixtures are kept in lockstep via
+# mise.toml + the weekly upstream-refresh workflow.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/upstream-parity.yml
+      - mise.toml
+      - rules.mbt
+      - rules_catalog.mbt
+      - karinto.mbt
+      - worker/**
+      - fixtures/upstream/**
+      - scripts/upstream-parity/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/upstream-parity.yml
+      - mise.toml
+      - rules.mbt
+      - rules_catalog.mbt
+      - karinto.mbt
+      - worker/**
+      - fixtures/upstream/**
+      - scripts/upstream-parity/**
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - run: moon update
+
+      - name: Build JS bundle
+        run: moon build --target js --release
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install upstream linters
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+          # Don't activate the shims globally; we invoke binaries explicitly
+          # via `mise exec` below to keep the rest of the job hermetic.
+          experimental: false
+
+      - name: Resolve linter binary paths
+        id: bins
+        run: |
+          echo "actionlint=$(mise which actionlint)" >> "$GITHUB_OUTPUT"
+          echo "zizmor=$(mise which zizmor)" >> "$GITHUB_OUTPUT"
+          echo "ghalint=$(mise which ghalint)" >> "$GITHUB_OUTPUT"
+
+      - name: Compare karinto vs upstream
+        # `--soft` on main keeps the job green even on divergence (the report
+        # still posts to the step summary). PRs hard-fail on divergence so
+        # newly introduced regressions get caught at review time.
+        run: |
+          node scripts/upstream-parity/compare.mjs \
+            --actionlint "${{ steps.bins.outputs.actionlint }}" \
+            --zizmor     "${{ steps.bins.outputs.zizmor }}" \
+            --ghalint    "${{ steps.bins.outputs.ghalint }}" \
+            ${{ github.event_name == 'push' && '--soft' || '' }}

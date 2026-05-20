@@ -1,0 +1,84 @@
+name: upstream-refresh
+
+# Weekly check (Monday 00:00 UTC) for new actionlint / zizmor / ghalint
+# releases. When found, bumps mise.toml and re-vendors fixtures from the
+# matching tag, then opens a PR. The PR auto-triggers upstream-parity.yml
+# so a real behavioural diff fails before the bump can merge.
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Refresh fixtures
+        id: refresh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/upstream-parity/refresh.mjs > refresh-summary.json
+          changed=$(node -e "console.log(JSON.parse(require('fs').readFileSync('refresh-summary.json','utf8')).changed)")
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Build PR body
+        if: steps.refresh.outputs.changed == 'true'
+        id: body
+        run: |
+          {
+            echo 'Refresh upstream linter pins (auto-generated).'
+            echo
+            echo '| tool | from | to | release |'
+            echo '| --- | --- | --- | --- |'
+            node -e '
+              const s = JSON.parse(require("fs").readFileSync("refresh-summary.json","utf8"));
+              for (const u of s.updates) {
+                console.log(`| ${u.name} | ${u.from} | ${u.to} | [${u.tag}](${u.url}) |`);
+              }
+            '
+            echo
+            echo 'Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. The `upstream-parity` workflow will run on this PR — review any divergences it surfaces before merging.'
+          } > pr-body.md
+          # peter-evans/create-pull-request reads `body` as a literal string, so
+          # pass via env to avoid quoting headaches.
+          {
+            echo 'PR_BODY<<EOF'
+            cat pr-body.md
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Compose PR title
+        if: steps.refresh.outputs.changed == 'true'
+        id: title
+        run: |
+          summary=$(node -e '
+            const s = JSON.parse(require("fs").readFileSync("refresh-summary.json","utf8"));
+            console.log(s.updates.map(u => `${u.name} ${u.to}`).join(", "));
+          ')
+          echo "title=chore(upstream): refresh ${summary}" >> "$GITHUB_OUTPUT"
+
+      - name: Open / update PR
+        if: steps.refresh.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: ${{ steps.title.outputs.title }}
+          title: ${{ steps.title.outputs.title }}
+          body: ${{ env.PR_BODY }}
+          branch: chore/upstream-refresh
+          delete-branch: true
+          labels: |
+            dependencies
+            skip-changeset
+          # Don't enable auto-merge — a refresh PR may surface real parity
+          # breaks that require human review.

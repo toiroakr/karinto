@@ -3693,28 +3693,54 @@ fn check_unknown_runner_label(
 // ---------------------------------------------------------------------------
 
 ///|
-/// Fire only on workflows whose triggers suggest external-state mutation
-/// (deploys, releases, scheduled jobs, manual runs), where running concurrent
-/// copies is most likely to cause harm. PR-style triggers are ignored.
+/// Mirrors zizmor's `concurrency-limits` (audit/concurrency_limits.rs):
+///
+/// 1. Reusable-only workflows (`on:` lists only `workflow_call`) are
+///    skipped — callers manage their concurrency. See zizmor#1511.
+/// 2. Workflow-level `concurrency: <bare string>` fires (lacks
+///    `cancel-in-progress`). A map form is treated as user-set intent
+///    even if `cancel-in-progress` is absent or false — see zizmor#1302.
+/// 3. With no workflow-level `concurrency:`, iterate normal jobs (skip
+///    reusable `uses:` jobs); any normal job with bare-string concurrency
+///    or no concurrency at all fires.
 fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
-      if m.contains("concurrency") {
+      if is_reusable_only(m) {
         return
       }
-      if !triggers_warrant_concurrency(m) {
-        return
+      let wf_concurrency = m.get("concurrency")
+      match wf_concurrency {
+        Some(@yaml.Yaml::String(_)) => {
+          add_diag(
+            out,
+            "concurrency-limits",
+            Info,
+            "workflow `concurrency:` is bare; missing `cancel-in-progress`",
+          )
+          return
+        }
+        Some(@yaml.Yaml::Map(_)) => return
+        _ => ()
       }
-      let mut any_job = false
       let mut missing = false
       for j in ctx.jobs {
-        any_job = true
-        if !j.raw.contains("concurrency") {
-          missing = true
-          break
+        if j.uses is Some(_) {
+          continue
+        }
+        match j.raw.get("concurrency") {
+          None => {
+            missing = true
+            break
+          }
+          Some(@yaml.Yaml::String(_)) => {
+            missing = true
+            break
+          }
+          _ => ()
         }
       }
-      if any_job && missing {
+      if missing {
         add_diag(
           out,
           "concurrency-limits",
@@ -3728,22 +3754,25 @@ fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 }
 
 ///|
-fn triggers_warrant_concurrency(m : Map[String, @yaml.Yaml]) -> Bool {
+/// True when the workflow's `on:` field lists only `workflow_call` — i.e.
+/// it is a reusable workflow whose concurrency must be managed by callers.
+fn is_reusable_only(m : Map[String, @yaml.Yaml]) -> Bool {
   match m.get("on") {
-    Some(@yaml.Yaml::Map(on_map)) => {
-      let push_qualifies = match on_map.get("push") {
-        Some(@yaml.Yaml::Map(push_map)) =>
-          push_map.contains("branches") ||
-          push_map.contains("branches-ignore") ||
-          push_map.contains("tags") ||
-          push_map.contains("tags-ignore")
-        _ => false
+    Some(@yaml.Yaml::String(s)) => s == "workflow_call"
+    Some(@yaml.Yaml::Array(arr)) => {
+      if arr.length() == 0 {
+        return false
       }
-      push_qualifies ||
-      on_map.contains("release") ||
-      on_map.contains("schedule") ||
-      on_map.contains("workflow_dispatch")
+      for item in arr {
+        match item {
+          @yaml.Yaml::String(s) => if s != "workflow_call" { return false }
+          _ => return false
+        }
+      }
+      true
     }
+    Some(@yaml.Yaml::Map(on_map)) =>
+      on_map.size() == 1 && on_map.contains("workflow_call")
     _ => false
   }
 }

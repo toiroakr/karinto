@@ -2,6 +2,7 @@
 _build/
 .mooncakes/
 .moonagent/
+.claude/
 node_modules/
 .wrangler/
 

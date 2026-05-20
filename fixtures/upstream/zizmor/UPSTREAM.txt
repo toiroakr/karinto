@@ -1,0 +1,2 @@
+zizmorcore/zizmor@v1.25.2
+vendored: crates/zizmor/tests -> tests

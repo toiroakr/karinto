@@ -75,6 +75,11 @@ test "artipacked: actions/checkout leaves credentials persisted" {
     "stats": { "jobs": 1, "steps": 2, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
@@ -105,6 +110,11 @@ test "bot-conditions: spoofable github.actor bot check" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "bot-conditions",
         "severity": "error",
@@ -198,6 +208,11 @@ test "dangerous-triggers: workflow uses pull_request_target" {
         "severity": "error",
         "message": "trigger `pull_request_target` runs with write access to the base repo",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -274,6 +289,11 @@ test "excessive-permissions: job grants more than it needs" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "excessive-permissions",
         "severity": "warning",
@@ -357,6 +377,11 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "message": "trigger `pull_request_target` runs with write access to the base repo",
       },
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "template-injection",
         "severity": "error",
         "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
@@ -391,6 +416,11 @@ test "hardcoded-container-credentials: plain password in container" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "hardcoded-container-credentials",
         "severity": "error",
@@ -449,6 +479,11 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
         "message": "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
       },
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "deprecated-workflow-commands",
         "severity": "warning",
         "message": "deprecated workflow command `::set-env`; use `$GITHUB_ENV` instead",
@@ -473,6 +508,11 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "unpinned-uses",
         "severity": "warning",
@@ -528,6 +568,11 @@ test "misfeature: continue-on-error masks real failures" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "misfeature",
         "severity": "info",
         "message": "job `build` has `continue-on-error: true`; failures will be hidden",
@@ -552,6 +597,11 @@ test "obfuscation: hex-encoded uses ref" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
@@ -589,6 +639,11 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "overprovisioned-secrets",
         "severity": "warning",
@@ -667,6 +722,11 @@ test "secrets-outside-env: secrets accessed without an environment" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "secrets-outside-env",
         "severity": "warning",
         "message": "job `deploy` uses `secrets.*` without protecting it with `environment:`",
@@ -691,6 +751,11 @@ test "self-hosted-runner: job runs on self-hosted runner" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "self-hosted-runner",
         "severity": "warning",
@@ -726,6 +791,11 @@ test "superfluous-actions: setup-node duplicated across steps" {
     "stats": { "jobs": 1, "steps": 2, "lines": 14 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "superfluous-actions",
         "severity": "info",
         "message": "job `build` uses `actions/setup-node` twice",
@@ -750,6 +820,11 @@ test "template-injection: untrusted input in run script" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "template-injection",
         "severity": "error",
@@ -802,6 +877,11 @@ test "unpinned-images: container image uses a floating tag" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unpinned-images",
         "severity": "warning",
         "message": "container image `node:20` is not pinned by digest",
@@ -826,6 +906,11 @@ test "unpinned-tools: pipe-to-shell installer in run" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "unpinned-tools",
         "severity": "warning",
@@ -854,6 +939,11 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unpinned-uses",
         "severity": "warning",
         "message": "uses `actions/checkout@v4` is not pinned to a full-length SHA",
@@ -881,6 +971,11 @@ test "unredacted-secrets: secret length manipulated before logging" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unredacted-secrets",
         "severity": "error",
         "message": "secret is transformed (base64) before logging; redaction will fail",
@@ -907,6 +1002,11 @@ test "unsound-condition: `always() && success()` is always true" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unsound-condition",
         "severity": "warning",
         "message": "`always() && success()` is always equivalent to `always()`",
@@ -932,6 +1032,11 @@ test "unsound-contains: contains() with literal arg order swapped" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "unsound-contains",
         "severity": "warning",
