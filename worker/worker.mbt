@@ -2,24 +2,29 @@
 /// JS entry point for the Cloudflare Worker.
 ///
 /// Takes the YAML content, file kind hint (`"workflow"` | `"action"` | `""`),
-/// a comma-separated `disable` glob list, and several CSV inputs that feed
-/// the rules whose verdict depends on data the Worker resolves out-of-band
-/// (typically via the GitHub / OSV.dev APIs):
+/// a comma-separated `disable` glob list, plus several CSV inputs that feed
+/// rules whose verdict depends on data the caller must resolve out-of-band
+/// (typically via the GitHub / OSV.dev APIs). All CSV inputs default to ""
+/// (rule stays dormant when the caller cannot supply data):
 ///
-///   * `vuln_uses_str`      — refs known to be vulnerable
-///                            (`known-vulnerable-actions`, query: `?osv-hits=`)
+///   * `vuln_uses_str`      — refs the caller has confirmed vulnerable
+///                            (`known-vulnerable-actions`)
 ///   * `forbidden_uses_str` — denylist globs for `forbidden-uses`
-///                            (query: `?forbidden=`)
-///   * `archived_uses_str`  — refs whose repo is archived
-///                            (`archived-uses`, query: `?archived=`)
+///   * `archived_uses_str`  — refs whose repo is archived (`archived-uses`)
 ///   * `impostor_uses_str`  — `owner/repo@sha` confirmed impostor commits
-///                            (`impostor-commit`, query: `?impostor=`)
+///                            (`impostor-commit`)
 ///   * `ref_mismatches_str` — `owner/repo@ref` whose tag/branch points to a
 ///                            different SHA than expected
-///                            (`ref-version-mismatch`, query: `?ref-mismatch=`)
+///                            (`ref-version-mismatch`)
 ///
-/// Each list is comma-separated. Empty inputs leave the corresponding rule
-/// dormant. Returns a JSON string with the lint diagnostics and metadata.
+/// The Cloudflare Worker HTTP handler (`cf/index.js`) currently only wires
+/// `vuln_uses_str` (populated from OSV.dev when the request sets `osv=1`).
+/// The remaining inputs are part of `lint_string`'s contract so callers
+/// embedding the Worker directly — tests, the dark-launch replayer,
+/// downstream integrations — can supply them; HTTP routing for them is a
+/// future change.
+///
+/// Returns a JSON string with the lint diagnostics and metadata.
 
 ///|
 pub fn lint_string(

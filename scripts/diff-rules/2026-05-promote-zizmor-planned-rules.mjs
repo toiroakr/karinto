@@ -1,6 +1,6 @@
 export const id = "promote-zizmor-planned-rules";
 export const reason =
-  "PR #14 promotes every Planned zizmor rule to Implemented (plus actionlint:yaml-anchor-issues), so prod captures predating this PR see additional Info/Warning findings on the workflows they were taken from. Only suppresses *new* findings whose `rule` is one of the freshly-firing or freshly-broadened zizmor audits.";
+  "PR #14 promotes every Planned zizmor rule to Implemented (plus actionlint:yaml-anchor-issues). When the PR worker replays a request that was captured in prod before this PR shipped, the replayed response therefore includes additional Info/Warning findings on the same workflow. This rule suppresses those diffs — but only when every new finding's `rule` is one of the freshly-firing or freshly-broadened audits listed below.";
 
 // Every rule promoted (or whose scope was broadened) by PR #14. If the
 // replayed worker emits a diagnostic whose `rule` is outside this list, the
