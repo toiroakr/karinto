@@ -779,9 +779,9 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       BestPractice,
       Warning,
       Low,
-      Planned,
+      Implemented,
       true,
-      true,
+      false,
     ),
     // Consolidates ghalint ghl-004 (deny_inherit_secrets).
     spec(

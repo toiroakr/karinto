@@ -70,6 +70,10 @@ pub(all) struct WalkCtx {
   // does not belong to the claimed repository. Empty → rule is silent
   // offline (matches zizmor `--no-online-audits`).
   impostor_uses : Array[String]
+  // Optional caller-supplied `owner/repo@sha` list of refs whose pinned SHA
+  // belongs to the repo but does NOT match the version named in the
+  // trailing `# vN` comment. Empty → rule silent offline.
+  ref_mismatches : Array[String]
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
@@ -160,6 +164,7 @@ pub fn prewalk(
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
   impostor_uses? : Array[String] = [],
+  ref_mismatches? : Array[String] = [],
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -251,6 +256,7 @@ pub fn prewalk(
     forbidden_uses,
     archived_uses,
     impostor_uses,
+    ref_mismatches,
   }
 }
 
@@ -848,6 +854,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: no_doc(),
       on_job: Some(check_impostor_commit_job),
       on_step: Some(check_impostor_commit_step),
+    },
+    Rule::{
+      id: "ref-version-mismatch",
+      title: "Pinned SHA does not match the version named in the trailing comment",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_ref_version_mismatch_job),
+      on_step: Some(check_ref_version_mismatch_step),
     },
   ]
 }
@@ -4394,6 +4408,62 @@ fn check_impostor_commit_job(
           "impostor-commit",
           Error,
           "uses `\{u}`: SHA does not exist in the claimed repository",
+        )
+      }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: ref-version-mismatch (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor's `ref-version-mismatch` checks whether a pinned SHA actually
+/// matches the tag mentioned in the trailing `# vN` comment. The
+/// resolution requires GitHub API access (tag → SHA), so karinto stays
+/// silent offline and relies on the Worker to thread the confirmed
+/// `owner/repo@sha` mismatches via `ref_mismatches=`. Empty list keeps
+/// the rule dormant — matches zizmor's `--no-online-audits` mode.
+fn check_ref_version_mismatch_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.ref_mismatches.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.ref_mismatches) {
+        add_diag(
+          out,
+          "ref-version-mismatch",
+          Warning,
+          "uses `\{u}`: pinned SHA does not match the version in the trailing comment",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_ref_version_mismatch_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.ref_mismatches.length() == 0 {
+    return
+  }
+  match job.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.ref_mismatches) {
+        add_diag(
+          out,
+          "ref-version-mismatch",
+          Warning,
+          "uses `\{u}`: pinned SHA does not match the version in the trailing comment",
         )
       }
     None => ()

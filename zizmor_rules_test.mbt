@@ -900,8 +900,11 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
 // compliant workflows. See rules_catalog.mbt.
 
 ///|
-#skip("not implemented yet")
-test "ref-version-mismatch: comment claims v5 but SHA is from v4" {
+/// Resolving `tag → SHA` to confirm a mismatch with the trailing `# vN`
+/// comment requires a GitHub API call. Mirrors zizmor's
+/// `--no-online-audits` behaviour: silent unless the Worker threads the
+/// confirmed-mismatch list through `ref_mismatches=`.
+test "ref-version-mismatch: silent without caller-supplied mismatch list" {
   let yaml =
     #|on: push
     #|jobs:
@@ -911,17 +914,27 @@ test "ref-version-mismatch: comment claims v5 but SHA is from v4" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v5
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "ref-version-mismatch",
-        "severity": "warning",
-        "message": "pinned SHA does not match the tag in the trailing comment (`v5`)",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "ref-version-mismatch" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "ref-version-mismatch: fires when caller marks ref as mismatched" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v5
+  let res = @karinto.lint(yaml, ref_mismatches=[
+    "actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "ref-version-mismatch" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
