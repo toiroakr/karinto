@@ -1370,6 +1370,13 @@
         "missing:unpinned-uses"
       ],
       "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/overprovisioned-secrets.yml",
+      "expect": [
+        "missing:overprovisioned-secrets"
+      ],
+      "reason": "Fixture mixes a true positive with a `# zizmor: ignore[overprovisioned-secrets]` trailing comment. karinto's inline-ignore parser treats every such comment as a global file-wide suppression (it has no node-position tracking), so the rule is disabled for the whole file even though only one node should be ignored. Implementation logic is correct; the limitation is engine-wide and tracked separately."
     }
   ]
 }
