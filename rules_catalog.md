@@ -93,7 +93,7 @@ the diagnostic provenance is never lost.
 | `constant-if-condition` | [`actionlint:constant-if-condition`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Implemented | |
 | `action-yml-metadata` | [`actionlint:action-yml-metadata`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | Applies to `action.yml` only. |
 | `deprecated-action-inputs` | [`actionlint:deprecated-popular-action-inputs`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Planned | Requires bundling popular-action metadata; fixtures in place. |
-| `yaml-anchor-issues` | [`actionlint:yaml-anchors`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Planned | Requires raw-anchor visibility from the YAML parser; fixtures in place. |
+| `yaml-anchor-issues` | [`actionlint:yaml-anchors`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Implemented | Re-scans the raw source for `&name` declarations / `*name` aliases (the YAML parser resolves them away) and flags anchors that were declared but never referenced. |
 
 ## Supply-chain & security (zizmor)
 

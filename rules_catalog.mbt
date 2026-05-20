@@ -504,7 +504,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Syntax,
       Warning,
       Low,
-      Planned,
+      Implemented,
       true,
       true,
     ),

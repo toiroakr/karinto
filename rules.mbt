@@ -871,6 +871,14 @@ pub fn all_rules() -> Array[Rule] {
       on_job: Some(check_matrix_values_job),
       on_step: None,
     },
+    Rule::{
+      id: "yaml-anchor-issues",
+      title: "YAML anchor declared but never referenced",
+      applies: workflow_or_action,
+      on_doc: Some(check_yaml_anchor_issues),
+      on_job: None,
+      on_step: None,
+    },
   ]
 }
 
@@ -4554,6 +4562,110 @@ fn check_matrix_values_job(
       _ => ()
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// Rule: yaml-anchor-issues (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// actionlint's `yaml-anchors` check fires when a YAML anchor (`&name`) is
+/// declared but never referenced via an alias (`*name`). The YAML parser
+/// resolves anchors away before we see the document, so we re-scan the
+/// raw source for `&label` (declaration) and `*label` (alias) tokens.
+fn is_anchor_name_char(ch : Char) -> Bool {
+  (ch >= 'a' && ch <= 'z') ||
+  (ch >= 'A' && ch <= 'Z') ||
+  (ch >= '0' && ch <= '9') ||
+  ch == '_' ||
+  ch == '-'
+}
+
+///|
+fn is_anchor_start(ch : Char) -> Bool {
+  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+///|
+/// Collect `&name` / `*name` tokens from `line`, ignoring anything after
+/// the first unquoted `#` (YAML comment). Skip single-quoted regions to
+/// avoid false positives on tokens embedded in scalar strings.
+fn scan_anchor_tokens(
+  line : String,
+  declared : Map[String, Bool],
+  used : Map[String, Bool],
+) -> Unit {
+  let chars = line.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_single && !in_double && ch == '#' {
+      return
+    }
+    if !in_double && ch == '\'' {
+      in_single = not(in_single)
+      i = i + 1
+      continue
+    }
+    if !in_single && ch == '"' {
+      in_double = not(in_double)
+      i = i + 1
+      continue
+    }
+    if !in_single && !in_double && (ch == '&' || ch == '*') {
+      let prev_ok = i == 0 ||
+        chars[i - 1] == ' ' ||
+        chars[i - 1] == '\t' ||
+        chars[i - 1] == ':' ||
+        chars[i - 1] == '[' ||
+        chars[i - 1] == ',' ||
+        chars[i - 1] == '-'
+      if prev_ok && i + 1 < n && is_anchor_start(chars[i + 1]) {
+        let mut j = i + 1
+        while j < n && is_anchor_name_char(chars[j]) {
+          j = j + 1
+        }
+        let name = line.substring(start=i + 1, end=j).to_string()
+        if ch == '&' {
+          declared[name] = true
+        } else {
+          used[name] = true
+        }
+        i = j
+        continue
+      }
+    }
+    i = i + 1
+  }
+}
+
+///|
+fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  if ctx.source == "" {
+    return
+  }
+  let declared : Map[String, Bool] = Map::new()
+  let used : Map[String, Bool] = Map::new()
+  for v in ctx.source.split("\n") {
+    scan_anchor_tokens(v.to_string(), declared, used)
+  }
+  let names : Array[String] = []
+  declared.each(fn(name, _) { names.push(name) })
+  // Stable order — sort by name.
+  names.sort()
+  for name in names {
+    if !used.contains(name) {
+      add_diag(
+        out,
+        "yaml-anchor-issues",
+        Warning,
+        "YAML anchor `&\{name}` is declared but never referenced",
+      )
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

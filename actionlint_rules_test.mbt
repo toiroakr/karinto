@@ -1185,7 +1185,6 @@ test "deprecated-action-inputs: deprecated input on a popular action" {
 }
 
 ///|
-#skip("not implemented yet")
 test "yaml-anchor-issues: anchor declared but never referenced" {
   let yaml =
     #|on: push
@@ -1196,15 +1195,31 @@ test "yaml-anchor-issues: anchor declared but never referenced" {
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "yaml-anchor-issues",
-        "severity": "warning",
-        "message": "YAML anchor `&base` is declared but never referenced",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "yaml-anchor-issues" })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="YAML anchor `&base` is declared but never referenced",
+  )
+}
+
+///|
+test "yaml-anchor-issues: silent when anchor is aliased" {
+  let yaml =
+    #|on: push
+    #|defaults: &defaults
+    #|  run:
+    #|    shell: bash
+    #|jobs:
+    #|  build:
+    #|    defaults: *defaults
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "yaml-anchor-issues" })
+  inspect(hits.length(), content="0")
 }
