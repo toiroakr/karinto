@@ -1358,6 +1358,20 @@
       "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
     },
     {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/self-hosted.yml",
+      "expect": [
+        "extra:self-hosted-runner"
+      ],
+      "reason": "Source=zizmor. self-hosted-runner is an auditor-persona-only audit upstream; under pedantic (parity engine's persona) it is suppressed. karinto has no persona system and reports it always — intentional behavioural divergence."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/self-hosted/self-hosted-runner-label.yml",
+      "expect": [
+        "extra:self-hosted-runner"
+      ],
+      "reason": "Source=zizmor. self-hosted-runner is an auditor-persona-only audit upstream; under pedantic (parity engine's persona) it is suppressed. karinto has no persona system and reports it always — intentional behavioural divergence."
+    },
+    {
       "file": "fixtures/upstream/zizmor/tests/integration/test-data/template-injection/issue-1664-repro.yml",
       "expect": [
         "missing:concurrency-limits"
