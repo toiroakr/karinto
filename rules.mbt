@@ -61,6 +61,11 @@ pub(all) struct WalkCtx {
   // keeps `forbidden-uses` dormant, matching zizmor's "no config → silent"
   // default.
   forbidden_uses : Array[String]
+  // Optional caller-supplied `owner/repo` list of archived repositories (in
+  // addition to a small hardcoded baseline). Worker resolves these from
+  // GitHub before linting; comparison is case-insensitive and operates on
+  // the bare `owner/repo` (subpath stripped).
+  archived_uses : Array[String]
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
@@ -149,6 +154,7 @@ pub fn prewalk(
   kind? : FileKind = Unknown,
   source? : String = "",
   forbidden_uses? : Array[String] = [],
+  archived_uses? : Array[String] = [],
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -238,6 +244,7 @@ pub fn prewalk(
     kind,
     source,
     forbidden_uses,
+    archived_uses,
   }
 }
 
@@ -819,6 +826,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: no_doc(),
       on_job: no_job(),
       on_step: Some(check_github_app),
+    },
+    Rule::{
+      id: "archived-uses",
+      title: "Uses an action whose repository is archived",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_archived_uses_job),
+      on_step: Some(check_archived_uses_step),
     },
   ]
 }
@@ -4182,6 +4197,123 @@ fn yaml_scalar_text(v : @yaml.Yaml) -> String {
     Boolean(false) => "false"
     Null => ""
     _ => ""
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: archived-uses (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor maintains a hardcoded baseline of archived `owner/repo` slugs so
+/// the rule fires even in offline mode. Karinto mirrors that minimum so
+/// upstream-parity holds on the zizmor archived-uses fixture without a
+/// network round-trip. Worker callers extend the list at runtime via
+/// `archived_uses=`. Comparison is case-insensitive (zizmor's snapshot
+/// fires on both `actions/setup-ruby` and `ACTIONS/SETUP-RUBY`).
+fn archived_baseline() -> Array[String] {
+  ["actions/setup-ruby"]
+}
+
+///|
+fn is_archived_repo(repo : String, extra : Array[String]) -> Bool {
+  if repo == "" {
+    return false
+  }
+  let lo = repo.to_lower()
+  for r in archived_baseline() {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  for r in extra {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Extract `owner/repo` from a `uses:` value, stripping any subpath
+/// (`actions/cache/restore` → `actions/cache`) and `@ref` suffix. Returns
+/// `""` for local (`./...`) or docker (`docker://...`) refs that have no
+/// `owner/repo` form.
+fn bare_repo_of(uses : String) -> String {
+  if uses == "" || uses.has_prefix("./") || uses.has_prefix("docker://") {
+    return ""
+  }
+  let at = last_at_index(uses)
+  let head = if at >= 0 {
+    uses.substring(start=0, end=at).to_string()
+  } else {
+    uses
+  }
+  let mut slash = -1
+  let mut count = 0
+  let n = head.length()
+  let mut i = 0
+  while i < n {
+    match head.get_char(i) {
+      Some('/') => {
+        count = count + 1
+        if count == 2 {
+          slash = i
+          break
+        }
+      }
+      _ => ()
+    }
+    i = i + 1
+  }
+  if slash >= 0 {
+    head.substring(start=0, end=slash).to_string()
+  } else {
+    head
+  }
+}
+
+///|
+fn check_archived_uses_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) => {
+      let repo = bare_repo_of(u)
+      if is_archived_repo(repo, ctx.archived_uses) {
+        add_diag(
+          out,
+          "archived-uses",
+          Warning,
+          "uses `\{repo}`: repository is archived",
+        )
+      }
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_archived_uses_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.uses {
+    Some(u) => {
+      let repo = bare_repo_of(u)
+      if is_archived_repo(repo, ctx.archived_uses) {
+        add_diag(
+          out,
+          "archived-uses",
+          Warning,
+          "uses `\{repo}`: repository is archived",
+        )
+      }
+    }
+    None => ()
   }
 }
 

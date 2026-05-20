@@ -102,7 +102,7 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | ID | Origin | Severity | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `anonymous-definition` | [`zizmor:anonymous-definition`](https://docs.zizmor.sh/audits/#anonymous-definition) | info | Implemented | |
-| `archived-uses` | [`zizmor:archived-uses`](https://docs.zizmor.sh/audits/#archived-uses) | warning | Planned | Requires GitHub API call to detect archived repos; fixtures in place. |
+| `archived-uses` | [`zizmor:archived-uses`](https://docs.zizmor.sh/audits/#archived-uses) | warning | Implemented | Mirrors zizmor's hardcoded offline baseline (`actions/setup-ruby`) so the rule fires without network access; Worker extends it via `archived_uses=` (CSV on the worker boundary as `?archived=…`) once GitHub reports `archived: true`. Comparison is case-insensitive and operates on the bare `owner/repo` (subpath stripped). |
 | `artipacked` | [`zizmor:artipacked`](https://docs.zizmor.sh/audits/#artipacked) | error | Planned | Preview implementation — narrower scope than upstream; misses YAML-anchor and action.yml fixtures. |
 | `bot-conditions` | [`zizmor:bot-conditions`](https://docs.zizmor.sh/audits/#bot-conditions) | error | Implemented | |
 | `cache-poisoning` | [`zizmor:cache-poisoning`](https://docs.zizmor.sh/audits/#cache-poisoning) | error | Planned | Preview implementation — covers a subset of zizmor's setup-action / publisher heuristics. |

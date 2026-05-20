@@ -67,8 +67,11 @@ test "anonymous-definition: workflow with explicit name is silent when jobs have
 }
 
 ///|
-#skip("not implemented yet")
-test "archived-uses: action repo is archived" {
+/// karinto carries a small hardcoded baseline that mirrors zizmor's offline
+/// detection (today: `actions/setup-ruby`). The Worker may extend it via
+/// `archived_uses=` once GitHub responds with `archived: true`. The
+/// comparison is case-insensitive (zizmor fires on `ACTIONS/SETUP-RUBY` too).
+test "archived-uses: hardcoded baseline fires on actions/setup-ruby" {
   let yaml =
     #|on: push
     #|jobs:
@@ -77,18 +80,42 @@ test "archived-uses: action repo is archived" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - uses: deprecated-org/abandoned-action@v1
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "archived-uses",
-        "severity": "warning",
-        "message": "uses `deprecated-org/abandoned-action`: repository is archived",
-      },
-    ],
-  })
+    #|      - uses: actions/setup-ruby@e932e7af67fc4a8fc77bd86b744acd4e42fe3543
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "archived-uses: caller-supplied list extends the baseline" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: my-org/legacy-action@v1
+  let res = @karinto.lint(yaml, archived_uses=["my-org/legacy-action"])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "archived-uses: dormant on non-listed repos" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@v4
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
