@@ -557,7 +557,7 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
       {
         "rule": "github-env",
         "severity": "error",
-        "message": "untrusted `github.event.pull_request.title` written to `$GITHUB_ENV`",
+        "message": "write to `GITHUB_ENV` may allow code execution",
       },
     ],
   })

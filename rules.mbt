@@ -3149,32 +3149,137 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// True when the workflow's `on:` block includes `pull_request_target` or
+/// `workflow_run` — the privileged-trigger context under which writes to
+/// `$GITHUB_ENV` / `$GITHUB_PATH` become an arbitrary-code-execution sink.
+fn workflow_has_dangerous_trigger(ctx : WalkCtx) -> Bool {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return false
+  }
+  match m.get("on") {
+    Some(String(s)) => is_dangerous_trigger(s)
+    Some(Array(arr)) => {
+      for item in arr {
+        match item {
+          String(s) => if is_dangerous_trigger(s) { return true }
+          _ => ()
+        }
+      }
+      false
+    }
+    Some(Map(om)) => {
+      let mut hit = false
+      om.each(fn(name, _) { if is_dangerous_trigger(name) { hit = true } })
+      hit
+    }
+    _ => false
+  }
+}
+
+///|
+/// Heuristic "non-literal" check for the LHS of a `>>` redirect to
+/// `GITHUB_ENV`/`GITHUB_PATH`. Matches any shell variable, `$(...)`,
+/// command-substitution backticks, cmd-style `%var%`, or `${{ ... }}`
+/// expression. Static-only writes (e.g. `echo foo=bar >> $GITHUB_ENV`)
+/// stay silent, matching upstream `bash_echo_arg_is_safe`.
+fn lhs_has_dynamic_token(lhs : String) -> Bool {
+  // bash: `$VAR`, `${VAR}`, `$(...)`
+  if lhs.contains("$") {
+    return true
+  }
+  // pwsh inside `"$env:..."` already covered by `$`. cmd: `%VAR%`.
+  let mut pct_count = 0
+  for part in lhs.split("%") {
+    let _ = part
+    pct_count = pct_count + 1
+  }
+  if pct_count >= 3 {
+    return true
+  }
+  // GitHub-Actions template expression embedded in the literal text.
+  if lhs.contains("${{") {
+    return true
+  }
+  // Command-substitution via backticks.
+  lhs.contains("`")
+}
+
+///|
+/// Matches the three syntactic forms upstream recognises for a redirect to
+/// `GITHUB_ENV` / `GITHUB_PATH`:
+///   * bash       `>> $GITHUB_ENV` or `>> ${GITHUB_ENV}`
+///   * powershell `>> $env:GITHUB_ENV` or `>> ${env:GITHUB_ENV}` (case-insensitive)
+///   * cmd        `>> %GITHUB_ENV%`
+/// Returns the (label, target) on first hit per line, else None.
+fn detect_github_env_redirect(line : String) -> (String, String)? {
+  let lo = line.to_lower()
+  let pairs = [
+    ("$github_env", "GITHUB_ENV"),
+    ("${github_env}", "GITHUB_ENV"),
+    ("$env:github_env", "GITHUB_ENV"),
+    ("${env:github_env}", "GITHUB_ENV"),
+    ("%github_env%", "GITHUB_ENV"),
+    ("$github_path", "GITHUB_PATH"),
+    ("${github_path}", "GITHUB_PATH"),
+    ("$env:github_path", "GITHUB_PATH"),
+    ("${env:github_path}", "GITHUB_PATH"),
+    ("%github_path%", "GITHUB_PATH"),
+  ]
+  for entry in pairs {
+    let (needle, target) = entry
+    match lo.find(needle) {
+      Some(_) => return Some((needle, target))
+      None => ()
+    }
+  }
+  None
+}
+
+///|
 fn check_github_env(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  match step.run {
-    Some(r) => {
-      let to_env = r.contains("$GITHUB_ENV") || r.contains("${GITHUB_ENV}")
-      let to_path = r.contains("$GITHUB_PATH") || r.contains("${GITHUB_PATH}")
-      if !to_env && !to_path {
-        return
-      }
-      match find_untrusted_in_text(r) {
-        Some(p) => {
-          let target = if to_path { "$GITHUB_PATH" } else { "$GITHUB_ENV" }
+  let run = match step.run {
+    Some(r) => r
+    None => return
+  }
+  // Workflow steps require a dangerous trigger; composite-action steps
+  // are checked unconditionally — they may be invoked from any caller
+  // workflow, including one with `pull_request_target`.
+  if !ctx.action_is_composite && !workflow_has_dangerous_trigger(ctx) {
+    return
+  }
+  // Walk by line; for each redirect to GITHUB_ENV/GITHUB_PATH, fire when
+  // the LHS contains any non-literal token (variable/cmd-sub/template).
+  let lines = run.split("\n")
+  for ln in lines {
+    let line = ln.to_string()
+    // Only care about lines that include `>>`.
+    if !line.contains(">>") {
+      continue
+    }
+    let (_, target) = match detect_github_env_redirect(line) {
+      Some(p) => p
+      None => continue
+    }
+    match line.find(">>") {
+      Some(idx) => {
+        let lhs = line[:idx].to_string()
+        if lhs_has_dynamic_token(lhs) {
           add_diag(
             out,
             "github-env",
             Error,
-            "untrusted `\{p}` written to `\{target}`",
+            "write to `\{target}` may allow code execution",
           )
+          return
         }
-        None => ()
       }
+      None => ()
     }
-    None => ()
   }
 }
 
