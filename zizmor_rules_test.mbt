@@ -1050,7 +1050,7 @@ test "self-hosted-runner: job runs on self-hosted runner" {
 // signal is only informational. See rules_catalog.mbt.
 
 ///|
-test "superfluous-actions: setup-node duplicated across steps" {
+test "superfluous-actions: dtolnay/rust-toolchain flagged" {
   let yaml =
     #|on: push
     #|jobs:
@@ -1060,15 +1060,10 @@ test "superfluous-actions: setup-node duplicated across steps" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
-    #|        with:
-    #|          node-version: 20
-    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
-    #|        with:
-    #|          node-version: 22
+    #|      - uses: dtolnay/rust-toolchain@086dfa4efe372cfb6b375460a56e26a62a873d2e
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
         "rule": "concurrency-limits",
@@ -1088,7 +1083,7 @@ test "superfluous-actions: setup-node duplicated across steps" {
       {
         "rule": "superfluous-actions",
         "severity": "info",
-        "message": "job `build` uses `actions/setup-node` twice",
+        "message": "step uses `dtolnay/rust-toolchain` — use `rustup` and/or `cargo` in a script step",
       },
     ],
   })

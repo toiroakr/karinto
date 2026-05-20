@@ -1351,6 +1351,13 @@
       "reason": "baseline: tracked at PR #13. Source=zizmor. karinto's YAML parser throws on this fixture (issue #1065 repro)."
     },
     {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/superfluous-actions.yml",
+      "expect": [
+        "missing:superfluous-actions"
+      ],
+      "reason": "Fixture has two true-positive superfluous-actions steps plus a third with `# zizmor: ignore[superfluous-actions]`. karinto's inline-ignore parser treats every such comment as a global file-wide suppression (no node-position tracking), so the rule is silenced for the whole file. Implementation logic is correct; the limitation is engine-wide and tracked separately."
+    },
+    {
       "file": "fixtures/upstream/zizmor/tests/integration/test-data/secrets-inherit.yml",
       "expect": [
         "missing:unpinned-uses"

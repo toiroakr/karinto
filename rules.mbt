@@ -545,9 +545,9 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "superfluous-actions",
-      title: "Duplicate setup-* action in a job",
-      applies: workflow_only,
-      on_doc: no_doc(),
+      title: "Action functionality is already included by the runner",
+      applies: workflow_or_action,
+      on_doc: Some(check_superfluous_actions_doc),
       on_job: Some(check_superfluous_actions),
       on_step: no_step(),
     },
@@ -2251,13 +2251,40 @@ fn step_repo_prefix(s : StepInfo) -> String? {
 }
 
 ///|
-fn is_setup_action(name : String) -> Bool {
-  name == "actions/setup-node" ||
-  name == "actions/setup-python" ||
-  name == "actions/setup-go" ||
-  name == "actions/setup-java" ||
-  name == "actions/setup-dotnet" ||
-  name == "actions/setup-ruby"
+fn superfluous_action_replacement(name : String) -> String? {
+  // Mirror upstream zizmor SUPERFLUOUS_ACTIONS catalogue (v1.25.2).
+  if name == "ncipollo/release-action" ||
+    name == "softprops/action-gh-release" ||
+    name == "elgohr/Github-Release-Action" {
+    Some("use `gh release` in a script step")
+  } else if name == "peter-evans/create-pull-request" {
+    Some("use `gh pr create` in a script step")
+  } else if name == "peter-evans/create-or-update-comment" {
+    Some("use `gh pr comment` or `gh issue comment` in a script step")
+  } else if name == "dacbd/create-issue-action" {
+    Some("use `gh issue create` in a script step")
+  } else if name == "actions-ecosystem/action-add-labels" {
+    Some(
+      "use `gh issue edit --add-label` or `gh pr edit --add-label` in a script step",
+    )
+  } else if name == "actions-ecosystem/action-remove-labels" {
+    Some(
+      "use `gh issue edit --remove-label` or `gh pr edit --remove-label` in a script step",
+    )
+  } else if name == "svenstaro/upload-release-action" {
+    Some("use `gh release create` and `gh release upload` in a script step")
+  } else if name == "addnab/docker-run-action" {
+    Some("use `docker run` in a script step, or use a container step")
+  } else if name == "sergeysova/jq-action" {
+    Some("use `jq` in a script step")
+  } else if name == "dtolnay/rust-toolchain" {
+    Some("use `rustup` and/or `cargo` in a script step")
+  } else if name == "stefanzweifel/git-auto-commit-action" ||
+    name == "EndBug/add-and-commit" {
+    Some("use `git add`, `git commit`, and `git push` in a script step")
+  } else {
+    None
+  }
 }
 
 ///|
@@ -2266,31 +2293,46 @@ fn check_superfluous_actions(
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  let counts : Map[String, Int] = {}
   for s in job.steps {
     match step_repo_prefix(s) {
       Some(prefix) =>
-        if is_setup_action(prefix) {
-          let curr = match counts.get(prefix) {
-            Some(n) => n
-            None => 0
-          }
-          counts[prefix] = curr + 1
+        match superfluous_action_replacement(prefix) {
+          Some(hint) =>
+            add_diag(
+              out,
+              "superfluous-actions",
+              Info,
+              "step uses `\{prefix}` — \{hint}",
+            )
+          None => ()
         }
       None => ()
     }
   }
-  counts.each(fn(prefix, n) {
-    if n >= 2 {
-      let times = if n == 2 { "twice" } else { "\{n} times" }
-      add_diag(
-        out,
-        "superfluous-actions",
-        Info,
-        "job `\{job.name}` uses `\{prefix}` \{times}",
-      )
+}
+
+///|
+fn check_superfluous_actions_doc(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  // Composite action steps reuse the same SUPERFLUOUS_ACTIONS catalogue upstream.
+  for s in ctx.action_steps {
+    match step_repo_prefix(s) {
+      Some(prefix) =>
+        match superfluous_action_replacement(prefix) {
+          Some(hint) =>
+            add_diag(
+              out,
+              "superfluous-actions",
+              Info,
+              "step uses `\{prefix}` — \{hint}",
+            )
+          None => ()
+        }
+      None => ()
     }
-  })
+  }
 }
 
 // ---------------------------------------------------------------------------
