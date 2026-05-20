@@ -134,7 +134,7 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 | `unpinned-tools` | [`zizmor:unpinned-tools`](https://docs.zizmor.sh/audits/#unpinned-tools) | warning | Planned | Preview implementation; upstream maintains a fuller catalogue of `curl | sh`-style installers. |
 | `unpinned-uses` | [`zizmor:unpinned-uses`](https://docs.zizmor.sh/audits/#unpinned-uses) + [`ghalint:ghl-008`](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/008.md) | warning | Implemented | **Consolidated** — absorbs ghalint `action_ref_should_be_full_length_commit_sha`. |
 | `unredacted-secrets` | [`zizmor:unredacted-secrets`](https://docs.zizmor.sh/audits/#unredacted-secrets) | error | Implemented | Scans `run:` and `env:` for `base64`/`xxd`/`tr`/`cut`/`sed`/`awk` pipes and `fromJSON(secrets…)` expressions that bypass redaction. |
-| `unsound-condition` | [`zizmor:unsound-condition`](https://docs.zizmor.sh/audits/#unsound-condition) | warning | Planned | Preview implementation; upstream uses full expression evaluation. |
+| `unsound-condition` | [`zizmor:unsound-condition`](https://docs.zizmor.sh/audits/#unsound-condition) | warning | Implemented | Detects `always()`/`success()`/`failure()`/`cancelled()` antipatterns and `if:` values that mix plaintext with `${{ ... }}` (incl. trailing newline from `|`/`>` block scalars). |
 | `unsound-contains` | [`zizmor:unsound-contains`](https://docs.zizmor.sh/audits/#unsound-contains) | warning | Implemented | |
 | `use-trusted-publishing` | [`zizmor:use-trusted-publishing`](https://docs.zizmor.sh/audits/#use-trusted-publishing) | info | Planned | Preview implementation; upstream catalogues more package-manager publish workflows. |
 

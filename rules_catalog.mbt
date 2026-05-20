@@ -938,7 +938,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       BestPractice,
       Warning,
       Medium,
-      Planned,
+      Implemented,
       true,
       true,
     ),

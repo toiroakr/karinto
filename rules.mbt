@@ -5478,7 +5478,9 @@ fn check_workflow_call_def(
 ///|
 /// Catch trivially-unsound boolean expressions that almost always indicate a
 /// misunderstanding of GHA's `always()` / `success()` / `failure()` /
-/// `cancelled()` semantics.
+/// `cancelled()` semantics, plus `if:` values whose YAML stringification
+/// always renders truthy (block scalars with trailing newlines, mixed
+/// plaintext + `${{ ... }}`).
 fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let seen : Map[String, Bool] = {}
   walk_strings(ctx.doc, fn(s) {
@@ -5518,6 +5520,72 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
     }
   })
+  // Step- and job-level `if:` values that mix `${{ ... }}` with surrounding
+  // plaintext (including the trailing `\n` left by `|` / `>` block scalars)
+  // get stringified by GitHub Actions, then tested for non-emptiness — so
+  // they evaluate truthy regardless of what the expression returns.
+  for job in ctx.jobs {
+    match job.if_cond {
+      Some(s) =>
+        if if_condition_is_unsound(s) {
+          add_diag(
+            out,
+            "unsound-condition",
+            Warning,
+            "job `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+          )
+        }
+      None => ()
+    }
+    for step in job.steps {
+      match step.if_cond {
+        Some(s) =>
+          if if_condition_is_unsound(s) {
+            add_diag(
+              out,
+              "unsound-condition",
+              Warning,
+              "step `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+            )
+          }
+        None => ()
+      }
+    }
+  }
+}
+
+///|
+/// True when an `if:` value, after parsing out `${{ ... }}` expressions,
+/// leaves any plaintext characters — including a stray space or a trailing
+/// `\n` (the canonical signature of `|` / `>` block scalars).
+fn if_condition_is_unsound(s : String) -> Bool {
+  if !s.contains("${{") {
+    return false
+  }
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let buf = StringBuilder::new()
+  while i < n {
+    if i + 2 < n &&
+      chars[i] == '$' &&
+      chars[i + 1] == '{' &&
+      chars[i + 2] == '{' {
+      let mut j = i + 3
+      while j + 1 < n && !(chars[j] == '}' && chars[j + 1] == '}') {
+        j = j + 1
+      }
+      if j + 1 < n {
+        i = j + 2
+      } else {
+        i = n
+      }
+    } else {
+      buf.write_char(chars[i])
+      i = i + 1
+    }
+  }
+  buf.to_string().length() > 0
 }
 
 ///|
