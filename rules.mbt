@@ -450,10 +450,10 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "use-trusted-publishing",
       title: "Prefer OIDC trusted publishing over long-lived tokens",
-      applies: workflow_only,
+      applies: workflow_or_action,
       on_doc: no_doc(),
-      on_job: no_job(),
-      on_step: Some(check_trusted_publishing),
+      on_job: Some(check_trusted_publishing_job),
+      on_step: Some(check_trusted_publishing_step),
     },
     Rule::{
       id: "dependabot-cooldown",
@@ -1243,34 +1243,375 @@ fn check_excessive_permissions(
 }
 
 // ---------------------------------------------------------------------------
-// Rule: use-trusted-publishing (zizmor) — heuristic
+// Rule: use-trusted-publishing (zizmor)
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_trusted_publishing(
-  _ctx : WalkCtx,
+/// True if `s` contains any of the URL substrings that mark a registry
+/// known to support OIDC trusted publishing.
+fn url_value_matches(value : @yaml.Yaml?, needle : String) -> Bool {
+  match value {
+    Some(String(s)) => s.to_lower().contains(needle)
+    _ => false
+  }
+}
+
+///|
+/// Action-based detection: returns Some(message) when the step's `uses:`
+/// pattern + `with:` inputs match an upstream-known credential-style
+/// publishing setup that should switch to OIDC.
+fn trusted_publishing_action_finding(step : StepInfo) -> String? {
+  match step.uses {
+    Some(u) => {
+      // Strip ref before pattern matching.
+      let bare = if step.at_idx >= 0 {
+        u[:step.at_idx].to_string()
+      } else {
+        u.to_string()
+      }
+      let lower = bare.to_lower()
+      let with_ = match step.with_ {
+        Some(w) => w
+        None => Map::from_array([])
+      }
+      if lower == "pypa/gh-action-pypi-publish" {
+        // Fires when `password:` input is present AND the target index
+        // is one we know supports trusted publishing (default pypi.org
+        // or one of the explicit pypi.org / test.pypi.org URLs).
+        let has_password = with_.contains("password")
+        if !has_password {
+          return None
+        }
+        let repo_url = match with_.get("repository-url") {
+          Some(v) => Some(v)
+          None => with_.get("repository_url")
+        }
+        let known = match repo_url {
+          Some(_) => url_value_matches(repo_url, "pypi.org")
+          None => true
+        }
+        if known {
+          return Some(
+            "PyPI publish uses an API token; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "rubygems/release-gem" {
+        // Fires unless `setup-trusted-publisher: true` is explicit.
+        let setup = match with_.get("setup-trusted-publisher") {
+          Some(@yaml.Yaml::Boolean(b)) => Some(b)
+          Some(@yaml.Yaml::String(s)) =>
+            if s.to_lower() == "true" {
+              Some(true)
+            } else if s.to_lower() == "false" {
+              Some(false)
+            } else {
+              None
+            }
+          _ => None
+        }
+        if setup == Some(false) {
+          return Some(
+            "rubygems/release-gem with `setup-trusted-publisher: false`; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "rubygems/configure-rubygems-credentials" {
+        if !with_.contains("api-token") {
+          return None
+        }
+        let server = with_.get("gem-server")
+        let known = match server {
+          Some(_) => url_value_matches(server, "rubygems.org")
+          None => true
+        }
+        if known {
+          return Some(
+            "rubygems/configure-rubygems-credentials uses an API token; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "actions/setup-node" {
+        let reg = with_.get("registry-url")
+        let always_auth = match with_.get("always-auth") {
+          Some(@yaml.Yaml::Boolean(true)) => true
+          Some(@yaml.Yaml::String(s)) => s.to_lower() == "true"
+          _ => false
+        }
+        if always_auth && url_value_matches(reg, "registry.npmjs.org") {
+          return Some(
+            "actions/setup-node with `always-auth: true` to npmjs; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      None
+    }
+    None => None
+  }
+}
+
+///|
+/// Replace bash (`\<EOL>`) and PowerShell (`` `<EOL> ``) line
+/// continuations with a single space so multi-line publishing commands
+/// flatten into one logical line.
+fn collapse_continuations(s : String) -> String {
+  let chars : Array[Char] = []
+  for ch in s {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '\\' || c == '`') && i + 1 < n {
+      let c1 = chars[i + 1]
+      if c1 == '\n' {
+        buf.write_char(' ')
+        i = i + 2
+        continue
+      }
+      if c1 == '\r' && i + 2 < n && chars[i + 2] == '\n' {
+        buf.write_char(' ')
+        i = i + 3
+        continue
+      }
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  buf.to_string()
+}
+
+///|
+fn tokens_contain(tokens : Array[String], needle : String) -> Bool {
+  for t in tokens {
+    if t == needle {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn tokens_contain_prefix(tokens : Array[String], prefix : String) -> Bool {
+  for t in tokens {
+    if t.has_prefix(prefix) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Tokenize a shell line on ASCII whitespace.
+fn shell_tokens(line : String) -> Array[String] {
+  let out : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut has = false
+  for ch in line {
+    if ch == ' ' || ch == '\t' {
+      if has {
+        out.push(buf.to_string())
+        buf.reset()
+        has = false
+      }
+    } else {
+      buf.write_char(ch)
+      has = true
+    }
+  }
+  if has {
+    out.push(buf.to_string())
+  }
+  out
+}
+
+///|
+/// Returns true if `tokens` (a single flattened shell command line)
+/// invokes one of upstream zizmor's tracked publishing commands.
+fn shell_line_is_publish(tokens : Array[String]) -> Bool {
+  if tokens.length() == 0 {
+    return false
+  }
+  let cmd = tokens[0]
+  let rest : Array[String] = []
+  for k in 1..<tokens.length() {
+    rest.push(tokens[k])
+  }
+  if cmd == "cargo" {
+    return tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run") &&
+      !tokens_contain(rest, "-n")
+  }
+  if cmd == "twine" {
+    return tokens_contain(rest, "upload")
+  }
+  if cmd == "npm" || cmd == "pnpm" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "bun" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "yarn" {
+    return tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run") &&
+      !tokens_contain(rest, "-n")
+  }
+  if cmd == "gem" {
+    return tokens_contain(rest, "push")
+  }
+  if cmd == "nuget" || cmd == "nuget.exe" {
+    return tokens_contain(rest, "push")
+  }
+  if cmd == "dotnet" {
+    return tokens_contain(rest, "nuget") && tokens_contain(rest, "push")
+  }
+  if cmd == "poetry" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "hatch" || cmd == "pdm" {
+    return tokens_contain(rest, "publish")
+  }
+  if cmd == "uv" {
+    if tokens_contain(rest, "publish") {
+      return true
+    }
+    if tokens_contain(rest, "twine") && tokens_contain(rest, "upload") {
+      return true
+    }
+    return false
+  }
+  if cmd == "uvx" {
+    if (
+        tokens_contain(rest, "twine") ||
+        tokens_contain_prefix(rest, "twine==") ||
+        tokens_contain_prefix(rest, "twine@")
+      ) &&
+      tokens_contain(rest, "upload") {
+      return true
+    }
+    return false
+  }
+  if cmd == "python" || cmd.has_prefix("python3") {
+    return tokens_contain(rest, "-m") &&
+      tokens_contain(rest, "twine") &&
+      tokens_contain(rest, "upload")
+  }
+  if cmd == "pipx" {
+    if rest.length() > 0 && rest[0] == "run" {
+      let twine_like = tokens_contain(rest, "twine") ||
+        tokens_contain_prefix(rest, "twine==") ||
+        tokens_contain_prefix(rest, "twine@")
+      return twine_like && tokens_contain(rest, "upload")
+    }
+    return false
+  }
+  if cmd == "bundle" {
+    return tokens_contain(rest, "exec") &&
+      tokens_contain(rest, "gem") &&
+      tokens_contain(rest, "push")
+  }
+  if cmd == "bunx" {
+    let npm_like = tokens_contain(rest, "npm") ||
+      tokens_contain_prefix(rest, "npm@")
+    return npm_like &&
+      tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run")
+  }
+  false
+}
+
+///|
+fn run_has_publish_cmd(run : String) -> Bool {
+  let normalized = collapse_continuations(run)
+  for line in normalized.split("\n") {
+    let trimmed = line.trim(chars=" \t\r").to_string()
+    if trimmed.length() == 0 {
+      continue
+    }
+    if shell_line_is_publish(shell_tokens(trimmed)) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// True if `permissions` map grants `id-token: write`.
+fn perms_has_id_token_write(value : @yaml.Yaml?) -> Bool {
+  match value {
+    Some(@yaml.Yaml::Map(m)) =>
+      match m.get("id-token") {
+        Some(@yaml.Yaml::String(s)) => s == "write"
+        _ => false
+      }
+    _ => false
+  }
+}
+
+///|
+/// `on_job` for `use-trusted-publishing`: action-based detection always
+/// fires; run-based detection is suppressed when the job carries
+/// `permissions.id-token: write` (workflow-level grant alone is enough
+/// for zizmor too, but propagating that here keeps the check tractable).
+fn check_trusted_publishing_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let job_id_token = perms_has_id_token_write(job.raw.get("permissions"))
+  let workflow_id_token = match ctx.workflow_map {
+    Some(m) => perms_has_id_token_write(m.get("permissions"))
+    None => false
+  }
+  let suppress_run = job_id_token || workflow_id_token
+  for step in job.steps {
+    match trusted_publishing_action_finding(step) {
+      Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+      None => ()
+    }
+    if !suppress_run {
+      match step.run {
+        Some(r) =>
+          if run_has_publish_cmd(r) {
+            add_diag(
+              out,
+              "use-trusted-publishing",
+              Info,
+              "publish command uses a long-lived token; prefer OIDC trusted publishing",
+            )
+          }
+        None => ()
+      }
+    }
+  }
+}
+
+///|
+/// `on_step` for composite-action steps: composite actions cannot
+/// declare permissions, so the run-based detection always applies.
+fn check_trusted_publishing_step(
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  if step.is_pypi_publish {
-    let has_password = match step.with_ {
-      Some(w) => w.contains("password")
-      None => false
-    }
-    if has_password {
-      add_diag(
-        out,
-        "use-trusted-publishing",
-        Info,
-        "PyPI publish uses an API token; prefer OIDC trusted publishing",
-      )
-    }
+  // Workflow steps are handled by `check_trusted_publishing_job` so
+  // they can see the enclosing job's permissions; skip them here.
+  if ctx.kind != FileKind::Action {
+    return
+  }
+  match trusted_publishing_action_finding(step) {
+    Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+    None => ()
   }
   match step.run {
     Some(r) =>
-      if r.contains("pkg-pr-new publish") ||
-        r.contains("npm publish") ||
-        r.contains("pnpm publish") {
+      if run_has_publish_cmd(r) {
         add_diag(
           out,
           "use-trusted-publishing",

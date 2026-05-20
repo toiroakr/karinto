@@ -962,9 +962,9 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       BestPractice,
       Info,
       Medium,
-      Planned,
+      Implemented,
       true,
-      false,
+      true,
     ),
     // -----------------------------------------------------------------------
     // ghalint family — policy/security checks. The numbering matches the
