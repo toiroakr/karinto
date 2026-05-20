@@ -346,8 +346,8 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "unpinned-images",
       title: "Container image is not pinned by digest",
-      applies: workflow_only,
-      on_doc: no_doc(),
+      applies: workflow_or_action,
+      on_doc: Some(check_unpinned_images_doc),
       on_job: Some(check_unpinned_images),
       on_step: no_step(),
     },
@@ -1390,6 +1390,65 @@ fn is_pinned_image(image : String) -> Bool {
 }
 
 ///|
+/// Returns the matrix key referenced inside a `${{ matrix.X }}`-only
+/// container image expression, or None if the image is not such a pure
+/// reference.
+fn matrix_key_of_image(image : String) -> String? {
+  let s = image.trim(chars=" \t").to_string()
+  if !s.has_prefix("${{") || !s.has_suffix("}}") {
+    return None
+  }
+  let inner = s
+    .substring(start=3, end=s.length() - 2)
+    .trim(chars=" \t")
+    .to_string()
+  let needle = "matrix."
+  if !inner.has_prefix(needle) {
+    return None
+  }
+  let rest = inner.substring(start=needle.length()).to_string()
+  // Reject anything beyond a simple identifier (functions, dotted paths).
+  let chars = rest.to_array()
+  for ch in chars {
+    let ok = (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '_' ||
+      ch == '-'
+    if !ok {
+      return None
+    }
+  }
+  Some(rest)
+}
+
+///|
+/// Walks `matrix.include` and reports unpinned values of `field` (e.g. the
+/// key the container image dereferences with `${{ matrix.<field> }}`).
+fn unpinned_matrix_images(matrix : @yaml.Yaml, field : String) -> Array[String] {
+  let out : Array[String] = []
+  match matrix {
+    Map(m) =>
+      match m.get("include") {
+        Some(Array(entries)) =>
+          for e in entries {
+            match e {
+              Map(em) =>
+                match em.get(field) {
+                  Some(String(v)) => if !is_pinned_image(v) { out.push(v) }
+                  _ => ()
+                }
+              _ => ()
+            }
+          }
+        _ => ()
+      }
+    _ => ()
+  }
+  out
+}
+
+///|
 fn check_unpinned_images(
   _ctx : WalkCtx,
   job : JobInfo,
@@ -1399,17 +1458,70 @@ fn check_unpinned_images(
     Some(v) =>
       match extract_image(v) {
         Some(img) =>
-          if !is_pinned_image(img) {
-            add_diag(
-              out,
-              "unpinned-images",
-              Warning,
-              "container image `\{img}` is not pinned by digest",
-            )
+          // Resolve `${{ matrix.<key> }}` style images by walking the
+          // matrix's `include:` list — anything literally unpinned there
+          // still counts as unpinned.
+          match matrix_key_of_image(img) {
+            Some(key) =>
+              match job.raw.get("strategy") {
+                Some(Map(strat)) =>
+                  match strat.get("matrix") {
+                    Some(mx) =>
+                      for v2 in unpinned_matrix_images(mx, key) {
+                        add_diag(
+                          out,
+                          "unpinned-images",
+                          Warning,
+                          "matrix entry `\{key}: \{v2}` produces an unpinned container image",
+                        )
+                      }
+                    None => ()
+                  }
+                _ => ()
+              }
+            None =>
+              if !is_pinned_image(img) {
+                add_diag(
+                  out,
+                  "unpinned-images",
+                  Warning,
+                  "container image `\{img}` is not pinned by digest",
+                )
+              }
           }
         None => ()
       }
     None => ()
+  }
+}
+
+///|
+fn check_unpinned_images_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  // Docker actions declare their image at `runs.image` (or
+  // `runs.using: docker` + `runs.image: docker://…`).
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  match m.get("runs") {
+    Some(Map(r)) =>
+      match r.get("image") {
+        Some(String(img)) => {
+          // Local Dockerfile references (e.g. `image: Dockerfile`) don't
+          // pull a remote image, so they can't be unpinned.
+          let is_local = !img.contains("docker://") && !img.contains("/")
+          if !is_local && !is_pinned_image(img) {
+            add_diag(
+              out,
+              "unpinned-images",
+              Warning,
+              "docker-action image `\{img}` is not pinned by digest",
+            )
+          }
+        }
+        _ => ()
+      }
+    _ => ()
   }
 }
 
