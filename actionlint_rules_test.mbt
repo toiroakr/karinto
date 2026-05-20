@@ -22,6 +22,11 @@ test "unexpected-keys: unknown key under job" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -61,6 +66,11 @@ test "missing-required-keys: workflow missing `on`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "missing-required-keys",
         "severity": "error",
         "message": "workflow is missing required key `on`",
@@ -94,6 +104,11 @@ test "empty-mappings: empty jobs block" {
     "stats": { "jobs": 0, "steps": 0, "lines": 2 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "empty-mappings",
         "severity": "warning",
         "message": "workflow: `jobs:` is an empty mapping",
@@ -123,6 +138,11 @@ test "invalid-mapping-values: runs-on must be string or array" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -164,6 +184,11 @@ test "expression-syntax: malformed `${{` expression" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "expression-syntax",
         "severity": "error",
@@ -232,6 +257,11 @@ test "unknown-context-or-function: unknown context name" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "unknown-context-or-function",
         "severity": "error",
         "message": "unknown context `githab` (did you mean `github`?)",
@@ -273,6 +303,11 @@ test "context-availability: `needs` referenced at workflow level" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -406,6 +441,11 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -458,6 +498,11 @@ test "job-needs-graph: dependency on undefined job" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "job-needs-graph",
         "severity": "error",
@@ -540,6 +585,11 @@ test "webhook-events: unknown event filter" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "webhook-events",
         "severity": "error",
         "message": "unknown webhook event `pushh` (did you mean `push`?)",
@@ -584,6 +634,11 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
     "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -627,6 +682,11 @@ test "glob-patterns: invalid glob pattern in paths filter" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -669,6 +729,11 @@ test "cron-and-timezone: out-of-range minute value" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "cron-and-timezone",
         "severity": "error",
         "message": "schedule.cron `60 * * * *`: minute: value `60` out of bounds [0-59]",
@@ -709,6 +774,11 @@ test "unknown-runner-label: unknown runner label" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -748,6 +818,11 @@ test "uses-syntax: missing @ref in uses" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -865,6 +940,11 @@ test "shell-name-per-os: pwsh on linux runner" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -910,6 +990,11 @@ test "invalid-env-var-name: env name starts with digit" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "invalid-env-var-name",
         "severity": "warning",
@@ -1001,6 +1086,11 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "reusable-workflow-definition",
         "severity": "error",
         "message": "workflow_call output `version` is missing `value:`",
@@ -1035,6 +1125,11 @@ test "job-step-id-naming: job id has invalid characters" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "job-step-id-naming",
         "severity": "warning",
@@ -1076,6 +1171,11 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1116,6 +1216,11 @@ test "constant-if-condition: `if: true` always-on" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",

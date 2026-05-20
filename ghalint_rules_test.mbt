@@ -27,6 +27,11 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
         "message": "workflow: `permissions: read-all` is forbidden",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "uses read-all permissions",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -66,6 +71,11 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "workflow-env-no-secrets",
         "severity": "error",
@@ -108,6 +118,11 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -158,6 +173,11 @@ test "github-app-limit-repositories: GitHub App token scoped to whole org" {
     "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -207,6 +227,11 @@ test "github-app-limit-permissions: GitHub App token requests no permissions" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -269,6 +294,11 @@ test "job-timeout-minutes-required: job is missing `timeout-minutes`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -310,6 +340,11 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",

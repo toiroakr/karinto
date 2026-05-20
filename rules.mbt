@@ -441,10 +441,10 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "excessive-permissions",
-      title: "Job grants many `write` permissions",
+      title: "Workflow or job grants overly broad `permissions:`",
       applies: workflow_only,
-      on_doc: no_doc(),
-      on_job: Some(check_excessive_permissions),
+      on_doc: Some(check_excessive_permissions),
+      on_job: no_job(),
       on_step: no_step(),
     },
     Rule::{
@@ -1251,34 +1251,93 @@ fn check_bot_conditions(
 }
 
 // ---------------------------------------------------------------------------
-// Rule: excessive-permissions (zizmor) — flags ≥ 3 `write` scopes per job
+// Rule: excessive-permissions (zizmor)
+//
+// Mirrors upstream's pedantic-mode behaviour: emit one finding per offending
+// `permissions:` shape at the workflow level (`read-all`, `write-all`, each
+// `write` entry of an Explicit map, or the *absence* of any `permissions:`
+// block) and additionally at each job's level when the job either picks
+// `read-all` / `write-all` or inherits the default token because no
+// parent-level `permissions:` block exists. Jobs that supply their own
+// Explicit map are not flagged — zizmor explicitly punts on per-key
+// over-scoping analysis there.
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_excessive_permissions(
-  _ctx : WalkCtx,
-  job : JobInfo,
-  out : Array[Diagnostic],
-) -> Unit {
-  match job.raw.get("permissions") {
-    Some(Map(perms)) => {
-      let mut writes = 0
-      perms.each(fn(_k, v) {
-        match v {
-          String("write") => writes = writes + 1
+fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  let workflow_perms = m.get("permissions")
+  let explicit_parent_permissions = match workflow_perms {
+    None => false
+    Some(_) => true
+  }
+  match workflow_perms {
+    None =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "default permissions used due to no permissions: block",
+      )
+    Some(String("read-all")) =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "uses read-all permissions",
+      )
+    Some(String("write-all")) =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "uses write-all permissions",
+      )
+    Some(Map(perms)) =>
+      perms.each(fn(name, value) {
+        match value {
+          String("write") =>
+            add_diag(
+              out,
+              "excessive-permissions",
+              Warning,
+              "\{name}: write is overly broad at the workflow level",
+            )
           _ => ()
         }
       })
-      if writes >= 3 {
+    _ => ()
+  }
+  for job in ctx.jobs {
+    match job.raw.get("permissions") {
+      None =>
+        if !explicit_parent_permissions {
+          add_diag(
+            out,
+            "excessive-permissions",
+            Warning,
+            "job `\{job.name}`: default permissions used due to no permissions: block",
+          )
+        }
+      Some(String("read-all")) =>
         add_diag(
           out,
           "excessive-permissions",
           Warning,
-          "job `\{job.name}` grants \{writes} write permissions; consider narrowing the scope",
+          "job `\{job.name}`: uses read-all permissions",
         )
-      }
+      Some(String("write-all")) =>
+        add_diag(
+          out,
+          "excessive-permissions",
+          Warning,
+          "job `\{job.name}`: uses write-all permissions",
+        )
+      _ => ()
     }
-    _ => ()
   }
 }
 
@@ -4057,13 +4116,13 @@ fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
 ///|
 /// Count non-overlapping substring occurrences.
 fn count_substr(s : String, sub : String) -> Int {
-  let sl = s.length()
-  let subl = sub.length()
+  let sa = s.to_array()
+  let ba = sub.to_array()
+  let sl = sa.length()
+  let subl = ba.length()
   if subl == 0 || sl < subl {
     return 0
   }
-  let sa = s.to_array()
-  let ba = sub.to_array()
   let mut count = 0
   let mut i = 0
   while i <= sl - subl {

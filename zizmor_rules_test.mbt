@@ -21,6 +21,11 @@ test "anonymous-definition: workflow has no top-level `name`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -57,6 +62,11 @@ test "anonymous-definition: workflow with explicit name is silent when jobs have
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -138,6 +148,11 @@ test "artipacked: actions/checkout leaves credentials persisted" {
     "stats": { "jobs": 1, "steps": 2, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -184,6 +199,11 @@ test "bot-conditions: spoofable github.actor bot check" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -229,6 +249,11 @@ test "cache-poisoning: cache restore in publish flow" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 2, "lines": 15 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "cache-poisoning",
         "severity": "error",
@@ -277,6 +302,11 @@ test "concurrency-limits: no concurrency on deploy workflow" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -315,6 +345,11 @@ test "dangerous-triggers: workflow uses pull_request_target" {
         "rule": "dangerous-triggers",
         "severity": "error",
         "message": "trigger `pull_request_target` runs with write access to the base repo",
+      },
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
       },
       {
         "rule": "concurrency-limits",
@@ -388,7 +423,11 @@ test "dependabot-execution: deny is safe" {
 }
 
 ///|
-test "excessive-permissions: job grants more than it needs" {
+test "excessive-permissions: workflow without `permissions:` block emits default-token finding" {
+  // Upstream punts on per-key analysis for *job-level* Explicit maps
+  // (`check_job_permissions` returns `None` for `Permissions::Explicit`).
+  // The only excessive-permissions hit here is therefore the workflow-level
+  // one for the missing parent `permissions:`.
   let yaml =
     #|on: push
     #|jobs:
@@ -406,6 +445,11 @@ test "excessive-permissions: job grants more than it needs" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -426,13 +470,48 @@ test "excessive-permissions: job grants more than it needs" {
         "severity": "info",
         "message": "permissions block has 4 entry/entries without explanatory comments",
       },
-      {
-        "rule": "excessive-permissions",
-        "severity": "warning",
-        "message": "job `build` grants 4 write permissions; consider narrowing the scope",
-      },
     ],
   })
+}
+
+///|
+test "excessive-permissions: workflow-level explicit `write` keys each fire" {
+  let yaml =
+    #|on: push
+    #|name: workflow-write-explicit
+    #|permissions:
+    #|  contents: write
+    #|  id-token: write
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "excessive-permissions" })
+  inspect(hits.length(), content="2")
+}
+
+///|
+test "excessive-permissions: workflow `permissions: {}` silences all jobs" {
+  let yaml =
+    #|on: push
+    #|name: workflow-empty-perms
+    #|permissions: {}
+    #|jobs:
+    #|  job1:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+    #|  job2:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "excessive-permissions" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -535,6 +614,11 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "message": "trigger `pull_request_target` runs with write access to the base repo",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -584,6 +668,11 @@ test "hardcoded-container-credentials: plain password in container" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -671,6 +760,11 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
         "message": "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -710,6 +804,11 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -780,6 +879,11 @@ test "misfeature: continue-on-error masks real failures" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -819,6 +923,11 @@ test "obfuscation: hex-encoded uses ref" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -876,6 +985,11 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -987,6 +1101,11 @@ test "secrets-outside-env: secrets accessed without an environment" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1026,6 +1145,11 @@ test "self-hosted-runner: job runs on self-hosted runner" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -1071,6 +1195,11 @@ test "superfluous-actions: dtolnay/rust-toolchain flagged" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1110,6 +1239,11 @@ test "template-injection: untrusted input in run script" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -1177,6 +1311,11 @@ test "unpinned-images: container image uses a floating tag" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1216,6 +1355,11 @@ test "unpinned-tools: pipe-to-shell installer in run" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -1259,6 +1403,11 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1301,6 +1450,11 @@ test "unredacted-secrets: secret length manipulated before logging" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1342,6 +1496,11 @@ test "unsound-condition: `always() && success()` is always true" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1382,6 +1541,11 @@ test "unsound-contains: contains() with literal arg order swapped" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -1427,6 +1591,11 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",

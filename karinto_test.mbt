@@ -45,6 +45,11 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -93,6 +98,11 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "message": "duplicate step ID `a` (conflicts with `A` case-insensitively)",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -132,6 +142,11 @@ test "permissions-write-all-forbidden: write-all permission rejected at workflow
         "message": "workflow: `permissions: write-all` is forbidden",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "uses write-all permissions",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -164,6 +179,16 @@ test "job-permissions-required: missing job permissions" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 7 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "job `build`: default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
@@ -243,6 +268,11 @@ test "disable: skip a rule with a glob pattern" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "uses write-all permissions",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
