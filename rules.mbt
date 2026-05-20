@@ -804,6 +804,14 @@ pub fn all_rules() -> Array[Rule] {
       on_job: no_job(),
       on_step: Some(check_forbidden_uses),
     },
+    Rule::{
+      id: "github-app",
+      title: "Dangerous use of `actions/create-github-app-token`",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_github_app),
+    },
   ]
 }
 
@@ -4043,6 +4051,107 @@ fn check_forbidden_uses(
       }
     }
     None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: github-app (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `github-app` audit: a step using
+/// `actions/create-github-app-token` is dangerous when it
+///   1. sets `skip-token-revoke` to a truthy value or any expression,
+///   2. specifies `owner:` without `repositories:` (token scoped to the
+///      whole org), or
+///   3. omits all `permission-*` inputs (token inherits blanket
+///      installation permissions).
+/// Each independent issue fires a separate diagnostic on the same step.
+fn check_github_app(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let _ = ctx
+  match step.uses {
+    Some(u) => if !u.has_prefix("actions/create-github-app-token@") { return }
+    None => return
+  }
+  match step.with_ {
+    Some(w) => {
+      // skip-token-revoke: anything non-default is suspicious.
+      match w.get("skip-token-revoke") {
+        Some(v) => {
+          let raw = yaml_scalar_text(v)
+          let trimmed = trim_ws(raw)
+          if trimmed != "" && trimmed != "false" {
+            add_diag(
+              out,
+              "github-app",
+              Error,
+              "`skip-token-revoke` disables the post-job token revocation; leave it false",
+            )
+          }
+        }
+        None => ()
+      }
+      // owner without repositories.
+      let has_owner = match w.get("owner") {
+        Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+        None => false
+      }
+      let has_repos = match w.get("repositories") {
+        Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+        None => false
+      }
+      if has_owner && !has_repos {
+        add_diag(
+          out,
+          "github-app",
+          Error,
+          "`owner` set without `repositories`: token spans the entire installation; scope it with `repositories:`",
+        )
+      }
+      // No permission-* inputs at all.
+      let mut has_permission = false
+      w.each(fn(k, _v) {
+        if k.has_prefix("permission-") {
+          has_permission = true
+        }
+      })
+      if !has_permission {
+        add_diag(
+          out,
+          "github-app",
+          Error,
+          "no `permission-*` inputs: token inherits the App's blanket installation permissions",
+        )
+      }
+    }
+    None =>
+      // No `with:` at all → token inherits everything.
+      add_diag(
+        out,
+        "github-app",
+        Error,
+        "no `permission-*` inputs: token inherits the App's blanket installation permissions",
+      )
+  }
+}
+
+///|
+/// Render a YAML scalar as text. Booleans and integers serialize to their
+/// canonical form; expressions and quoted strings stay as the original
+/// literal. Non-scalars return the empty string.
+fn yaml_scalar_text(v : @yaml.Yaml) -> String {
+  match v {
+    String(s) => s
+    Integer(i) => i.to_string()
+    Real(_, repr~) => repr
+    Boolean(true) => "true"
+    Boolean(false) => "false"
+    Null => ""
+    _ => ""
   }
 }
 

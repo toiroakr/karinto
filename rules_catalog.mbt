@@ -653,7 +653,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Security,
       Warning,
       Medium,
-      Planned,
+      Implemented,
       true,
       false,
     ),

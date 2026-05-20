@@ -447,8 +447,7 @@ test "forbidden-uses: dormant when no denylist provided" {
 }
 
 ///|
-#skip("not implemented yet")
-test "github-app: GitHub App token exchanged at workflow scope" {
+test "github-app: skip-token-revoke true, owner-without-repositories, missing permission-*" {
   let yaml =
     #|on: push
     #|jobs:
@@ -457,20 +456,35 @@ test "github-app: GitHub App token exchanged at workflow scope" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - id: token
-    #|        uses: tibdex/github-app-token@v2
-    #|      - run: echo "${{ steps.token.outputs.token }}"
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 10 },
-    "diagnostics": [
-      {
-        "rule": "github-app",
-        "severity": "warning",
-        "message": "GitHub App token is interpolated into a shell command",
-      },
-    ],
-  })
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          skip-token-revoke: true
+    #|          owner: github
+    #|          client-id: ${{ vars.APP_ID }}
+    #|          private-key: ${{ secrets.APP_KEY }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="3")
+}
+
+///|
+test "github-app: scoped properly is silent" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          owner: github
+    #|          repositories: github/docs
+    #|          permission-issues: write
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
