@@ -425,11 +425,11 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "artipacked",
-      title: "Checkout-then-upload-artifact leaks credentials",
-      applies: workflow_only,
+      title: "Credential persistence through GitHub Actions artifacts",
+      applies: workflow_or_action,
       on_doc: no_doc(),
       on_job: Some(check_artipacked),
-      on_step: no_step(),
+      on_step: Some(check_artipacked_step),
     },
     Rule::{
       id: "bot-conditions",
@@ -1142,27 +1142,67 @@ fn check_unpinned_uses(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Inspect an `actions/checkout` step's `with:` block and emit an
+/// `artipacked` diagnostic when the step leaves credentials persisted.
+///
+/// Behaviour mirrors upstream zizmor's Regular persona (pedantic):
+/// - Literal `persist-credentials: false` (bool or stringy `"false"`) is
+///   safe — emit nothing.
+/// - Literal `persist-credentials: true` (bool or stringy `"true"`) is an
+///   auditor-only finding and is suppressed under Regular.
+/// - Missing `persist-credentials` (or `with:` itself absent) → Warning
+///   with "does not set persist-credentials: false".
+/// - Templated `persist-credentials: ${{ ... }}` → same Warning.
+/// - `with:` itself is an expression (`with: ${{ fromJson(...) }}`) → Info
+///   with "may not set persist-credentials: false" (lower confidence).
+fn artipacked_emit_for_step(step : StepInfo, out : Array[Diagnostic]) -> Unit {
+  if !step.is_actions_checkout {
+    return
+  }
+  let unsafe_msg = "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false"
+  let maybe_msg = "credential persistence through GitHub Actions artifacts: may not set persist-credentials: false"
+  match step.raw.get("with") {
+    Some(Map(w)) =>
+      match w.get("persist-credentials") {
+        None => add_diag(out, "artipacked", Warning, unsafe_msg)
+        Some(Boolean(false)) => ()
+        Some(Boolean(true)) => () // auditor-only — silent under Regular
+        Some(String(s)) =>
+          match s.to_lower() {
+            "false" | "true" => ()
+            _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+          }
+        _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+      }
+    Some(String(_)) => add_diag(out, "artipacked", Info, maybe_msg)
+    _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+  }
+}
+
+///|
 fn check_artipacked(
   _ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  let mut checkout_unsafe = false
   for s in job.steps {
-    if s.is_actions_checkout {
-      if !s.has_persist_creds_false {
-        checkout_unsafe = true
-      }
-    } else if checkout_unsafe && s.is_upload_artifact {
-      add_diag(
-        out,
-        "artipacked",
-        Error,
-        "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
-      )
-      return
-    }
+    artipacked_emit_for_step(s, out)
   }
+}
+
+///|
+/// `on_step` for composite-action steps: composite actions reuse the
+/// caller's `GITHUB_TOKEN`, so an unsafe `actions/checkout` inside one
+/// is just as risky as in a workflow.
+fn check_artipacked_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.kind != FileKind::Action {
+    return
+  }
+  artipacked_emit_for_step(step, out)
 }
 
 // ---------------------------------------------------------------------------

@@ -159,8 +159,8 @@ test "artipacked: actions/checkout leaves credentials persisted" {
       },
       {
         "rule": "artipacked",
-        "severity": "error",
-        "message": "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
+        "severity": "warning",
+        "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
       },
     ],
   })
@@ -848,6 +848,11 @@ test "obfuscation: hex-encoded uses ref" {
         "rule": "obfuscation",
         "severity": "info",
         "message": "uses ref contains percent-encoded characters; possible obfuscation",
+      },
+      {
+        "rule": "artipacked",
+        "severity": "warning",
+        "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
       },
     ],
   })

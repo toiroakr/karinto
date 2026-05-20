@@ -330,6 +330,11 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
       },
+      {
+        "rule": "artipacked",
+        "severity": "warning",
+        "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
+      },
     ],
   })
 }
