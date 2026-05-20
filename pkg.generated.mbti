@@ -13,7 +13,7 @@ pub fn all_rules() -> Array[Rule]
 
 pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String]) -> LintResult
 
-pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind) -> WalkCtx
+pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
 
@@ -150,6 +150,7 @@ pub(all) struct WalkCtx {
   updates : Array[Map[String, @yaml.Yaml]]
   vuln_uses : Array[String]
   kind : FileKind
+  source : String
 }
 
 // Type aliases

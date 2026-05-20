@@ -956,6 +956,11 @@ test "permissions-syntax: unknown permission scope" {
         "severity": "info",
         "message": "job `build` has no `name:`",
       },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
+      },
     ],
   })
 }

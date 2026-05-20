@@ -222,6 +222,11 @@ test "cache-poisoning: cache restore in publish flow" {
         "severity": "info",
         "message": "job `release` has no `name:`",
       },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
+      },
     ],
   })
 }
@@ -389,6 +394,11 @@ test "excessive-permissions: job grants more than it needs" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 4 entry/entries without explanatory comments",
       },
       {
         "rule": "excessive-permissions",
@@ -858,7 +868,22 @@ test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
     #|  call:
     #|    uses: org/repo/.github/workflows/build.yml@v1
     #|    secrets: inherit
-  json_inspect(lint_json(yaml), content=({"kind":"workflow","stats":{"jobs":1,"steps":0,"lines":7},"diagnostics":[{"rule":"anonymous-definition","severity":"info","message":"workflow has no `name:`"},{"rule":"secrets-inherit","severity":"error","message":"job `call`: `secrets: inherit` forwards every secret"}]}))
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 0, "lines": 7 },
+    "diagnostics": [
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "secrets-inherit",
+        "severity": "error",
+        "message": "job `call`: `secrets: inherit` forwards every secret",
+      },
+    ],
+  })
 }
 
 ///|
@@ -1337,6 +1362,11 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `publish` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
       },
       {
         "rule": "use-trusted-publishing",

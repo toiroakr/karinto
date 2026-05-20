@@ -59,6 +59,10 @@ pub(all) struct WalkCtx {
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
   kind : FileKind
+  // Raw source text. YAML parsing loses comments and line layout, but
+  // rules like `undocumented-permissions` need both — they re-scan the
+  // source. Empty string when no source is available.
+  source : String
 }
 
 ///|
@@ -137,6 +141,7 @@ pub fn prewalk(
   doc : @yaml.Yaml,
   vuln_uses? : Array[String] = [],
   kind? : FileKind = Unknown,
+  source? : String = "",
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -224,6 +229,7 @@ pub fn prewalk(
     updates,
     vuln_uses,
     kind,
+    source,
   }
 }
 
@@ -771,6 +777,14 @@ pub fn all_rules() -> Array[Rule] {
       title: "Workflow/action or job has no `name:`",
       applies: workflow_or_action,
       on_doc: Some(check_anonymous_definition),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "undocumented-permissions",
+      title: "Permissions block has no explanatory comments",
+      applies: workflow_only,
+      on_doc: Some(check_undocumented_permissions),
       on_job: no_job(),
       on_step: no_step(),
     },
@@ -3824,6 +3838,153 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
     }
     None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: undocumented-permissions (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `undocumented-permissions` (pedantic persona): a
+/// `permissions:` block whose entries lack explanatory comments is suspect.
+/// We re-scan the raw source because the YAML parser drops comments.
+///
+/// Heuristics:
+///   - `permissions: {}` (or any inline-flow value) — skip.
+///   - A block whose only entry is `contents: read` — skip (self-explanatory).
+///   - Otherwise, every key:value line in the block must have a non-empty
+///     trailing comment. An empty `#` does not count; any text after `#`
+///     (including a `zizmor: ignore[...]` directive) does.
+fn check_undocumented_permissions(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.source == "" {
+    return
+  }
+  let lines : Array[String] = []
+  for v in ctx.source.split("\n") {
+    lines.push(v.to_string())
+  }
+  let n = lines.length()
+  let mut i = 0
+  while i < n {
+    let line = lines[i]
+    let indent = leading_spaces(line)
+    let stripped = line.substring(start=indent).to_string()
+    // Header looks like `permissions:` (optionally followed by an inline
+    // value or comment). Skip if there's a non-empty inline value.
+    if has_permissions_header(stripped) {
+      let after = stripped.substring(start="permissions:".length()).to_string()
+      let after_trimmed = trim_ws(after)
+      // Strip any trailing comment.
+      let val = match index_of(after_trimmed, "#") {
+        Some(k) => trim_ws(after_trimmed.substring(start=0, end=k).to_string())
+        None => after_trimmed
+      }
+      if val != "" {
+        // Inline value (e.g. `permissions: {}`, `permissions: read-all`).
+        i = i + 1
+        continue
+      }
+      // Collect block lines: subsequent lines indented strictly deeper than
+      // the header. Stop at the first line with indent ≤ header indent.
+      let entries : Array[(Int, String, String)] = []
+      let mut j = i + 1
+      while j < n {
+        let body = lines[j]
+        let body_trim = trim_ws(body)
+        if body_trim == "" {
+          j = j + 1
+          continue
+        }
+        let body_indent = leading_spaces(body)
+        if body_indent <= indent {
+          break
+        }
+        // Pure-comment lines inside the block are skipped.
+        if body_trim.has_prefix("#") {
+          j = j + 1
+          continue
+        }
+        let after_pound = match index_of(body, "#") {
+          Some(k) => Some(body.substring(start=k + 1).to_string())
+          None => None
+        }
+        let before_pound = match index_of(body, "#") {
+          Some(k) => body.substring(start=0, end=k).to_string()
+          None => body
+        }
+        entries.push((j, before_pound, comment_text(after_pound)))
+        j = j + 1
+      }
+      // An entry is "documented" if it has a non-empty trailing comment, or if
+      // it is the self-explanatory `contents: read`. Fire when any entry is
+      // undocumented. Empty block -> nothing to flag.
+      if entries.length() > 0 {
+        let mut uncommented = 0
+        for e in entries {
+          let (_, before, comment) = e
+          let kv = trim_ws(before)
+          if comment == "" && kv != "contents: read" {
+            uncommented = uncommented + 1
+          }
+        }
+        if uncommented > 0 {
+          add_diag(
+            out,
+            "undocumented-permissions",
+            Info,
+            "permissions block has \{uncommented} entry/entries without explanatory comments",
+          )
+        }
+      }
+      i = j
+      continue
+    }
+    i = i + 1
+  }
+}
+
+///|
+/// Count leading ASCII space characters on a line. Tabs are not GitHub
+/// Actions YAML's indentation style, so this is sufficient.
+fn leading_spaces(s : String) -> Int {
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut k = 0
+  while k < n && chars[k] == ' ' {
+    k = k + 1
+  }
+  k
+}
+
+///|
+/// True iff `stripped` begins with `permissions:` as a top-level key. We
+/// reject `permissionsfoo:` and other look-alikes.
+fn has_permissions_header(stripped : String) -> Bool {
+  let needle = "permissions:"
+  if !stripped.has_prefix(needle) {
+    return false
+  }
+  let rest = stripped.substring(start=needle.length()).to_string()
+  if rest == "" {
+    return true
+  }
+  let chars = rest.to_array()
+  let c = chars[0]
+  c == ' ' || c == '\t' || c == '#'
+}
+
+///|
+/// Inline-comment payload after the `#`. Returns the comment body with
+/// surrounding whitespace stripped. An empty body (just `#` or `# `) is
+/// returned as the empty string.
+fn comment_text(after_pound : String?) -> String {
+  match after_pound {
+    Some(s) => trim_ws(s)
+    None => ""
   }
 }
 

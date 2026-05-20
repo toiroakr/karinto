@@ -131,7 +131,7 @@ pub fn lint(
       }
       let stats = compute_stats(doc, lines)
       let diagnostics = run_rules(
-        doc, resolved_kind, merged_disabled, vuln_uses,
+        doc, resolved_kind, merged_disabled, vuln_uses, content,
       )
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
@@ -267,8 +267,9 @@ fn run_rules(
   kind : FileKind,
   disabled : Array[String],
   vuln_uses : Array[String],
+  source : String,
 ) -> Array[Diagnostic] {
-  let ctx = prewalk(doc, vuln_uses~, kind~)
+  let ctx = prewalk(doc, vuln_uses~, kind~, source~)
   let out : Array[Diagnostic] = []
 
   // Filter once. Each scope iterates pre-built callback arrays — no per-step
