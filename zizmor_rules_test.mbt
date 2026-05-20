@@ -331,34 +331,33 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
 }
 
 ///|
-#skip("not implemented yet")
-test "dependabot-execution: dependabot trigger runs external code" {
+test "dependabot-execution: insecure-external-code-execution allowed" {
   let yaml =
-    #|on:
-    #|  pull_request:
-    #|    branches: [main]
-    #|jobs:
-    #|  test:
-    #|    if: github.actor == 'dependabot[bot]'
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - uses: actions/checkout@v4
-    #|        with:
-    #|          ref: ${{ github.event.pull_request.head.sha }}
-    #|      - run: npm install && npm test
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
-    "diagnostics": [
-      {
-        "rule": "dependabot-execution",
-        "severity": "error",
-        "message": "dependabot PR head SHA is checked out and code is executed without review",
-      },
-    ],
-  })
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: pip
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+    #|    insecure-external-code-execution: allow
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dependabot-execution" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "dependabot-execution: deny is safe" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: pip
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+    #|    insecure-external-code-execution: deny
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dependabot-execution" })
+  inspect(hits.length(), content="0")
 }
 
 ///|

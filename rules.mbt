@@ -445,6 +445,14 @@ pub fn all_rules() -> Array[Rule] {
       on_step: no_step(),
     },
     Rule::{
+      id: "dependabot-execution",
+      title: "Dependabot enables `insecure-external-code-execution`",
+      applies: unknown_only,
+      on_doc: Some(check_dependabot_execution),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
       id: "workflow-env-no-secrets",
       title: "Workflow env must not reference `secrets`",
       applies: workflow_only,
@@ -1533,6 +1541,28 @@ fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         Info,
         "dependabot update has no `cooldown:` configured",
       )
+    }
+  }
+}
+
+///|
+/// Mirrors zizmor's `dependabot-execution`: a `dependabot.yml` update
+/// entry that sets `insecure-external-code-execution: allow` lets the
+/// dependency resolver run arbitrary scripts shipped by upstream
+/// packages (the `cargo`, `bundler`, `pip`, etc. ecosystems support it).
+fn check_dependabot_execution(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  for um in ctx.updates {
+    match um.get("insecure-external-code-execution") {
+      Some(v) =>
+        if yaml_scalar_text(v) == "allow" {
+          add_diag(
+            out,
+            "dependabot-execution",
+            Error,
+            "`insecure-external-code-execution: allow` lets dependency resolvers run arbitrary upstream code",
+          )
+        }
+      None => ()
     }
   }
 }
