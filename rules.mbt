@@ -2893,28 +2893,45 @@ fn check_github_env(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Checks whether `text` references a secret via a transform that bypasses
+/// GitHub Actions' built-in redaction. Returns `Some(transform-name)` on
+/// hit. Looks for shell pipes that mangle the secret (base64/xxd/tr/cut/sed
+/// /awk) and for `fromJSON(secrets...)` / `fromJson(secrets...)` expressions
+/// (case-insensitive) that destructure JSON-typed secrets — both classes
+/// land an unredacted value in logs.
+fn unredacted_secret_transform(text : String) -> String? {
+  if !contains_secrets_ref(text) {
+    return None
+  }
+  let lo = text.to_lower()
+  let transforms = [
+    ("base64", "base64"),
+    ("xxd", "xxd"),
+    ("| tr ", "tr"),
+    ("| cut ", "cut"),
+    ("| sed ", "sed"),
+    ("| awk ", "awk"),
+    ("fromjson(secrets", "fromJSON"),
+  ]
+  for entry in transforms {
+    let (pat, name) = entry
+    if lo.contains(pat) {
+      return Some(name)
+    }
+  }
+  None
+}
+
+///|
 fn check_unredacted_secrets(
   _ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) => {
-      if !contains_secrets_ref(r) {
-        return
-      }
-      let transforms = [
-        ("base64", "base64"),
-        ("xxd", "xxd"),
-        ("| tr ", "tr"),
-        ("| cut ", "cut"),
-        ("| sed ", "sed"),
-        ("| awk ", "awk"),
-        ("fromJSON(secrets", "fromJSON"),
-      ]
-      for entry in transforms {
-        let (pat, name) = entry
-        if r.contains(pat) {
+    Some(r) =>
+      match unredacted_secret_transform(r) {
+        Some(name) => {
           add_diag(
             out,
             "unredacted-secrets",
@@ -2923,9 +2940,32 @@ fn check_unredacted_secrets(
           )
           return
         }
+        None => ()
       }
-    }
     None => ()
+  }
+  // zizmor also flags `env:` values that destructure JSON-typed secrets via
+  // `fromJSON(secrets.X)` — the unredacted field lands in the runner
+  // environment and gets echoed by any subsequent `run:` that references it.
+  match step.raw.get("env") {
+    Some(Map(env)) =>
+      env.each(fn(_k, v) {
+        match v {
+          String(s) =>
+            match unredacted_secret_transform(s) {
+              Some(name) =>
+                add_diag(
+                  out,
+                  "unredacted-secrets",
+                  Error,
+                  "secret is transformed (\{name}) in `env:` before logging; redaction will fail",
+                )
+              None => ()
+            }
+          _ => ()
+        }
+      })
+    _ => ()
   }
 }
 
