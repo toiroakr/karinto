@@ -5,7 +5,6 @@
 // prefix); the catalogue's `origins` field preserves the zizmor lineage.
 
 ///|
-#skip("not implemented yet")
 test "anonymous-definition: workflow has no top-level `name`" {
   let yaml =
     #|on: push
@@ -22,9 +21,46 @@ test "anonymous-definition: workflow has no top-level `name`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+    ],
+  })
+}
+
+///|
+test "anonymous-definition: workflow with explicit name is silent when jobs have names" {
+  let yaml =
+    #|name: build
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    name: Build everything
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -80,6 +116,16 @@ test "artipacked: actions/checkout leaves credentials persisted" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
@@ -114,6 +160,16 @@ test "bot-conditions: spoofable github.actor bot check" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `auto` has no `name:`",
       },
       {
         "rule": "bot-conditions",
@@ -156,6 +212,16 @@ test "cache-poisoning: cache restore in publish flow" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `release` has no `name:`",
+      },
     ],
   })
 }
@@ -182,6 +248,16 @@ test "concurrency-limits: no concurrency on deploy workflow" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `deploy` has no `name:`",
       },
     ],
   })
@@ -212,6 +288,16 @@ test "dangerous-triggers: workflow uses pull_request_target" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -293,6 +379,16 @@ test "excessive-permissions: job grants more than it needs" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "excessive-permissions",
@@ -382,6 +478,16 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "template-injection",
         "severity": "error",
         "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
@@ -420,6 +526,16 @@ test "hardcoded-container-credentials: plain password in container" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "hardcoded-container-credentials",
@@ -484,6 +600,16 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "deprecated-workflow-commands",
         "severity": "warning",
         "message": "deprecated workflow command `::set-env`; use `$GITHUB_ENV` instead",
@@ -512,6 +638,16 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-uses",
@@ -573,6 +709,16 @@ test "misfeature: continue-on-error masks real failures" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "misfeature",
         "severity": "info",
         "message": "job `build` has `continue-on-error: true`; failures will be hidden",
@@ -601,6 +747,16 @@ test "obfuscation: hex-encoded uses ref" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "checkout-persist-credentials-false",
@@ -643,6 +799,16 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "overprovisioned-secrets",
@@ -692,17 +858,7 @@ test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
     #|  call:
     #|    uses: org/repo/.github/workflows/build.yml@v1
     #|    secrets: inherit
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 0, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "secrets-inherit",
-        "severity": "error",
-        "message": "job `call`: `secrets: inherit` forwards every secret",
-      },
-    ],
-  })
+  json_inspect(lint_json(yaml), content=({"kind":"workflow","stats":{"jobs":1,"steps":0,"lines":7},"diagnostics":[{"rule":"anonymous-definition","severity":"info","message":"workflow has no `name:`"},{"rule":"secrets-inherit","severity":"error","message":"job `call`: `secrets: inherit` forwards every secret"}]}))
 }
 
 ///|
@@ -725,6 +881,16 @@ test "secrets-outside-env: secrets accessed without an environment" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `deploy` has no `name:`",
       },
       {
         "rule": "secrets-outside-env",
@@ -755,6 +921,16 @@ test "self-hosted-runner: job runs on self-hosted runner" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "self-hosted-runner",
@@ -796,6 +972,16 @@ test "superfluous-actions: setup-node duplicated across steps" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "superfluous-actions",
         "severity": "info",
         "message": "job `build` uses `actions/setup-node` twice",
@@ -824,6 +1010,16 @@ test "template-injection: untrusted input in run script" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `echo` has no `name:`",
       },
       {
         "rule": "template-injection",
@@ -882,6 +1078,16 @@ test "unpinned-images: container image uses a floating tag" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "unpinned-images",
         "severity": "warning",
         "message": "container image `node:20` is not pinned by digest",
@@ -910,6 +1116,16 @@ test "unpinned-tools: pipe-to-shell installer in run" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-tools",
@@ -944,6 +1160,16 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "unpinned-uses",
         "severity": "warning",
         "message": "uses `actions/checkout@v4` is not pinned to a full-length SHA",
@@ -974,6 +1200,16 @@ test "unredacted-secrets: secret length manipulated before logging" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unredacted-secrets",
@@ -1011,6 +1247,16 @@ test "unsound-condition: `always() && success()` is always true" {
         "severity": "warning",
         "message": "`always() && success()` is always equivalent to `always()`",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -1042,6 +1288,16 @@ test "unsound-contains: contains() with literal arg order swapped" {
         "severity": "warning",
         "message": "`contains('main', github.ref)` arguments look swapped",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -1071,6 +1327,16 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `publish` has no `name:`",
       },
       {
         "rule": "use-trusted-publishing",

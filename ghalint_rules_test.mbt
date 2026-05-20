@@ -31,6 +31,16 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -66,6 +76,16 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -92,6 +112,16 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "job-env-no-secrets",
@@ -133,6 +163,16 @@ test "github-app-limit-repositories: GitHub App token scoped to whole org" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "github-app-limit-repositories",
         "severity": "warning",
         "message": "GitHub App token request is missing `repositories:` scope",
@@ -171,6 +211,16 @@ test "github-app-limit-permissions: GitHub App token requests no permissions" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "github-app-limit-permissions",
@@ -224,6 +274,16 @@ test "job-timeout-minutes-required: job is missing `timeout-minutes`" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "job-timeout-minutes-required",
         "severity": "warning",
         "message": "job `build` does not declare `timeout-minutes:`",
@@ -254,6 +314,16 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "checkout-persist-credentials-false",

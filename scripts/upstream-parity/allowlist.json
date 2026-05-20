@@ -1334,13 +1334,21 @@
       "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
     },
     {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/invalid/invalid-workflow-2.yml",
+      "expect": [
+        "extra:anonymous-definition"
+      ],
+      "reason": "Source=zizmor. zizmor rejects this fixture as invalid (parse error); karinto's tolerant YAML parser still flags the unnamed job."
+    },
+    {
       "file": "fixtures/upstream/zizmor/tests/integration/test-data/issue-1065.yml",
       "expect": [
         "missing:unpinned-uses",
         "missing:concurrency-limits",
+        "missing:anonymous-definition",
         "ignore"
       ],
-      "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
+      "reason": "baseline: tracked at PR #13. Source=zizmor. karinto's YAML parser throws on this fixture (issue #1065 repro)."
     },
     {
       "file": "fixtures/upstream/zizmor/tests/integration/test-data/secrets-inherit.yml",

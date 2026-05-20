@@ -27,6 +27,16 @@ test "unexpected-keys: unknown key under job" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "unexpected-keys",
         "severity": "error",
         "message": "job `build`: unknown key `typo`",
@@ -60,6 +70,16 @@ test "missing-required-keys: workflow missing `on`" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -77,6 +97,11 @@ test "empty-mappings: empty jobs block" {
         "rule": "empty-mappings",
         "severity": "warning",
         "message": "workflow: `jobs:` is an empty mapping",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
       },
     ],
   })
@@ -102,6 +127,16 @@ test "invalid-mapping-values: runs-on must be string or array" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "invalid-mapping-values",
@@ -138,6 +173,16 @@ test "expression-syntax: malformed `${{` expression" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -196,6 +241,16 @@ test "unknown-context-or-function: unknown context name" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -227,6 +282,16 @@ test "context-availability: `needs` referenced at workflow level" {
         "rule": "context-availability",
         "severity": "error",
         "message": "context `needs` is not available in workflow-level `env`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -350,6 +415,16 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
         "severity": "warning",
         "message": "comparison `1 == 1` is always true",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -387,6 +462,16 @@ test "job-needs-graph: dependency on undefined job" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -448,6 +533,16 @@ test "webhook-events: unknown event filter" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -482,6 +577,16 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
         "severity": "error",
         "message": "workflow_dispatch input `level.type` must be one of choice/boolean/string/environment/number",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `noop` has no `name:`",
+      },
     ],
   })
 }
@@ -515,6 +620,16 @@ test "glob-patterns: invalid glob pattern in paths filter" {
         "severity": "error",
         "message": "invalid glob `src/[unclosed`: unterminated character class",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -547,6 +662,16 @@ test "cron-and-timezone: out-of-range minute value" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -571,6 +696,16 @@ test "unknown-runner-label: unknown runner label" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unknown-runner-label",
@@ -601,6 +736,16 @@ test "uses-syntax: missing @ref in uses" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "uses-syntax",
@@ -709,6 +854,16 @@ test "shell-name-per-os: pwsh on linux runner" {
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "shell-name-per-os",
         "severity": "error",
         "message": "shell `cmd` is only available on Windows runners",
@@ -749,6 +904,16 @@ test "invalid-env-var-name: env name starts with digit" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -781,6 +946,16 @@ test "permissions-syntax: unknown permission scope" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -808,6 +983,16 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
         "rule": "reusable-workflow-definition",
         "severity": "error",
         "message": "workflow_call output `version` is missing `value:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -839,6 +1024,16 @@ test "job-step-id-naming: job id has invalid characters" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build job` has no `name:`",
+      },
     ],
   })
 }
@@ -863,6 +1058,16 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "deprecated-workflow-commands",
@@ -894,6 +1099,16 @@ test "constant-if-condition: `if: true` always-on" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "constant-if-condition",

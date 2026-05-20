@@ -101,7 +101,7 @@ Per-audit anchors below follow the pattern `https://docs.zizmor.sh/audits/#<id>`
 
 | ID | Origin | Severity | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `anonymous-definition` | [`zizmor:anonymous-definition`](https://docs.zizmor.sh/audits/#anonymous-definition) | info | Planned | Low priority; fixtures in place. |
+| `anonymous-definition` | [`zizmor:anonymous-definition`](https://docs.zizmor.sh/audits/#anonymous-definition) | info | Implemented | |
 | `archived-uses` | [`zizmor:archived-uses`](https://docs.zizmor.sh/audits/#archived-uses) | warning | Planned | Requires GitHub API call to detect archived repos; fixtures in place. |
 | `artipacked` | [`zizmor:artipacked`](https://docs.zizmor.sh/audits/#artipacked) | error | Planned | Preview implementation — narrower scope than upstream; misses YAML-anchor and action.yml fixtures. |
 | `bot-conditions` | [`zizmor:bot-conditions`](https://docs.zizmor.sh/audits/#bot-conditions) | error | Implemented | |

@@ -766,6 +766,14 @@ pub fn all_rules() -> Array[Rule] {
       on_job: no_job(),
       on_step: no_step(),
     },
+    Rule::{
+      id: "anonymous-definition",
+      title: "Workflow/action or job has no `name:`",
+      applies: workflow_or_action,
+      on_doc: Some(check_anonymous_definition),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
   ]
 }
 
@@ -3774,6 +3782,48 @@ fn is_reusable_only(m : Map[String, @yaml.Yaml]) -> Bool {
     Some(@yaml.Yaml::Map(on_map)) =>
       on_map.size() == 1 && on_map.contains("workflow_call")
     _ => false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: anonymous-definition (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `anonymous-definition` (audit/anonymous_definition.rs):
+/// fires when a workflow/action has no top-level `name:` and, in workflows,
+/// for each normal job that lacks its own `name:` (the job key is just an
+/// ID). Reusable-workflow caller jobs (`uses:` instead of `runs-on:`) are
+/// skipped — their identity is the called workflow, not a free-form label.
+/// zizmor only surfaces this under `--persona=pedantic`; karinto's parity
+/// run uses pedantic so we match the pedantic firings.
+fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      if !m.contains("name") {
+        let what = match ctx.kind {
+          Action => "action"
+          _ => "workflow"
+        }
+        add_diag(out, "anonymous-definition", Info, "\{what} has no `name:`")
+      }
+      if ctx.kind != FileKind::Action {
+        for j in ctx.jobs {
+          if j.uses is Some(_) {
+            continue
+          }
+          if !j.raw.contains("name") {
+            add_diag(
+              out,
+              "anonymous-definition",
+              Info,
+              "job `\{j.name}` has no `name:`",
+            )
+          }
+        }
+      }
+    }
+    None => ()
   }
 }
 

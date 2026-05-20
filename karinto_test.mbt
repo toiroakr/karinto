@@ -49,6 +49,21 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `Build` has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -82,6 +97,16 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -111,6 +136,16 @@ test "permissions-write-all-forbidden: write-all permission rejected at workflow
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -133,6 +168,16 @@ test "job-permissions-required: missing job permissions" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "job-permissions-required",
@@ -164,6 +209,16 @@ test "job-permissions-required: satisfied when workflow-level permissions presen
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
@@ -192,6 +247,16 @@ test "disable: skip a rule with a glob pattern" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
