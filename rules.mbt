@@ -2129,17 +2129,84 @@ fn check_misfeature_step(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Mirrors zizmor's `dependabot-cooldown`: each `updates:` entry is
+/// inspected independently and may produce up to four findings
+/// (missing block / no default-days / insufficient default-days /
+/// multi-ecosystem-group with effective cooldown). Threshold matches
+/// upstream's default `days = 7`.
 fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let threshold = 7
   for um in ctx.updates {
-    if !um.contains("cooldown") {
-      add_diag(
-        out,
-        "dependabot-cooldown",
-        Info,
-        "dependabot update has no `cooldown:` configured",
-      )
+    let cooldown = um.get("cooldown")
+    match cooldown {
+      None =>
+        add_diag(
+          out,
+          "dependabot-cooldown",
+          Info,
+          "missing cooldown configuration",
+        )
+      Some(@yaml.Yaml::Map(c)) => {
+        let dd = c.get("default-days")
+        let dd_int = match dd {
+          Some(@yaml.Yaml::Integer(n)) => Some(n)
+          Some(@yaml.Yaml::Real(d, repr=_)) => Some(d.to_int64())
+          _ => None
+        }
+        match dd_int {
+          None =>
+            add_diag(
+              out,
+              "dependabot-cooldown",
+              Info,
+              "no default-days configured",
+            )
+          Some(n) =>
+            if n < threshold.to_int64() {
+              add_diag(
+                out,
+                "dependabot-cooldown",
+                Info,
+                "insufficient default-days configured (less than \{threshold})",
+              )
+            }
+        }
+        // multi-ecosystem-group with effective cooldown (pedantic).
+        if um.contains("multi-ecosystem-group") && cooldown_is_effective(c) {
+          add_diag(
+            out,
+            "dependabot-cooldown",
+            Info,
+            "multi-ecosystem-group cooldowns do not batch updates correctly",
+          )
+        }
+      }
+      _ =>
+        add_diag(
+          out,
+          "dependabot-cooldown",
+          Info,
+          "missing cooldown configuration",
+        )
     }
   }
+}
+
+///|
+/// Returns true when the cooldown block has any positive day budget,
+/// matching zizmor's `Cooldown::effective`.
+fn cooldown_is_effective(c : Map[String, @yaml.Yaml]) -> Bool {
+  let fields = [
+    "default-days", "semver-major-days", "semver-minor-days", "semver-patch-days",
+  ]
+  for k in fields {
+    match c.get(k) {
+      Some(@yaml.Yaml::Integer(n)) => if n > 0L { return true }
+      Some(@yaml.Yaml::Real(d, repr=_)) => if d > 0.0 { return true }
+      _ => ()
+    }
+  }
+  false
 }
 
 ///|

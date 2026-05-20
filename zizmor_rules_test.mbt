@@ -351,7 +351,7 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
       {
         "rule": "dependabot-cooldown",
         "severity": "info",
-        "message": "dependabot update has no `cooldown:` configured",
+        "message": "missing cooldown configuration",
       },
     ],
   })
