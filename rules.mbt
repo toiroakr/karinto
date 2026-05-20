@@ -378,7 +378,7 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "insecure-commands",
       title: "`ACTIONS_ALLOW_UNSECURE_COMMANDS` re-enables legacy commands",
-      applies: workflow_only,
+      applies: workflow_or_action,
       on_doc: Some(check_insecure_commands),
       on_job: no_job(),
       on_step: no_step(),
@@ -1522,34 +1522,32 @@ fn env_has_unsafe_commands(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let m = match ctx.workflow_map {
-    Some(m) => m
-    None => return
-  }
-  let flagged = match m.get("env") {
-    Some(Map(env)) => env_has_unsafe_commands(env)
-    _ => false
-  }
-  if flagged {
+  let fire = fn() {
     add_diag(
       out,
       "insecure-commands",
       Warning,
       "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
     )
-    return
+  }
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("env") {
+        Some(Map(env)) =>
+          if env_has_unsafe_commands(env) {
+            fire()
+            return
+          }
+        _ => ()
+      }
+    None => ()
   }
   // Job- and step-level env blocks also count.
   for j in ctx.jobs {
     match j.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          add_diag(
-            out,
-            "insecure-commands",
-            Warning,
-            "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-          )
+          fire()
           return
         }
       _ => ()
@@ -1558,16 +1556,22 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match s.raw.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            add_diag(
-              out,
-              "insecure-commands",
-              Warning,
-              "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-            )
+            fire()
             return
           }
         _ => ()
       }
+    }
+  }
+  // Composite-action steps share the same hazard.
+  for s in ctx.action_steps {
+    match s.raw.get("env") {
+      Some(Map(env)) =>
+        if env_has_unsafe_commands(env) {
+          fire()
+          return
+        }
+      _ => ()
     }
   }
 }
