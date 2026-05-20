@@ -879,6 +879,14 @@ pub fn all_rules() -> Array[Rule] {
       on_job: None,
       on_step: None,
     },
+    Rule::{
+      id: "deprecated-action-inputs",
+      title: "Deprecated input on a popular action",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: None,
+      on_step: Some(check_deprecated_action_inputs),
+    },
   ]
 }
 
@@ -4664,6 +4672,66 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         Warning,
         "YAML anchor `&\{name}` is declared but never referenced",
       )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: deprecated-action-inputs (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Hardcoded baseline of `<owner/repo>` → `[(old, new)]` deprecation
+/// mappings for popular actions. actionlint pulls a much wider dataset
+/// from its bundled `popular-actions.json` (~200 actions); shipping
+/// that full table from the linter is tracked under
+/// `popular-action-inputs`. This baseline covers the cases most workflow
+/// authors actually hit. The Worker can extend coverage by supplying
+/// its own deprecation map at a later stage (out of scope here).
+fn deprecated_action_inputs_baseline() -> Array[
+  (String, Array[(String, String)]),
+] {
+  [
+    ("actions/setup-node", [("version", "node-version")]),
+    ("actions/setup-python", [("python_version", "python-version")]),
+    ("actions/setup-go", [("version", "go-version")]),
+    ("actions/setup-java", [("version", "java-version")]),
+    ("actions/setup-dotnet", [("version", "dotnet-version")]),
+  ]
+}
+
+///|
+fn check_deprecated_action_inputs(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let uses = match step.uses {
+    Some(u) => u
+    None => return
+  }
+  let with_ = match step.with_ {
+    Some(w) => w
+    None => return
+  }
+  let repo = bare_repo_of(uses)
+  if repo == "" {
+    return
+  }
+  let lo = repo.to_lower()
+  for entry in deprecated_action_inputs_baseline() {
+    if lo != entry.0.to_lower() {
+      continue
+    }
+    for pair in entry.1 {
+      if with_.contains(pair.0) {
+        add_diag(
+          out,
+          "deprecated-action-inputs",
+          Warning,
+          "\{entry.0} input `\{pair.0}` is deprecated; use `\{pair.1}`",
+        )
+      }
     }
   }
 }

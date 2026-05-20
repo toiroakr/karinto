@@ -496,6 +496,10 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       true,
     ),
+    // Status stays Planned: a hardcoded baseline of ~5 popular actions
+    // ships in `rules.mbt`, but actionlint pulls from ~200 entries.
+    // Promote to Implemented once the full popular-actions catalogue is
+    // bundled (tracked under `popular-action-inputs` below).
     spec(
       "yaml-anchor-issues",
       "YAML anchor/alias issues",

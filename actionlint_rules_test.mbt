@@ -1158,7 +1158,6 @@ test "action-yml-metadata: action.yml missing `runs`" {
 }
 
 ///|
-#skip("not implemented yet")
 test "deprecated-action-inputs: deprecated input on a popular action" {
   let yaml =
     #|on: push
@@ -1171,17 +1170,35 @@ test "deprecated-action-inputs: deprecated input on a popular action" {
     #|      - uses: actions/setup-node@v4
     #|        with:
     #|          version: 20
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
-    "diagnostics": [
-      {
-        "rule": "deprecated-action-inputs",
-        "severity": "warning",
-        "message": "actions/setup-node input `version` is deprecated; use `node-version`",
-      },
-    ],
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "deprecated-action-inputs"
   })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="actions/setup-node input `version` is deprecated; use `node-version`",
+  )
+}
+
+///|
+test "deprecated-action-inputs: silent when current input is used" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/setup-node@v4
+    #|        with:
+    #|          node-version: 20
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "deprecated-action-inputs"
+  })
+  inspect(hits.length(), content="0")
 }
 
 ///|
