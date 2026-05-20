@@ -113,6 +113,7 @@ pub fn lint(
   vuln_uses? : Array[String] = [],
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
+  impostor_uses? : Array[String] = [],
 ) -> LintResult {
   let lines = count_lines(content)
   let merged_disabled = merge_inline_ignores(content, disabled)
@@ -134,7 +135,7 @@ pub fn lint(
       let stats = compute_stats(doc, lines)
       let diagnostics = run_rules(
         doc, resolved_kind, merged_disabled, vuln_uses, content, forbidden_uses,
-        archived_uses,
+        archived_uses, impostor_uses,
       )
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
@@ -273,6 +274,7 @@ fn run_rules(
   source : String,
   forbidden_uses : Array[String],
   archived_uses : Array[String],
+  impostor_uses : Array[String],
 ) -> Array[Diagnostic] {
   let ctx = prewalk(
     doc,
@@ -281,6 +283,7 @@ fn run_rules(
     source~,
     forbidden_uses~,
     archived_uses~,
+    impostor_uses~,
   )
   let out : Array[Diagnostic] = []
 

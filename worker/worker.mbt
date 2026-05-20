@@ -15,6 +15,7 @@ pub fn lint_string(
   vuln_uses_str : String,
   forbidden_uses_str? : String = "",
   archived_uses_str? : String = "",
+  impostor_uses_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -25,6 +26,7 @@ pub fn lint_string(
   let vuln_uses = split_csv(vuln_uses_str)
   let forbidden_uses = split_csv(forbidden_uses_str)
   let archived_uses = split_csv(archived_uses_str)
+  let impostor_uses = split_csv(impostor_uses_str)
   let result = @karinto.lint(
     content,
     kind~,
@@ -32,6 +34,7 @@ pub fn lint_string(
     vuln_uses~,
     forbidden_uses~,
     archived_uses~,
+    impostor_uses~,
   )
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),

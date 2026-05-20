@@ -66,6 +66,10 @@ pub(all) struct WalkCtx {
   // GitHub before linting; comparison is case-insensitive and operates on
   // the bare `owner/repo` (subpath stripped).
   archived_uses : Array[String]
+  // Optional caller-supplied `owner/repo@sha` list of refs whose pinned SHA
+  // does not belong to the claimed repository. Empty → rule is silent
+  // offline (matches zizmor `--no-online-audits`).
+  impostor_uses : Array[String]
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
@@ -155,6 +159,7 @@ pub fn prewalk(
   source? : String = "",
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
+  impostor_uses? : Array[String] = [],
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -245,6 +250,7 @@ pub fn prewalk(
     source,
     forbidden_uses,
     archived_uses,
+    impostor_uses,
   }
 }
 
@@ -834,6 +840,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: no_doc(),
       on_job: Some(check_archived_uses_job),
       on_step: Some(check_archived_uses_step),
+    },
+    Rule::{
+      id: "impostor-commit",
+      title: "Pinned SHA does not exist in the claimed repository",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_impostor_commit_job),
+      on_step: Some(check_impostor_commit_step),
     },
   ]
 }
@@ -4313,6 +4327,75 @@ fn check_archived_uses_job(
         )
       }
     }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: impostor-commit (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor's `impostor-commit` audit walks the GitHub API to confirm that a
+/// pinned SHA belongs to the claimed `owner/repo`. We cannot do that from
+/// the linter itself, so the Worker resolves it externally and passes the
+/// confirmed-impostor `owner/repo@sha` list via `impostor_uses=`. Empty
+/// list keeps the rule silent — matches zizmor's `--no-online-audits` mode.
+fn uses_listed(uses : String, listed : Array[String]) -> Bool {
+  if listed.length() == 0 || uses == "" {
+    return false
+  }
+  let lo = uses.to_lower()
+  for r in listed {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn check_impostor_commit_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.impostor_uses.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.impostor_uses) {
+        add_diag(
+          out,
+          "impostor-commit",
+          Error,
+          "uses `\{u}`: SHA does not exist in the claimed repository",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_impostor_commit_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.impostor_uses.length() == 0 {
+    return
+  }
+  match job.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.impostor_uses) {
+        add_diag(
+          out,
+          "impostor-commit",
+          Error,
+          "uses `\{u}`: SHA does not exist in the claimed repository",
+        )
+      }
     None => ()
   }
 }

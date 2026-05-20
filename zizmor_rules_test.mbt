@@ -609,8 +609,12 @@ test "hardcoded-container-credentials: plain password in container" {
 }
 
 ///|
-#skip("not implemented yet")
-test "impostor-commit: SHA pin not present in claimed repo" {
+/// Confirming a SHA does NOT belong to the claimed repository requires a
+/// GitHub API call, which the linter cannot do offline. Mirrors zizmor's
+/// `--no-online-audits` behaviour: silent unless the Worker resolves the
+/// ref externally and threads the confirmed-impostor list through
+/// `impostor_uses=`.
+test "impostor-commit: silent without caller-supplied impostor list" {
   let yaml =
     #|on: push
     #|jobs:
@@ -620,17 +624,27 @@ test "impostor-commit: SHA pin not present in claimed repo" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "impostor-commit",
-        "severity": "error",
-        "message": "uses `actions/checkout@deadbeef…`: SHA does not exist in `actions/checkout`",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "impostor-commit" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "impostor-commit: fires when caller marks ref as impostor" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  let res = @karinto.lint(yaml, impostor_uses=[
+    "actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "impostor-commit" })
+  inspect(hits.length(), content="1")
 }
 
 ///|

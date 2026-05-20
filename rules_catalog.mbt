@@ -692,9 +692,9 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       SupplyChain,
       Error,
       High,
-      Planned,
+      Implemented,
       true,
-      true,
+      false,
     ),
     spec(
       "insecure-commands",
