@@ -385,11 +385,11 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "misfeature",
-      title: "`continue-on-error: true` masks real failures",
+      title: "GitHub Actions misfeatures (cmd shell, setup-python pip-install, continue-on-error)",
       applies: workflow_only,
-      on_doc: no_doc(),
+      on_doc: Some(check_misfeature_doc),
       on_job: Some(check_misfeature),
-      on_step: no_step(),
+      on_step: Some(check_misfeature_step),
     },
     Rule::{
       id: "job-permissions-required",
@@ -1577,8 +1577,45 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 }
 
 // ---------------------------------------------------------------------------
-// Rule: misfeature (zizmor) — `continue-on-error: true` at job level
+// Rule: misfeature (zizmor) — GHA misfeatures that bite users in practice:
+//   - `defaults.run.shell: cmd` (workflow or job) — Windows `cmd` swallows
+//     exit codes from inline `run:` blocks
+//   - `actions/setup-python` with `pip-install:` — the input is undocumented
+//     and silently no-ops on misuse
+//   - job-level `continue-on-error: true` — hides real failures
 // ---------------------------------------------------------------------------
+
+///|
+fn defaults_run_shell_is_cmd(raw : Map[String, @yaml.Yaml]) -> Bool {
+  match raw.get("defaults") {
+    Some(Map(d)) =>
+      match d.get("run") {
+        Some(Map(r)) =>
+          match r.get("shell") {
+            Some(String(s)) => s.to_lower() == "cmd"
+            _ => false
+          }
+        _ => false
+      }
+    _ => false
+  }
+}
+
+///|
+fn check_misfeature_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      if defaults_run_shell_is_cmd(m) {
+        add_diag(
+          out,
+          "misfeature",
+          Info,
+          "workflow `defaults.run.shell: cmd` makes inline `run:` blocks swallow exit codes; prefer `pwsh`",
+        )
+      }
+    None => ()
+  }
+}
 
 ///|
 fn check_misfeature(
@@ -1595,6 +1632,42 @@ fn check_misfeature(
         "job `\{job.name}` has `continue-on-error: true`; failures will be hidden",
       )
     _ => ()
+  }
+  if defaults_run_shell_is_cmd(job.raw) {
+    add_diag(
+      out,
+      "misfeature",
+      Info,
+      "job `\{job.name}` has `defaults.run.shell: cmd`, which swallows inline `run:` exit codes; prefer `pwsh`",
+    )
+  }
+}
+
+///|
+fn check_misfeature_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) => {
+      let lo = u.to_lower()
+      if lo.contains("actions/setup-python") {
+        match step.raw.get("with") {
+          Some(Map(w)) =>
+            if w.contains("pip-install") {
+              add_diag(
+                out,
+                "misfeature",
+                Info,
+                "`actions/setup-python` has no `pip-install:` input; this silently no-ops — run `pip install` in a separate step",
+              )
+            }
+          _ => ()
+        }
+      }
+    }
+    None => ()
   }
 }
 

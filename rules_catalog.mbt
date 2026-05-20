@@ -732,7 +732,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       BestPractice,
       Info,
       Low,
-      Planned,
+      Implemented,
       true,
       true,
     ),
