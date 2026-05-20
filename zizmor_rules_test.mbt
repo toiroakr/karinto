@@ -232,7 +232,7 @@ test "cache-poisoning: cache restore in publish flow" {
       {
         "rule": "cache-poisoning",
         "severity": "error",
-        "message": "release-publishing job restores from cache; risk of cache poisoning",
+        "message": "runtime artifacts potentially vulnerable to a cache poisoning attack",
       },
       {
         "rule": "concurrency-limits",

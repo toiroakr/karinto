@@ -567,15 +567,15 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
     ),
     spec(
       "cache-poisoning",
-      "Cache poisoning risk in release flow",
+      "Runtime artifacts vulnerable to cache poisoning",
       Zizmor,
       ["zizmor:cache-poisoning"],
       Security,
       Error,
       High,
-      Planned,
+      Implemented,
       true,
-      false,
+      true,
     ),
     spec(
       "concurrency-limits",

@@ -3225,71 +3225,629 @@ fn check_overprovisioned_secrets(
 // ---------------------------------------------------------------------------
 
 ///|
-fn workflow_runs_on_release(ctx : WalkCtx) -> Bool {
+/// Trigger kinds collected from a workflow's `on:` block; mirrors upstream
+/// `ReleaseTrigger`. `has_release_branch` distinguishes a `push:branches`
+/// pattern whose name contains the substring `"release"` (case-insensitive),
+/// which suppresses the tag-push conditional heuristic.
+priv struct CacheTriggers {
+  has_tag_push : Bool
+  has_release_event : Bool
+  has_release_branch : Bool
+}
+
+///|
+fn cache_triggers_empty(t : CacheTriggers) -> Bool {
+  !t.has_tag_push && !t.has_release_event && !t.has_release_branch
+}
+
+///|
+fn cache_triggers_all_tag_or_release(t : CacheTriggers) -> Bool {
+  !cache_triggers_empty(t) && !t.has_release_branch
+}
+
+///|
+fn branch_pattern_is_release(s : String) -> Bool {
+  s.to_lower().contains("release")
+}
+
+///|
+fn collect_cache_triggers(ctx : WalkCtx) -> CacheTriggers {
+  let mut tag = false
+  let mut rel = false
+  let mut branch = false
   let m = match ctx.workflow_map {
     Some(m) => m
-    None => return false
+    None =>
+      return CacheTriggers::{
+        has_tag_push: false,
+        has_release_event: false,
+        has_release_branch: false,
+      }
   }
   match m.get("on") {
-    Some(String(s)) => s == "release"
-    Some(Array(arr)) => {
+    Some(String(s)) => if s == "release" { rel = true }
+    Some(Array(arr)) =>
       for item in arr {
         match item {
-          String(s) => if s == "release" { return true }
+          String(s) => if s == "release" { rel = true }
           _ => ()
         }
       }
-      false
-    }
-    Some(Map(om)) => {
-      let mut found = false
+    Some(Map(om)) =>
       om.each(fn(name, v) {
         if name == "release" {
-          found = true
+          rel = true
         }
         if name == "push" {
           match v {
-            Map(pm) => if pm.contains("tags") { found = true }
+            Map(pm) => {
+              if pm.contains("tags") {
+                tag = true
+              }
+              match pm.get("branches") {
+                Some(String(s)) =>
+                  if branch_pattern_is_release(s) {
+                    branch = true
+                  }
+                Some(Array(b)) =>
+                  for it in b {
+                    match it {
+                      String(s) =>
+                        if branch_pattern_is_release(s) {
+                          branch = true
+                        }
+                      _ => ()
+                    }
+                  }
+                _ => ()
+              }
+            }
             _ => ()
           }
         }
       })
-      found
-    }
-    _ => false
+    _ => ()
+  }
+  CacheTriggers::{
+    has_tag_push: tag,
+    has_release_event: rel,
+    has_release_branch: branch,
   }
 }
 
 ///|
-fn step_is_cache_restore(s : StepInfo) -> Bool {
+/// True if `uses` matches one of the curated publisher actions used by
+/// upstream zizmor to mark a job as "publishing artifacts at runtime".
+/// Comparison strips the `@ref` suffix and is case-insensitive.
+fn cache_uses_is_publisher(u : String) -> Bool {
+  let lo = u.to_lower()
+  let prefixes = [
+    "pypa/gh-action-pypi-publish", "rubygems/release-gem", "jreleaser/release-action",
+    "goreleaser/goreleaser-action", "softprops/action-gh-release", "release-drafter/release-drafter",
+    "googleapis/release-please-action", "redhat-actions/push-to-registry", "aws-actions/amazon-ecs-deploy-task-definition",
+    "aws-actions/aws-cloudformation-github-deploy", "azure/aci-deploy", "azure/container-apps-deploy-action",
+    "azure/functions-action", "azure/sql-action", "cloudflare/wrangler-action", "google-github-actions/deploy-appengine",
+    "google-github-actions/deploy-cloudrun", "google-github-actions/deploy-cloud-functions",
+  ]
+  for p in prefixes {
+    if lo.has_prefix(p + "@") || lo.has_prefix(p + "/") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn step_is_publisher_step(s : StepInfo) -> Bool {
   match s.uses {
-    Some(u) =>
-      u.has_prefix("actions/cache@") || u.has_prefix("actions/cache/restore@")
+    Some(u) => {
+      if cache_uses_is_publisher(u) {
+        return true
+      }
+      let lo = u.to_lower()
+      if lo.has_prefix("docker/build-push-action@") ||
+        lo.has_prefix("docker/build-push-action/") {
+        // Upstream: ControlExpr::single(Toggle::OptIn, "push", Boolean, true) —
+        // the 4th arg is `default_satisfied`, so when `push:` is absent the
+        // step is still treated as publishing. Only an explicit `push: false`
+        // (literal bool or stringy "false") clears it.
+        match s.with_ {
+          Some(w) =>
+            match w.get("push") {
+              Some(Boolean(false)) => false
+              Some(String(s)) => s.to_lower() != "false"
+              _ => true
+            }
+          _ => true
+        }
+      } else {
+        false
+      }
+    }
     None => false
   }
 }
 
 ///|
-fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  if !workflow_runs_on_release(ctx) {
-    return
-  }
-  for j in ctx.jobs {
-    let mut hit = false
-    for s in j.steps {
-      if step_is_cache_restore(s) {
-        hit = true
-        break
-      }
+fn job_has_publisher_step(j : JobInfo) -> Bool {
+  for s in j.steps {
+    if step_is_publisher_step(s) {
+      return true
     }
-    if hit {
-      add_diag(
-        out,
-        "cache-poisoning",
-        Error,
-        "release-publishing job restores from cache; risk of cache poisoning",
-      )
-      return
+  }
+  false
+}
+
+///|
+/// Per-step classification: NotSatisfied means no cache is in use.
+/// Satisfied means the step caches unconditionally (Always /
+/// DefaultBehaviour / DirectOptIn). Conditional carries an optional
+/// "would-enable-under-tag-push" result of evaluating the control
+/// expression — `Some(true)` means tag-push would still cache,
+/// `Some(false)` means it would not, `None` means uncertain.
+priv enum CacheStep {
+  CacheNotSatisfied
+  CacheSatisfied
+  CacheConditional(Bool?)
+}
+
+///|
+fn expr_to_string(value : @yaml.Yaml) -> String {
+  match value {
+    String(s) => s
+    Boolean(true) => "true"
+    Boolean(false) => "false"
+    Integer(n) => n.to_string()
+    _ => ""
+  }
+}
+
+///|
+/// Evaluate `${{ ... }}` under the assumption that the workflow is
+/// running under a tag-push (so `startsWith(github.ref, 'refs/tags/')`
+/// is true). Returns Some(b) for definitive results, None for anything
+/// the recogniser doesn't understand.
+fn eval_tag_push_expr(raw : String) -> Bool? {
+  let trimmed = raw.trim(chars=" \t\n\r").to_string()
+  if !trimmed.has_prefix("${{") || !trimmed.has_suffix("}}") {
+    return None
+  }
+  let inner = trimmed
+    .substring(start=3, end=trimmed.length() - 2)
+    .trim(chars=" \t\n\r")
+    .to_string()
+  eval_tag_push_inner(inner)
+}
+
+///|
+fn eval_tag_push_inner(s : String) -> Bool? {
+  let t = s.trim(chars=" \t\n\r").to_string()
+  if t == "true" {
+    return Some(true)
+  }
+  if t == "false" {
+    return Some(false)
+  }
+  if t.has_prefix("!") {
+    match eval_tag_push_inner(t.substring(start=1).to_string()) {
+      Some(b) => return Some(!b)
+      None => return None
+    }
+  }
+  // Match `startsWith(github.ref, 'refs/tags/')` permissively
+  // (any whitespace, single or double quotes).
+  let lo = t.to_lower()
+  if lo.has_prefix("startswith(") &&
+    lo.contains("github.ref") &&
+    (lo.contains("'refs/tags/'") || lo.contains("\"refs/tags/\"")) {
+    return Some(true)
+  }
+  None
+}
+
+///|
+fn classify_boolean_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(true)) => CacheSatisfied
+        Some(Boolean(false)) => CacheNotSatisfied
+        Some(String(s)) => {
+          let lo = s.to_lower()
+          if lo == "false" {
+            CacheNotSatisfied
+          } else if s.has_prefix("${{") {
+            CacheConditional(eval_tag_push_expr(s))
+          } else if lo == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else {
+            // boolish (any non-false, non-templated string)
+            CacheSatisfied
+          }
+        }
+        _ =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+      }
+  }
+}
+
+///|
+fn classify_boolean_optout(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  // OptOut Boolean: field=true → cache off, field=false → cache on.
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(true)) => CacheNotSatisfied
+        Some(Boolean(false)) => CacheSatisfied
+        Some(String(s)) => {
+          let lo = s.to_lower()
+          if lo == "false" {
+            CacheSatisfied
+          } else if s.has_prefix("${{") {
+            // For OptOut Boolean: cache-enabled iff expr-result is false.
+            let r = eval_tag_push_expr(s)
+            let would_enable = match r {
+              Some(b) => Some(!b)
+              None => None
+            }
+            CacheConditional(would_enable)
+          } else if lo == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else {
+            // boolish non-false string → cache off
+            CacheNotSatisfied
+          }
+        }
+        _ =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+      }
+  }
+}
+
+///|
+fn classify_freestring_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(String(s)) =>
+          if s == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            CacheSatisfied
+          }
+        Some(Null) =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(_)) => CacheSatisfied
+        Some(_) => CacheSatisfied
+      }
+  }
+}
+
+///|
+fn classify_exact_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  allowed : Array[String],
+) -> CacheStep {
+  match with_ {
+    None => CacheNotSatisfied
+    Some(w) =>
+      match w.get(field) {
+        None => CacheNotSatisfied
+        Some(String(s)) =>
+          if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            let lo = s.to_lower()
+            let mut matched = false
+            for a in allowed {
+              if a.to_lower() == lo {
+                matched = true
+              }
+            }
+            if matched {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          }
+        _ => CacheNotSatisfied
+      }
+  }
+}
+
+///|
+fn classify_exact_optout(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  allowed : Array[String],
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  // OptOut Exact: value in allowed list → cache off, else cache on.
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(String(s)) =>
+          if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            let lo = s.to_lower()
+            let mut matched = false
+            for a in allowed {
+              if a.to_lower() == lo {
+                matched = true
+              }
+            }
+            if matched {
+              CacheNotSatisfied
+            } else {
+              CacheSatisfied
+            }
+          }
+        Some(v) => {
+          let coerced = expr_to_string(v).to_lower()
+          let mut matched = false
+          for a in allowed {
+            if a.to_lower() == coerced {
+              matched = true
+            }
+          }
+          if matched {
+            CacheNotSatisfied
+          } else {
+            CacheSatisfied
+          }
+        }
+      }
+  }
+}
+
+///|
+fn cache_step_and(a : CacheStep, b : CacheStep) -> CacheStep {
+  match (a, b) {
+    (CacheNotSatisfied, _) | (_, CacheNotSatisfied) => CacheNotSatisfied
+    (CacheConditional(x), CacheConditional(y)) =>
+      match (x, y) {
+        (Some(false), _) | (_, Some(false)) => CacheConditional(Some(false))
+        (Some(true), Some(true)) => CacheConditional(Some(true))
+        _ => CacheConditional(None)
+      }
+    (CacheConditional(x), _) | (_, CacheConditional(x)) => CacheConditional(x)
+    _ => CacheSatisfied
+  }
+}
+
+///|
+fn cache_step_or(a : CacheStep, b : CacheStep) -> CacheStep {
+  match (a, b) {
+    (CacheSatisfied, _) | (_, CacheSatisfied) => CacheSatisfied
+    (CacheConditional(x), CacheConditional(y)) =>
+      match (x, y) {
+        (Some(true), _) | (_, Some(true)) => CacheConditional(Some(true))
+        (Some(false), Some(false)) => CacheConditional(Some(false))
+        _ => CacheConditional(None)
+      }
+    (CacheConditional(x), _) | (_, CacheConditional(x)) => CacheConditional(x)
+    _ => CacheNotSatisfied
+  }
+}
+
+///|
+fn classify_cache_aware_step(s : StepInfo) -> CacheStep {
+  let u = match s.uses {
+    Some(u) => u
+    None => return CacheNotSatisfied
+  }
+  // Strip ref before matching.
+  let bare = if s.at_idx >= 0 {
+    u.substring(start=0, end=s.at_idx).to_lower()
+  } else {
+    u.to_lower()
+  }
+  if bare == "actions/cache" || bare == "actions/cache/restore" {
+    return classify_boolean_optout(s.with_, "lookup-only", true)
+  }
+  if bare == "actions/setup-java" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "actions/setup-go" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "actions/setup-node" {
+    let c1 = classify_exact_optin(s.with_, "cache", ["npm", "yarn", "pnpm"])
+    let c2 = classify_boolean_optin(s.with_, "package-manager-cache", true)
+    return cache_step_or(c1, c2)
+  }
+  if bare == "actions/setup-python" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "actions/setup-dotnet" {
+    return classify_boolean_optin(s.with_, "cache", false)
+  }
+  if bare == "astral-sh/setup-uv" {
+    return classify_boolean_optin(s.with_, "enable-cache", true)
+  }
+  if bare == "swatinem/rust-cache" {
+    return classify_boolean_optout(s.with_, "lookup-only", true)
+  }
+  if bare == "ruby/setup-ruby" {
+    return classify_boolean_optin(s.with_, "bundler-cache", false)
+  }
+  if bare == "pyo3/maturin-action" {
+    return classify_boolean_optin(s.with_, "sccache", false)
+  }
+  if bare == "mlugg/setup-zig" {
+    return classify_boolean_optin(s.with_, "use-cache", true)
+  }
+  if bare == "oven-sh/setup-bun" {
+    return classify_boolean_optout(s.with_, "no-cache", true)
+  }
+  if bare == "determinatesystems/magic-nix-cache-action" {
+    return classify_boolean_optin(s.with_, "use-gha-cache", true)
+  }
+  if bare == "graalvm/setup-graalvm" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "gradle/actions/setup-gradle" {
+    return classify_boolean_optout(s.with_, "cache-disabled", true)
+  }
+  if bare == "docker/setup-buildx-action" {
+    let c1 = classify_boolean_optin(s.with_, "cache-binary", true)
+    let c2 = classify_freestring_optin(s.with_, "version", false)
+    return cache_step_and(c1, c2)
+  }
+  if bare == "actions-rust-lang/setup-rust-toolchain" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "mozilla-actions/sccache-action" {
+    return CacheSatisfied
+  }
+  if bare == "nix-community/cache-nix-action" {
+    return CacheSatisfied
+  }
+  if bare == "jdx/mise-action" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "ramsey/composer-install" {
+    return classify_exact_optout(
+      s.with_,
+      "ignore-cache",
+      ["yes", "true", "1"],
+      true,
+    )
+  }
+  if bare == "awalsh128/cache-apt-pkgs-action" {
+    return CacheSatisfied
+  }
+  CacheNotSatisfied
+}
+
+///|
+/// Decide whether a step's `CacheStep` value should produce a finding,
+/// given the workflow's collected triggers. Conditional findings can be
+/// suppressed (or upgraded) when the trigger set is purely tag/release.
+fn cache_step_should_emit(triggers : CacheTriggers, step : CacheStep) -> Bool {
+  match step {
+    CacheNotSatisfied => false
+    CacheSatisfied => true
+    CacheConditional(would_enable) =>
+      if cache_triggers_all_tag_or_release(triggers) {
+        match would_enable {
+          Some(false) => false // tag-push would disable caching → silenced
+          _ => true // Some(true) → upgraded to DirectOptIn; None → uncertain
+        }
+      } else {
+        true // no heuristic when a release-branch trigger is present
+      }
+  }
+}
+
+///|
+fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let triggers = collect_cache_triggers(ctx)
+  let workflow_publishing = !cache_triggers_empty(triggers)
+  for j in ctx.jobs {
+    let job_publishing = workflow_publishing || job_has_publisher_step(j)
+    if !job_publishing {
+      continue
+    }
+    for s in j.steps {
+      let usage = classify_cache_aware_step(s)
+      if cache_step_should_emit(triggers, usage) {
+        add_diag(
+          out,
+          "cache-poisoning",
+          Error,
+          "runtime artifacts potentially vulnerable to a cache poisoning attack",
+        )
+        return
+      }
     }
   }
 }
