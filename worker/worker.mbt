@@ -2,10 +2,24 @@
 /// JS entry point for the Cloudflare Worker.
 ///
 /// Takes the YAML content, file kind hint (`"workflow"` | `"action"` | `""`),
-/// a comma-separated `disable` glob list, a CSV of `uses:` refs the caller
-/// already knows are vulnerable (e.g. fetched from OSV.dev), and a CSV of
-/// `forbidden-uses` glob patterns (denylist). Returns a JSON string with
-/// the lint diagnostics and metadata.
+/// a comma-separated `disable` glob list, and several CSV inputs that feed
+/// the rules whose verdict depends on data the Worker resolves out-of-band
+/// (typically via the GitHub / OSV.dev APIs):
+///
+///   * `vuln_uses_str`      — refs known to be vulnerable
+///                            (`known-vulnerable-actions`, query: `?osv-hits=`)
+///   * `forbidden_uses_str` — denylist globs for `forbidden-uses`
+///                            (query: `?forbidden=`)
+///   * `archived_uses_str`  — refs whose repo is archived
+///                            (`archived-uses`, query: `?archived=`)
+///   * `impostor_uses_str`  — `owner/repo@sha` confirmed impostor commits
+///                            (`impostor-commit`, query: `?impostor=`)
+///   * `ref_mismatches_str` — `owner/repo@ref` whose tag/branch points to a
+///                            different SHA than expected
+///                            (`ref-version-mismatch`, query: `?ref-mismatch=`)
+///
+/// Each list is comma-separated. Empty inputs leave the corresponding rule
+/// dormant. Returns a JSON string with the lint diagnostics and metadata.
 
 ///|
 pub fn lint_string(

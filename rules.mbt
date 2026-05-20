@@ -2765,6 +2765,31 @@ fn text_has_reducible_expression(text : String) -> Bool {
 }
 
 ///|
+/// True when the bracketed expression is a non-literal lookup — i.e. it
+/// contains a `.` (property access) outside any quoted string. Literal
+/// indices like `1` or `'a.b'` (single-quoted strings with embedded dots)
+/// must stay static so we don't false-positive on the `obfuscation` audit.
+fn index_expr_is_computed(idx_text : String) -> Bool {
+  let chars = idx_text.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_double && ch == '\'' {
+      in_single = not(in_single)
+    } else if !in_single && ch == '"' {
+      in_double = not(in_double)
+    } else if !in_single && !in_double && ch == '.' {
+      return true
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
 /// Detects `name[expr]` where `expr` itself is a non-literal lookup
 /// (contains `.`). Matches upstream `computed_indices` pedantic finding.
 fn text_has_computed_index(text : String) -> Bool {
@@ -2794,9 +2819,7 @@ fn text_has_computed_index(text : String) -> Bool {
           }
           if k < text.length() {
             let idx_text = text[j + 1:k].to_string()
-            // A computed index has a `.` inside (property access) or
-            // another `[`. Pure literals like `1` / `'a'` are static.
-            if idx_text.contains(".") {
+            if index_expr_is_computed(idx_text) {
               return true
             }
           }
@@ -4646,14 +4669,40 @@ fn workflow_has_dangerous_trigger(ctx : WalkCtx) -> Bool {
 /// Heuristic "non-literal" check for the LHS of a `>>` redirect to
 /// `GITHUB_ENV`/`GITHUB_PATH`. Matches any shell variable, `$(...)`,
 /// command-substitution backticks, cmd-style `%var%`, or `${{ ... }}`
-/// expression. Static-only writes (e.g. `echo foo=bar >> $GITHUB_ENV`)
+/// expression. Single-quoted regions stay literal in bash, so `$` and
+/// backticks inside them are ignored — `echo '$HOME' >> $GITHUB_ENV`
+/// is a static write. Static-only writes (e.g. `echo foo=bar >> $GITHUB_ENV`)
 /// stay silent, matching upstream `bash_echo_arg_is_safe`.
 fn lhs_has_dynamic_token(lhs : String) -> Bool {
-  // bash: `$VAR`, `${VAR}`, `$(...)`
-  if lhs.contains("$") {
-    return true
+  let chars = lhs.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_double && ch == '\'' {
+      in_single = not(in_single)
+      i = i + 1
+      continue
+    }
+    if !in_single && ch == '"' {
+      in_double = not(in_double)
+      i = i + 1
+      continue
+    }
+    if !in_single {
+      // Outside single-quotes: bash `$VAR` / `${VAR}` / `$(...)`,
+      // pwsh `$env:...`, the template expression `${{ ... }}`, or a
+      // command-substitution backtick — every one is dynamic.
+      if ch == '$' || ch == '`' {
+        return true
+      }
+    }
+    i = i + 1
   }
-  // pwsh inside `"$env:..."` already covered by `$`. cmd: `%VAR%`.
+  // cmd `%VAR%` is unaffected by shell quoting (cmd doesn't use single quotes
+  // the same way); fall back to counting `%` occurrences.
   let mut pct_count = 0
   for part in lhs.split("%") {
     let _ = part
@@ -4662,12 +4711,7 @@ fn lhs_has_dynamic_token(lhs : String) -> Bool {
   if pct_count >= 3 {
     return true
   }
-  // GitHub-Actions template expression embedded in the literal text.
-  if lhs.contains("${{") {
-    return true
-  }
-  // Command-substitution via backticks.
-  lhs.contains("`")
+  false
 }
 
 ///|
@@ -6514,6 +6558,12 @@ fn scan_anchor_tokens(
       return
     }
     if !in_double && ch == '\'' {
+      // YAML escapes a single-quote inside a single-quoted scalar as `''`;
+      // skip the pair and stay in the quoted region.
+      if in_single && i + 1 < n && chars[i + 1] == '\'' {
+        i = i + 2
+        continue
+      }
       in_single = not(in_single)
       i = i + 1
       continue

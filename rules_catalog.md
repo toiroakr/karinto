@@ -7,7 +7,7 @@ lint execution lives in `rules.mbt` (`all_rules()`); editing the catalogue
 does not by itself change engine behaviour. Keep both files in sync; see
 [`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the update rule.
 
-83 catalogued rules: **61 implemented**, **17 planned**, **5 not planned**,
+83 catalogued rules: **70 implemented**, **8 planned**, **5 not planned**,
 plus **4 upstream checks consolidated** into existing karinto rules (see
 below).
 

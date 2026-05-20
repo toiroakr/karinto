@@ -1332,8 +1332,7 @@
     {
       "file": "fixtures/upstream/zizmor/tests/integration/test-data/invalid/invalid-workflow.yml",
       "expect": [
-        "extra:concurrency-limits",
-        "ignore"
+        "extra:concurrency-limits"
       ],
       "reason": "baseline: tracked at PR #13. Source=zizmor. Remove this entry once karinto catches up."
     },
@@ -1349,8 +1348,7 @@
       "expect": [
         "missing:unpinned-uses",
         "missing:concurrency-limits",
-        "missing:anonymous-definition",
-        "ignore"
+        "missing:anonymous-definition"
       ],
       "reason": "baseline: tracked at PR #13. Source=zizmor. karinto's YAML parser throws on this fixture (issue #1065 repro)."
     },
