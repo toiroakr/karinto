@@ -20,27 +20,35 @@ import { tmpdir } from "node:os";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
 
+// Each `vendor` entry copies <repo>/<from> → fixtures/upstream/<name>/<to>.
+// Keep destination paths flat ("tests", "testdata", "pkg") regardless of where
+// fixtures live in the upstream repo.
 const TOOLS = [
   {
     name: "actionlint",
     miseKey: "aqua:rhysd/actionlint",
     repo: "rhysd/actionlint",
-    // Vendor the testdata tree from the matching release tag.
-    vendor: ["testdata"],
+    vendor: [{ from: "testdata", to: "testdata" }],
   },
   {
     name: "zizmor",
     miseKey: "ubi:zizmorcore/zizmor",
     repo: "zizmorcore/zizmor",
-    vendor: ["tests"],
+    // zizmor's snapshot/integration fixtures live under the workspace crate.
+    vendor: [{ from: "crates/zizmor/tests", to: "tests" }],
   },
   {
     name: "ghalint",
     miseKey: "aqua:suzuki-shunsuke/ghalint",
     repo: "suzuki-shunsuke/ghalint",
-    // ghalint scatters per-policy testdata under pkg/policy/; vendor the
-    // whole pkg/ tree and let the comparison engine pick up .yml files.
-    vendor: ["pkg"],
+    // ghalint stores its policy test cases as inline Go string literals in
+    // *_test.go (no yaml under pkg/), so the only redistributable fixtures
+    // are the two dogfood files at the repo root that exercise the linter
+    // against intentionally-violating workflow/action definitions.
+    vendor: [
+      { from: "test-workflow.yaml", to: "test-workflow.yaml" },
+      { from: "test-action.yaml", to: "test-action.yaml" },
+    ],
   },
 ];
 
@@ -59,6 +67,27 @@ for (const tool of TOOLS) {
   const cur = currentVersions.get(tool.miseKey);
   if (!cur) {
     console.error(`warn: ${tool.miseKey} not pinned in mise.toml — skipping`);
+    continue;
+  }
+  // Bootstrap: if fixtures for this tool are absent or empty, vendor at the
+  // currently pinned version regardless of upstream movement. This lets the
+  // first run on a fresh checkout populate fixtures without waiting for an
+  // upstream release.
+  const dst = join(fixturesRoot, tool.name);
+  const needsBootstrap = !existsSync(dst) || readdirSync(dst).length === 0;
+  if (needsBootstrap) {
+    const tag = `v${cur}`;
+    console.error(`bootstrap: ${tool.name} ${cur}`);
+    vendor(tool, tag);
+    updates.push({
+      name: tool.name,
+      repo: tool.repo,
+      from: cur,
+      to: cur,
+      tag,
+      url: `https://github.com/${tool.repo}/releases/tag/${tag}`,
+      bootstrap: true,
+    });
     continue;
   }
   const latest = fetchLatestRelease(tool.repo);
@@ -165,18 +194,28 @@ function vendor(tool, tag) {
   // Replace dst entirely with the vendored subdirs.
   rmSync(dst, { recursive: true, force: true });
   mkdirSync(dst, { recursive: true });
-  for (const sub of tool.vendor) {
-    const from = join(tmp, sub);
-    if (!existsSync(from)) {
-      console.error(`warn: ${tool.repo}@${tag} has no ${sub}/; skipping that subdir`);
+  let copied = 0;
+  const summary = [];
+  for (const entry of tool.vendor) {
+    const fromAbs = join(tmp, entry.from);
+    if (!existsSync(fromAbs)) {
+      console.error(`warn: ${tool.repo}@${tag} has no ${entry.from}/; skipping that subdir`);
       continue;
     }
-    cpSync(from, join(dst, sub), { recursive: true });
+    cpSync(fromAbs, join(dst, entry.to), { recursive: true });
+    copied++;
+    summary.push(entry.from === entry.to ? entry.from : `${entry.from} -> ${entry.to}`);
+  }
+  if (copied === 0) {
+    // No content vendored; leave dst empty so the bootstrap check retries.
+    rmSync(dst, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
+    die(`vendor: ${tool.repo}@${tag} produced no fixtures`);
   }
   // Drop a small marker so the vendored copy carries the tag in the diff.
   writeFileSync(
     join(dst, "UPSTREAM.txt"),
-    `${tool.repo}@${tag}\nvendored: ${tool.vendor.join(", ")}\n`,
+    `${tool.repo}@${tag}\nvendored: ${summary.join(", ")}\n`,
   );
   rmSync(tmp, { recursive: true, force: true });
 }

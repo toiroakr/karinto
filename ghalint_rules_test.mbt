@@ -26,6 +26,11 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
         "severity": "error",
         "message": "workflow: `permissions: read-all` is forbidden",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -56,6 +61,11 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
         "severity": "error",
         "message": "workflow env `TOKEN` references `secrets.*`; move it to a job/step env",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -78,6 +88,11 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "job-env-no-secrets",
         "severity": "error",
@@ -113,6 +128,11 @@ test "github-app-limit-repositories: GitHub App token scoped to whole org" {
     "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "github-app-limit-repositories",
         "severity": "warning",
         "message": "GitHub App token request is missing `repositories:` scope",
@@ -147,6 +167,11 @@ test "github-app-limit-permissions: GitHub App token requests no permissions" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "github-app-limit-permissions",
         "severity": "warning",
@@ -194,6 +219,11 @@ test "job-timeout-minutes-required: job is missing `timeout-minutes`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "job-timeout-minutes-required",
         "severity": "warning",
         "message": "job `build` does not declare `timeout-minutes:`",
@@ -220,6 +250,11 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",

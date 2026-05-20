@@ -26,10 +26,12 @@ async function loadLint(bundlePath) {
 export async function lintFixture({ bundlePath, file }) {
   const lint = await loadLint(bundlePath);
   const content = readFileSync(file, "utf8");
-  // lint_string returns a JSON string for both workflow + action inputs.
+  // lint_string signature: (content, kind_str, disable_str, vuln_uses_str).
+  // Pass "" for kind to let karinto auto-detect from YAML structure, mirroring
+  // the Worker's behaviour when no `kind` query param is supplied.
   let raw;
   try {
-    raw = lint(content);
+    raw = lint(content, "", "", "");
   } catch (err) {
     return { ok: false, error: `lint_string threw: ${err.message}`, ruleIds: [] };
   }

@@ -44,6 +44,11 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "severity": "error",
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -72,6 +77,11 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "severity": "error",
         "message": "duplicate step ID `a` (conflicts with `A` case-insensitively)",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -96,6 +106,11 @@ test "permissions-write-all-forbidden: write-all permission rejected at workflow
         "severity": "error",
         "message": "workflow: `permissions: write-all` is forbidden",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -114,6 +129,11 @@ test "job-permissions-required: missing job permissions" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 7 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "job-permissions-required",
         "severity": "warning",
@@ -138,7 +158,13 @@ test "job-permissions-required: satisfied when workflow-level permissions presen
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+    ],
   })
 }
 
@@ -161,7 +187,13 @@ test "disable: skip a rule with a glob pattern" {
   json_inspect(res.to_json(), content={
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+    ],
   })
 }
 

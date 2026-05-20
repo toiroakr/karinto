@@ -22,6 +22,11 @@ test "unexpected-keys: unknown key under job" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unexpected-keys",
         "severity": "error",
         "message": "job `build`: unknown key `typo`",
@@ -49,6 +54,11 @@ test "missing-required-keys: workflow missing `on`" {
         "rule": "missing-required-keys",
         "severity": "error",
         "message": "workflow is missing required key `on`",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -89,6 +99,11 @@ test "invalid-mapping-values: runs-on must be string or array" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "invalid-mapping-values",
         "severity": "error",
         "message": "job `build`: `runs-on` must be a string or array",
@@ -118,6 +133,11 @@ test "expression-syntax: malformed `${{` expression" {
         "rule": "expression-syntax",
         "severity": "error",
         "message": "expression syntax error: unterminated `${{`",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -171,6 +191,11 @@ test "unknown-context-or-function: unknown context name" {
         "severity": "error",
         "message": "unknown context `githab` (did you mean `github`?)",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -193,6 +218,11 @@ test "context-availability: `needs` referenced at workflow level" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "context-availability",
         "severity": "error",
@@ -311,6 +341,11 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "meaningless-comparison",
         "severity": "warning",
         "message": "comparison `1 == 1` is always true",
@@ -347,6 +382,11 @@ test "job-needs-graph: dependency on undefined job" {
         "rule": "job-needs-graph",
         "severity": "error",
         "message": "job `build` needs undefined job `missing`",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -402,6 +442,11 @@ test "webhook-events: unknown event filter" {
         "rule": "webhook-events",
         "severity": "error",
         "message": "unknown webhook event `pushh` (did you mean `push`?)",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -461,6 +506,11 @@ test "glob-patterns: invalid glob pattern in paths filter" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "glob-patterns",
         "severity": "error",
         "message": "invalid glob `src/[unclosed`: unterminated character class",
@@ -518,6 +568,11 @@ test "unknown-runner-label: unknown runner label" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "unknown-runner-label",
         "severity": "warning",
         "message": "unknown runner label `ubunto-latest` (did you mean `ubuntu-latest`?)",
@@ -542,6 +597,11 @@ test "uses-syntax: missing @ref in uses" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "uses-syntax",
         "severity": "error",
@@ -644,6 +704,11 @@ test "shell-name-per-os: pwsh on linux runner" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "shell-name-per-os",
         "severity": "error",
         "message": "shell `cmd` is only available on Windows runners",
@@ -679,6 +744,11 @@ test "invalid-env-var-name: env name starts with digit" {
         "severity": "warning",
         "message": "env name `1FOO` does not match `[A-Za-z_][A-Za-z0-9_]*`",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -705,6 +775,11 @@ test "permissions-syntax: unknown permission scope" {
         "rule": "permissions-syntax",
         "severity": "error",
         "message": "workflow: unknown permission scope `conents` — did you mean `contents`?",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
       },
     ],
   })
@@ -759,6 +834,11 @@ test "job-step-id-naming: job id has invalid characters" {
         "severity": "warning",
         "message": "job ID `build job` must match `[A-Za-z_][A-Za-z0-9_-]*`",
       },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
     ],
   })
 }
@@ -779,6 +859,11 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "deprecated-workflow-commands",
         "severity": "warning",
@@ -805,6 +890,11 @@ test "constant-if-condition: `if: true` always-on" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
       {
         "rule": "constant-if-condition",
         "severity": "warning",
