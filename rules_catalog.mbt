@@ -899,7 +899,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       SupplyChain,
       Warning,
       Medium,
-      Planned,
+      Implemented,
       true,
       false,
     ),

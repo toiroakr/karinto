@@ -2425,6 +2425,22 @@ fn run_has_pipe_to_shell(r : String) -> Bool {
 }
 
 ///|
+/// Returns the canonical owner/name (lower-cased, no `@ref`, no path
+/// segments) of a tool-installer action that downloads a versioned tool
+/// at runtime. The list below matches zizmor's curated catalogue.
+fn tool_installer_action(uses : String) -> String? {
+  let lo = uses.to_lower()
+  let bare = bare_repo_of(lo)
+  let known = ["aquasecurity/setup-trivy", "1password/load-secrets-action"]
+  for k in known {
+    if bare == k {
+      return Some(k)
+    }
+  }
+  None
+}
+
+///|
 fn check_unpinned_tools(
   _ctx : WalkCtx,
   step : StepInfo,
@@ -2439,6 +2455,49 @@ fn check_unpinned_tools(
           Warning,
           "run step fetches and executes an external script without pinning",
         )
+        return
+      }
+    None => ()
+  }
+  // Known tool-installer actions: flag implicit-latest (`with:` missing or
+  // omits `version:`), explicit `version: latest`, and expression-based
+  // versions that resolve at workflow-trigger time.
+  match step.uses {
+    Some(u) =>
+      match tool_installer_action(u) {
+        Some(name) => {
+          let kind = match step.raw.get("with") {
+            Some(Map(w)) =>
+              match w.get("version") {
+                Some(String(v)) => {
+                  let lo = v.to_lower()
+                  if lo == "latest" {
+                    "explicit-latest"
+                  } else if v.contains("${{") {
+                    "dynamic"
+                  } else {
+                    "pinned"
+                  }
+                }
+                Some(_) => "pinned"
+                None => "implicit-latest"
+              }
+            _ => "implicit-latest"
+          }
+          let msg = match kind {
+            "implicit-latest" =>
+              "`\{name}` defaults to the latest tool version; pin via `with.version`"
+            "explicit-latest" =>
+              "`\{name}` is invoked with `version: latest`; pin to a specific version"
+            "dynamic" =>
+              "`\{name}` resolves `version` from an expression; pin to a literal version"
+            _ => ""
+          }
+          if msg.length() > 0 {
+            add_diag(out, "unpinned-tools", Warning, msg)
+          }
+        }
+        None => ()
       }
     None => ()
   }
