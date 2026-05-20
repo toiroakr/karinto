@@ -4,8 +4,10 @@
 /// Takes the YAML content, file kind hint (`"workflow"` | `"action"` | `""`),
 /// a comma-separated `disable` glob list, plus several CSV inputs that feed
 /// rules whose verdict depends on data the caller must resolve out-of-band
-/// (typically via the GitHub / OSV.dev APIs). All CSV inputs default to ""
-/// (rule stays dormant when the caller cannot supply data):
+/// (typically via the GitHub / OSV.dev APIs). All CSV inputs default to "";
+/// when empty, the *caller-supplied augmentation* goes dormant. Rules with
+/// an offline baseline (e.g. `archived-uses` has a hardcoded
+/// `actions/setup-ruby` entry) still fire on their built-in entries.
 ///
 ///   * `vuln_uses_str`      — refs the caller has confirmed vulnerable
 ///                            (`known-vulnerable-actions`)
