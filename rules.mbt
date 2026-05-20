@@ -513,10 +513,10 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "obfuscation",
-      title: "Obfuscated uses ref (percent-encoded)",
+      title: "Obfuscated usage of GitHub Actions features",
       applies: workflow_or_action,
       on_doc: no_doc(),
-      on_job: no_job(),
+      on_job: Some(check_obfuscation_job),
       on_step: Some(check_obfuscation),
     },
     Rule::{
@@ -2102,6 +2102,210 @@ fn ref_has_percent_encoding(s : String) -> Bool {
 }
 
 ///|
+/// Returns the "obfuscation kind" (empty / `.` / `..`) for the first
+/// suspicious path segment in `head` (the part before `@`), or None.
+fn uses_path_obfuscation(head : String) -> String? {
+  // Skip the leading `owner/repo` segments — those are the first two
+  // slash-delimited parts and shouldn't be checked. Upstream checks
+  // *every* component including these for `.`/`..`/empty, but in
+  // practice owner/repo can never literally be `.` / `..` / empty, so
+  // walking from the start is safe.
+  let mut idx = 0
+  let parts = head.split("/")
+  for raw in parts {
+    let part = raw.to_string()
+    if idx >= 2 {
+      // 3rd+ component is a subpath piece.
+      if part.length() == 0 {
+        return Some("empty component")
+      }
+      if part == "." {
+        return Some("'.' component")
+      }
+      if part == ".." {
+        return Some("'..' component")
+      }
+    }
+    idx = idx + 1
+  }
+  None
+}
+
+///|
+/// True if `inner` (the contents of a `${{ ... }}` interpolation) can be
+/// reduced to a constant value statically. Mirrors zizmor's
+/// `Expr::constant_reducible`: literals are reducible; any property
+/// access (`foo.bar` / `foo[...]`) is presumed dynamic; functions are
+/// reducible only when they are one of the deterministic builtins
+/// (`contains`, `startswith`, `endswith`, `format`, `tojson`, `join`).
+/// Single-quoted string literals may contain `.` and identifier-looking
+/// text that should not be confused for context access.
+fn expression_is_constant_only(inner : String) -> Bool {
+  let lower = inner.to_lower()
+  let chars : Array[Char] = []
+  for ch in lower {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    // Skip single-quoted string literals (GitHub Actions syntax uses
+    // `''` as the escape for a single quote inside a string).
+    if c == '\'' {
+      i = i + 1
+      while i < n {
+        if chars[i] == '\'' {
+          if i + 1 < n && chars[i + 1] == '\'' {
+            i = i + 2
+            continue
+          }
+          i = i + 1
+          break
+        }
+        i = i + 1
+      }
+      continue
+    }
+    if is_ident_start(c) {
+      let start = i
+      while i < n && is_ident_cont(chars[i]) {
+        i = i + 1
+      }
+      // `-` is a legal identifier continuation in GitHub Actions
+      // expressions (see e.g. `runs-on`). zizmor's lexer also accepts it.
+      while i < n && chars[i] == '-' && i + 1 < n && is_ident_cont(chars[i + 1]) {
+        i = i + 1
+        while i < n && is_ident_cont(chars[i]) {
+          i = i + 1
+        }
+      }
+      let buf = StringBuilder::new()
+      for p in start..<i {
+        buf.write_char(chars[p])
+      }
+      let name = buf.to_string()
+      // Skip trailing whitespace before looking at the next token.
+      let mut k = i
+      while k < n && (chars[k] == ' ' || chars[k] == '\t') {
+        k = k + 1
+      }
+      let next = if k < n { chars[k] } else { ' ' }
+      // Property access — context or computed.
+      if next == '.' || next == '[' {
+        return false
+      }
+      // Function calls.
+      if next == '(' {
+        let safe = [
+          "contains", "startswith", "endswith", "format", "tojson", "fromjson", "join",
+        ]
+        let mut is_safe = false
+        for f in safe {
+          if name == f {
+            is_safe = true
+            break
+          }
+        }
+        if !is_safe {
+          return false
+        }
+        // Bare identifier that isn't a keyword/literal — treat as a
+        // context reference (e.g. `github` standalone or an unknown
+        // ident). Only `true`/`false`/`null` are literal keywords.
+      } else if name != "true" && name != "false" && name != "null" {
+        return false
+      }
+      continue
+    }
+    i = i + 1
+  }
+  true
+}
+
+///|
+/// Scans `text` for `${{ ... }}` interpolations. Returns true on the first
+/// match whose inner content is constant-only (and therefore reducible).
+fn text_has_reducible_expression(text : String) -> Bool {
+  let mut i = 0
+  let bytes = text
+  while i + 2 < bytes.length() {
+    let c0 = bytes[i]
+    if c0 == '$' && bytes[i + 1] == '{' && bytes[i + 2] == '{' {
+      // Find matching `}}`.
+      let mut j = i + 3
+      let mut found = false
+      while j + 1 < bytes.length() {
+        if bytes[j] == '}' && bytes[j + 1] == '}' {
+          found = true
+          break
+        }
+        j = j + 1
+      }
+      if found {
+        let inner = bytes[i + 3:j].to_string()
+        let trimmed = inner.trim(chars=" \t\r\n").to_string()
+        if trimmed.length() > 0 && expression_is_constant_only(trimmed) {
+          return true
+        }
+        i = j + 2
+        continue
+      }
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
+/// Detects `name[expr]` where `expr` itself is a non-literal lookup
+/// (contains `.`). Matches upstream `computed_indices` pedantic finding.
+fn text_has_computed_index(text : String) -> Bool {
+  // Walk balanced `[...]` within `${{ ... }}` blocks.
+  let mut i = 0
+  while i + 2 < text.length() {
+    if text[i] == '$' && text[i + 1] == '{' && text[i + 2] == '{' {
+      let mut j = i + 3
+      while j + 1 < text.length() {
+        if text[j] == '}' && text[j + 1] == '}' {
+          break
+        }
+        if text[j] == '[' {
+          // Capture index expression up to matching `]`.
+          let mut k = j + 1
+          let mut nested = 1
+          while k < text.length() && nested > 0 {
+            if text[k] == '[' {
+              nested = nested + 1
+            } else if text[k] == ']' {
+              nested = nested - 1
+              if nested == 0 {
+                break
+              }
+            }
+            k = k + 1
+          }
+          if k < text.length() {
+            let idx_text = text[j + 1:k].to_string()
+            // A computed index has a `.` inside (property access) or
+            // another `[`. Pure literals like `1` / `'a'` are static.
+            if idx_text.contains(".") {
+              return true
+            }
+          }
+          j = k
+        }
+        j = j + 1
+      }
+      i = j + 2
+      continue
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
 fn check_obfuscation(
   _ctx : WalkCtx,
   step : StepInfo,
@@ -2110,16 +2314,98 @@ fn check_obfuscation(
   match step.uses {
     Some(u) =>
       if step.at_idx >= 0 {
+        let head = u[:step.at_idx].to_string()
         let ref_str = u[step.at_idx + 1:].to_owned()
         if ref_has_percent_encoding(ref_str) {
           add_diag(
             out,
             "obfuscation",
-            Warning,
+            Info,
             "uses ref contains percent-encoded characters; possible obfuscation",
           )
         }
+        match uses_path_obfuscation(head) {
+          Some(kind) =>
+            add_diag(out, "obfuscation", Info, "uses ref contains \{kind}")
+          None => ()
+        }
       }
+    None => ()
+  }
+  // `with:` block that is an expression — prevents static analysis.
+  match step.raw.get("with") {
+    Some(String(s)) => {
+      let t = s.trim(chars=" \t\r\n").to_string()
+      if t.has_prefix("${{") && t.has_suffix("}}") {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "use of an expression for `with:` prevents analysis",
+        )
+      }
+    }
+    _ => ()
+  }
+  // Expressions in `if:` / `run:` text.
+  match step.if_cond {
+    Some(c) =>
+      if text_has_reducible_expression(c) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "`if:` expression can be replaced by its static evaluation",
+        )
+      }
+    None => ()
+  }
+  match step.run {
+    Some(r) => {
+      if text_has_reducible_expression(r) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "expression can be replaced by its static evaluation",
+        )
+      }
+      if text_has_computed_index(r) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    }
+    None => ()
+  }
+  // Computed indices can also appear in `if:`.
+  match step.if_cond {
+    Some(c) =>
+      if text_has_computed_index(c) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_obfuscation_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.if_cond {
+    Some(c) => {
+      if text_has_reducible_expression(c) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "`if:` expression can be replaced by its static evaluation",
+        )
+      }
+      if text_has_computed_index(c) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    }
     None => ()
   }
 }

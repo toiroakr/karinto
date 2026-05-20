@@ -425,6 +425,11 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
         "severity": "info",
         "message": "job `build` has no `name:`",
       },
+      {
+        "rule": "obfuscation",
+        "severity": "info",
+        "message": "`if:` expression can be replaced by its static evaluation",
+      },
     ],
   })
 }

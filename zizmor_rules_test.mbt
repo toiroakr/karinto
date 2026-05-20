@@ -846,7 +846,7 @@ test "obfuscation: hex-encoded uses ref" {
       },
       {
         "rule": "obfuscation",
-        "severity": "warning",
+        "severity": "info",
         "message": "uses ref contains percent-encoded characters; possible obfuscation",
       },
     ],
