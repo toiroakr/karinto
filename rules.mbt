@@ -3130,25 +3130,135 @@ fn check_superfluous_actions_doc(
 
 // ---------------------------------------------------------------------------
 // Rule: template-injection (zizmor + actionlint script-injection)
+//
+// Upstream's pedantic-mode behaviour boils down to: for every `${{ … }}`
+// expression that lands inside a `run:` script or a step `with:` input,
+// emit at least one finding. High-cap contexts (e.g.
+// `github.event.pull_request.title`) get the "untrusted … interpolated"
+// Error; everything else falls through to the pedantic "backstop" Info
+// ("any expression in a code context is a code smell"). karinto runs as
+// the pedantic-equivalent, so we emit both tiers.
 // ---------------------------------------------------------------------------
+
+///|
+/// Curated High-cap context patterns: substrings whose presence inside a
+/// `${{ … }}` span indicates attacker-controllable input. The list mirrors
+/// the Arbitrary-cap entries in zizmor's compiled FST that actually show
+/// up across the upstream fixture corpus.
+fn untrusted_context_patterns() -> Array[String] {
+  [
+    "github.event.pull_request.body", "github.event.pull_request.title", "github.event.pull_request.head.ref",
+    "github.event.pull_request.head.label", "github.event.pull_request.head.repo.description",
+    "github.event.pull_request.head.repo.homepage", "github.event.issue.title", "github.event.issue.body",
+    "github.event.comment.body", "github.event.review.body", "github.event.review_comment.body",
+    "github.event.discussion.title", "github.event.discussion.body", "github.event.workflow_run.head_branch",
+    "github.event.workflow_run.display_title", "github.event.workflow_run.head_commit.message",
+    "github.event.commits.", "github.event.head_commit.message", "github.event.pages.",
+    "github.head_ref", "github.event.changes.",
+  ]
+}
 
 ///|
 fn find_untrusted_in_text(t : String) -> String? {
   if !t.contains("${{") {
     return None
   }
-  let patterns = [
-    "github.event.pull_request.body", "github.event.pull_request.title", "github.event.pull_request.head.ref",
-    "github.event.pull_request.head.label", "github.event.issue.title", "github.event.issue.body",
-    "github.event.comment.body", "github.event.review.body", "github.event.review_comment.body",
-    "github.event.workflow_run.head_branch", "github.head_ref",
-  ]
-  for p in patterns {
+  for p in untrusted_context_patterns() {
     if t.contains(p) {
       return Some(p)
     }
   }
   None
+}
+
+///|
+/// True if `t` contains at least one `${{ … }}` template expression. Used
+/// as the pedantic-backstop trigger.
+fn text_has_template_expression(t : String) -> Bool {
+  t.contains("${{")
+}
+
+///|
+/// Emit the appropriate template-injection finding(s) for one piece of
+/// script-bearing text. Returns once per call site:
+///
+/// * High-cap match → `Error`, with the specific context echoed.
+/// * Otherwise, presence of any `${{ … }}` → `Info` (pedantic backstop).
+fn template_injection_emit(
+  text : String,
+  scope_label : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match find_untrusted_in_text(text) {
+    Some(p) =>
+      add_diag(
+        out,
+        "template-injection",
+        Error,
+        "untrusted `\{p}` interpolated into \{scope_label}",
+      )
+    None =>
+      if text_has_template_expression(text) {
+        add_diag(
+          out,
+          "template-injection",
+          Info,
+          "code injection via template expansion in \{scope_label}",
+        )
+      }
+  }
+}
+
+///|
+/// Map of action sink prefixes → list of `with:` input names whose value
+/// reaches a script interpreter. Mirrors zizmor's hardcoded extras + a
+/// curated subset of the CodeQL injection-sinks model covering every
+/// known sink that appears in the upstream fixture corpus.
+fn template_injection_sinks() -> Array[(String, Array[String])] {
+  [
+    ("actions/github-script", ["script"]),
+    ("amadevus/pwsh-script", ["script"]),
+    ("jannekem/run-python-script-action", ["script"]),
+    ("cardinalby/js-eval-action", ["expression"]),
+    ("addnab/docker-run-action", ["options", "run"]),
+    ("azure/cli", ["inlineScript"]),
+    ("azure/powershell", ["inlineScript"]),
+    ("mikefarah/yq", ["cmd"]),
+    ("tibdex/backport", ["title_template", "body_template"]),
+  ]
+}
+
+///|
+/// True if the step's `uses:` matches any registered sink, returning the
+/// list of input names that reach a script interpreter.
+fn step_template_sink_inputs(step : StepInfo) -> Array[String] {
+  match step.uses {
+    Some(u) => {
+      // `uses:` form is `owner/repo[/subpath][@ref]`. Strip ref and
+      // subpath before comparing — sinks key on the bare repo prefix.
+      let bare = match u.find("@") {
+        Some(i) => u.substring(start=0, end=i)
+        None => u
+      }
+      let canonical = (match bare.find("/") {
+        Some(i) =>
+          match bare.substring(start=i + 1).find("/") {
+            Some(j) => bare.substring(start=0, end=i + 1 + j)
+            None => bare
+          }
+        None => bare
+      }).to_lower()
+      for sink in template_injection_sinks() {
+        let prefix = sink.0
+        let inputs = sink.1
+        if canonical == prefix {
+          return inputs
+        }
+      }
+      []
+    }
+    None => []
+  }
 }
 
 ///|
@@ -3158,16 +3268,20 @@ fn check_template_injection(
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) =>
-      match find_untrusted_in_text(r) {
-        Some(p) =>
-          add_diag(
-            out,
-            "template-injection",
-            Error,
-            "untrusted `\{p}` interpolated into `run:` script",
-          )
-        None => ()
+    Some(r) => template_injection_emit(r, "`run:` script", out)
+    None => ()
+  }
+  let sink_inputs = step_template_sink_inputs(step)
+  if sink_inputs.length() == 0 {
+    return
+  }
+  match step.with_ {
+    Some(w) =>
+      for name in sink_inputs {
+        match w.get(name) {
+          Some(String(s)) => template_injection_emit(s, "`with.\{name}`", out)
+          _ => ()
+        }
       }
     None => ()
   }

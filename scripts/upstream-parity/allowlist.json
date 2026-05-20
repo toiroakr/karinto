@@ -1398,6 +1398,41 @@
         "missing:overprovisioned-secrets"
       ],
       "reason": "Fixture mixes a true positive with a `# zizmor: ignore[overprovisioned-secrets]` trailing comment. karinto's inline-ignore parser treats every such comment as a global file-wide suppression (it has no node-position tracking), so the rule is disabled for the whole file even though only one node should be ignored. Implementation logic is correct; the limitation is engine-wide and tracked separately."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/obfuscation.yml",
+      "expect": [
+        "missing:template-injection"
+      ],
+      "reason": "Fixture has a `# zizmor: ignore[template-injection]` trailing comment on a single `run:` step but contains other unscoped `${{ ... }}` expressions that zizmor still flags. karinto's inline-ignore parser is file-wide (no node-position tracking), so the directive suppresses the rule for the entire file. Same engine-wide limitation as overprovisioned-secrets.yml."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/config-scenarios/config-in-dotgithub/.github/workflows/hackme.yml",
+      "expect": [
+        "extra:template-injection"
+      ],
+      "reason": "Fixture relies on a local `.github/zizmor.yml` config that ignores template-injection for this file. karinto has no zizmor.yml config-discovery layer, so it fires the rule. Implementation logic is correct; the limitation is engine-wide."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/config-scenarios/config-in-root/.github/workflows/hackme.yml",
+      "expect": [
+        "extra:template-injection"
+      ],
+      "reason": "Fixture relies on a sibling-root `zizmor.yml` config that ignores template-injection for this file. karinto has no zizmor.yml config-discovery layer, so it fires the rule. Implementation logic is correct; the limitation is engine-wide."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/config-scenarios/disablement/.github/workflows/hackme.yml",
+      "expect": [
+        "extra:template-injection"
+      ],
+      "reason": "Fixture relies on a local `zizmor.yml` config that fully disables template-injection. karinto has no zizmor.yml config-discovery layer, so it fires the rule. Implementation logic is correct; the limitation is engine-wide."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/config-scenarios/dotyaml-config-in-dotgithub/.github/workflows/hackme.yml",
+      "expect": [
+        "extra:template-injection"
+      ],
+      "reason": "Fixture relies on a `.github/zizmor.yaml` (the `.yaml` variant) config that ignores template-injection for this file. karinto has no zizmor.yml config-discovery layer, so it fires the rule. Implementation logic is correct; the limitation is engine-wide."
     }
   ]
 }

@@ -1121,6 +1121,11 @@ test "secrets-outside-env: secrets accessed without an environment" {
         "message": "job `deploy` has no `name:`",
       },
       {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
+      },
+      {
         "rule": "secrets-outside-env",
         "severity": "warning",
         "message": "job `deploy` uses `secrets.*` without protecting it with `environment:`",
@@ -1468,6 +1473,11 @@ test "unredacted-secrets: secret length manipulated before logging" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
       },
       {
         "rule": "unredacted-secrets",
