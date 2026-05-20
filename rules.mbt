@@ -863,6 +863,14 @@ pub fn all_rules() -> Array[Rule] {
       on_job: Some(check_ref_version_mismatch_job),
       on_step: Some(check_ref_version_mismatch_step),
     },
+    Rule::{
+      id: "matrix-values",
+      title: "Duplicate scalar entries in `strategy.matrix.<key>`",
+      applies: workflow_only,
+      on_doc: no_doc(),
+      on_job: Some(check_matrix_values_job),
+      on_step: None,
+    },
   ]
 }
 
@@ -4468,6 +4476,84 @@ fn check_ref_version_mismatch_job(
       }
     None => ()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: matrix-values (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// actionlint's `matrix-values` flags duplicate scalar entries in a job's
+/// `strategy.matrix.<key>` array. We only handle scalars (string/int/
+/// real/bool) — non-scalar matrix shapes (`include`/`exclude` maps,
+/// nested arrays) are left to the engine work tracked under the broader
+/// matrix-typing audits.
+fn scalar_repr(y : @yaml.Yaml) -> String? {
+  match y {
+    @yaml.Yaml::String(s) => Some("s:" + s)
+    @yaml.Yaml::Integer(i) => Some("i:" + i.to_string())
+    @yaml.Yaml::Real(_, repr~) => Some("r:" + repr)
+    @yaml.Yaml::Boolean(b) => Some("b:" + b.to_string())
+    @yaml.Yaml::Null => Some("n:")
+    _ => None
+  }
+}
+
+///|
+fn matrix_value_display(y : @yaml.Yaml) -> String {
+  match y {
+    @yaml.Yaml::String(s) => s
+    @yaml.Yaml::Integer(i) => i.to_string()
+    @yaml.Yaml::Real(_, repr~) => repr
+    @yaml.Yaml::Boolean(b) => b.to_string()
+    @yaml.Yaml::Null => "null"
+    _ => "?"
+  }
+}
+
+///|
+fn check_matrix_values_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let strategy = match job.raw.get("strategy") {
+    Some(@yaml.Yaml::Map(m)) => m
+    _ => return
+  }
+  let matrix = match strategy.get("matrix") {
+    Some(@yaml.Yaml::Map(m)) => m
+    _ => return
+  }
+  matrix.each(fn(key, value) {
+    if key == "include" || key == "exclude" {
+      return
+    }
+    match value {
+      @yaml.Yaml::Array(arr) => {
+        let seen : Map[String, Bool] = Map::new()
+        let reported : Map[String, Bool] = Map::new()
+        for entry in arr {
+          match scalar_repr(entry) {
+            Some(repr) =>
+              if seen.contains(repr) && !reported.contains(repr) {
+                reported[repr] = true
+                add_diag(
+                  out,
+                  "matrix-values",
+                  Error,
+                  "duplicate matrix value `\{matrix_value_display(entry)}` in `\{key}`",
+                )
+              } else {
+                seen[repr] = true
+              }
+            None => ()
+          }
+        }
+      }
+      _ => ()
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------

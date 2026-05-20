@@ -478,8 +478,7 @@ test "job-needs-graph: dependency on undefined job" {
 }
 
 ///|
-#skip("not implemented yet")
-test "matrix-values: duplicate matrix values" {
+test "matrix-values: duplicate scalar in matrix array" {
   let yaml =
     #|on: push
     #|jobs:
@@ -492,17 +491,29 @@ test "matrix-values: duplicate matrix values" {
     #|        node: [16, 16, 18]
     #|    steps:
     #|      - run: echo $NODE
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
-    "diagnostics": [
-      {
-        "rule": "matrix-values",
-        "severity": "error",
-        "message": "duplicate matrix value `16` in `node`",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "matrix-values" })
+  inspect(hits.length(), content="1")
+  inspect(hits[0].message, content="duplicate matrix value `16` in `node`")
+}
+
+///|
+test "matrix-values: silent on unique matrix entries" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  test:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    strategy:
+    #|      matrix:
+    #|        node: [16, 18, 20]
+    #|    steps:
+    #|      - run: echo $NODE
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "matrix-values" })
+  inspect(hits.length(), content="0")
 }
 
 ///|

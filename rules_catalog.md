@@ -73,7 +73,7 @@ the diagnostic provenance is never lost.
 | `shellcheck` | [`actionlint:shellcheck-on-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Not planned | Cloudflare Workers cannot ship native `shellcheck` binaries; no in-pure-JS substitute that matches actionlint coverage. |
 | `pyflakes` | [`actionlint:pyflakes-on-python-run`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | warning | Not planned | Same Worker-runtime constraint as `shellcheck`. |
 | `job-needs-graph` | [`actionlint:job-needs-graph`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
-| `matrix-values` | [`actionlint:matrix-values`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Planned | Fixtures in place; expansion model TBD. |
+| `matrix-values` | [`actionlint:matrix-values`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Planned | Preview implementation: detects duplicate scalar entries in `strategy.matrix.<key>` arrays. `include`/`exclude` validation against the matrix configuration (the bulk of upstream coverage) is still pending. |
 | `webhook-events` | [`actionlint:webhook-events`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
 | `workflow-dispatch-inputs` | [`actionlint:workflow-dispatch-inputs`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
 | `glob-patterns` | [`actionlint:glob-patterns`](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) | error | Implemented | |
