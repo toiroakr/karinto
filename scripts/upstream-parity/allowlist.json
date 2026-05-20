@@ -12,9 +12,13 @@
     "    'extra:<rule-id>'      karinto fires <rule-id> but upstream doesn't; suppress.",
     "",
     "  Aggregate mode (actionlint):",
-    "    'upstream-only'  upstream fires; karinto silent. Suppress (e.g. shellcheck-only finding).",
-    "    'karinto-only'   karinto fires; upstream silent. Suppress.",
-    "    'ignore'         suppress any divergence on this file.",
+    "    'upstream-only'    upstream fires; karinto silent. Suppress (e.g. shellcheck-only finding).",
+    "    'karinto-only'     karinto fires; upstream silent. Suppress.",
+    "    'ignore'           suppress any divergence on this file.",
+    "    'fires:<rule-id>'  require karinto to fire <rule-id> on this fixture even though",
+    "                       no actionlint kind maps to it (e.g. zizmor template-injection",
+    "                       Info backstop on actionlint OK testdata). Fails hard if <rule-id>",
+    "                       stops firing — keeps regression detection on cross-source rules.",
     "",
     "  Always include a 'reason' field so future readers can see why it's here."
   ],
@@ -1433,6 +1437,258 @@
         "extra:template-injection"
       ],
       "reason": "Fixture relies on a `.github/zizmor.yaml` (the `.yaml` variant) config that ignores template-injection for this file. karinto has no zizmor.yml config-discovery layer, so it fires the rule. Implementation logic is correct; the limitation is engine-wide."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/bench/large.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/matrix_exclude_mismatch.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/err/matrix_exclude_no_match.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/pyflakes_integration.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/bool_conversion.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-101.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-104.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-113.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-151-child-of-child-job.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-152.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-164.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-223.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-235-expr-in-input-default-value.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-249_matrix_exclude_filter_object_subset.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-261_matrix_row_item_constructed_with_expr.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-263-inputs-shared-by-multiple-events.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-294_matrix_row_array_expression.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-355-shellcheck-sc2043.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-414_expression_in_matrix_exclude.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-442-download-artifact-v3-workaround.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-45.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-67.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/matrix_exclude_match_to_expr.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/matrix_expression_in_exclude.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/matrix_in_array_at_runs_on.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/no_description_workflow_call.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/skip_inputs.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/special_function_availability.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/using_reusable_workflow_call_outputs.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/variables.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/workflow_call_event.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/workflow_dispatch_25_inputs.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/workflow_dispatch_input_types.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/config_variables/workflows/test.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/local_action_case_insensitive/workflows/test.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/projects/yaml_anchor_in_action/workflows/test.yaml",
+      "expect": [
+        "fires:template-injection"
+      ],
+      "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
     }
   ]
 }

@@ -259,6 +259,11 @@ function classify(source, file, karinto, upstream) {
   const expectUpstreamOnly = allow?.has("upstream-only");
   const expectKarintoOnly = allow?.has("karinto-only");
   const ignore = allow?.has("ignore");
+  const requiredFires = allow
+    ? [...allow].filter((t) => t.startsWith("fires:")).map((t) => t.slice(6))
+    : [];
+  const karintoRuleSet = new Set(karinto.ok ? (karinto.ruleIds ?? []) : []);
+  const missingFires = requiredFires.filter((id) => !karintoRuleSet.has(id));
 
   let hard = false;
   let mismatch = null;
@@ -270,6 +275,9 @@ function classify(source, file, karinto, upstream) {
   } else if (!expectedFire && karintoFired && !expectKarintoOnly) {
     hard = true;
     mismatch = "karinto-fired-upstream-silent";
+  } else if (missingFires.length > 0) {
+    hard = true;
+    mismatch = "expected-fire-missing";
   }
   return {
     hard,
@@ -279,6 +287,8 @@ function classify(source, file, karinto, upstream) {
     plannedKinds: [...plannedKinds],
     plannedKarinto: karintoPlannedFired,
     unmappedKinds: [...unmappedKinds],
+    expectedFires: requiredFires,
+    missingFires,
     mode: "aggregate",
   };
 }
@@ -423,6 +433,7 @@ function renderRow(x) {
     if (x.plannedKinds?.length) parts.push(`planned-kinds=[${x.plannedKinds.join(", ")}]`);
     if (x.plannedKarinto?.length) parts.push(`planned-karinto=[${x.plannedKarinto.join(", ")}]`);
     if (x.unmappedKinds?.length) parts.push(`unmapped-kinds=[${x.unmappedKinds.join(", ")}]`);
+    if (x.missingFires?.length) parts.push(`missing-fires=[${x.missingFires.join(", ")}]`);
   }
   if (x.karinto && x.karinto.ok === false) parts.push(`karinto-error=${x.karinto.error}`);
   if (x.upstream && x.upstream.ok === false) parts.push(`upstream-error=${x.upstream.error}`);

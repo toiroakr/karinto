@@ -64,10 +64,10 @@ pub(all) struct RuleSpec {
 } derive(Eq, Debug)
 
 ///|
-/// The full catalogue: 82 rules spanning actionlint (36), zizmor (36) and
-/// ghalint (10). 5 deliberate consolidations are recorded in `origins`
+/// The full catalogue: 83 rules spanning actionlint (37), zizmor (36) and
+/// ghalint (10). 4 deliberate consolidations are recorded in `origins`
 /// (zizmor entries that also absorb the matching actionlint or ghalint
-/// check), and 4 rules are marked `NotPlanned` (out of scope, see status
+/// check), and 5 rules are marked `NotPlanned` (out of scope, see status
 /// comments below).
 pub fn all_rule_specs() -> Array[RuleSpec] {
   [
@@ -240,6 +240,26 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       External,
       Warning,
       Low,
+      NotPlanned,
+      true,
+      true,
+    ),
+    // NotPlanned: same vulnerability surface as zizmor:template-injection, which
+    // karinto ships as the `template-injection` rule. zizmor's audit covers
+    // every taint sink actionlint flags (verified against actionlint's
+    // examples/untrusted_input.yaml, err/nested_untrusted_input.yaml,
+    // err/github_script_untrusted_input.yaml) and additionally backstops with
+    // Info-level findings on every `${{ … }}` expression. Finding granularity
+    // differs (actionlint emits one per untrusted subexpression; zizmor
+    // emits one per template expression), but no vulnerable site is missed.
+    spec(
+      "script-injection",
+      "Script injection via untrusted input in run:",
+      Actionlint,
+      ["actionlint:script-injection"],
+      Security,
+      Error,
+      High,
       NotPlanned,
       true,
       true,
@@ -851,12 +871,11 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       false,
     ),
-    // Consolidates actionlint's "script injection" check (untrusted input in `run:`).
     spec(
       "template-injection",
       "Template injection via untrusted input",
       Zizmor,
-      ["zizmor:template-injection", "actionlint:script-injection"],
+      ["zizmor:template-injection"],
       Security,
       Error,
       High,

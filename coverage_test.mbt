@@ -125,7 +125,7 @@ test "coverage: every spec records at least one upstream origin" {
 
 ///|
 test "coverage: consolidated rules list every upstream they absorb" {
-  // The five intentional consolidations — each one must keep both upstream
+  // The four intentional consolidations — each one must keep both upstream
   // identifiers in `origins` so the lineage is never lost.
   json_inspect(@karinto.rule_spec("unpinned-uses").origins, content=[
     "zizmor:unpinned-uses", "ghalint:ghl-008 (action_ref_should_be_full_length_commit_sha)",
@@ -139,7 +139,15 @@ test "coverage: consolidated rules list every upstream they absorb" {
   json_inspect(@karinto.rule_spec("hardcoded-container-credentials").origins, content=[
     "zizmor:hardcoded-container-credentials", "actionlint:hardcoded-credentials",
   ])
+  // template-injection: the consolidation was unwound because zizmor's
+  // template-injection audit covers actionlint:script-injection at broader
+  // scope (Info backstop on every `${{ }}`). `script-injection` is catalogued
+  // separately as `NotPlanned` with that rationale.
   json_inspect(@karinto.rule_spec("template-injection").origins, content=[
-    "zizmor:template-injection", "actionlint:script-injection",
+    "zizmor:template-injection",
   ])
+  json_inspect(@karinto.rule_spec("script-injection").origins, content=[
+    "actionlint:script-injection",
+  ])
+  assert_true(@karinto.rule_spec("script-injection").status is NotPlanned)
 }
