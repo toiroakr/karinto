@@ -36,12 +36,12 @@ const ITERS = 100;
 let bestAll = Infinity, bestNone = Infinity;
 for (let trial = 0; trial < N; trial++) {
   const t0 = performance.now();
-  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "");
+  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "", "");
   const t1 = performance.now();
   if (t1 - t0 < bestAll) bestAll = t1 - t0;
 
   const t2 = performance.now();
-  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "*");
+  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "*", "");
   const t3 = performance.now();
   if (t3 - t2 < bestNone) bestNone = t3 - t2;
 }

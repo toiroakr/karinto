@@ -15,9 +15,9 @@
 ///   * `archived_uses_str`  — refs whose repo is archived (`archived-uses`)
 ///   * `impostor_uses_str`  — `owner/repo@sha` confirmed impostor commits
 ///                            (`impostor-commit`)
-///   * `ref_mismatches_str` — `owner/repo@ref` whose tag/branch points to a
-///                            different SHA than expected
-///                            (`ref-version-mismatch`)
+///   * `ref_mismatches_str` — `owner/repo@sha` whose pinned SHA does not
+///                            match the version named in the trailing
+///                            comment (`ref-version-mismatch`)
 ///
 /// The Cloudflare Worker HTTP handler (`cf/index.js`) currently only wires
 /// `vuln_uses_str` (populated from OSV.dev when the request sets `osv=1`).

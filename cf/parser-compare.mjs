@@ -50,7 +50,7 @@ for (let t = 0; t < N; t++) {
 let bestMb = Infinity;
 for (let t = 0; t < N; t++) {
   const t0 = performance.now();
-  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "");
+  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "", "");
   const t1 = performance.now();
   if (t1 - t0 < bestMb) bestMb = t1 - t0;
 }
@@ -59,7 +59,7 @@ for (let t = 0; t < N; t++) {
 let bestMbNo = Infinity;
 for (let t = 0; t < N; t++) {
   const t0 = performance.now();
-  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "*");
+  for (let i = 0; i < ITERS; i++) lint_string(yaml, "", "*", "");
   const t1 = performance.now();
   if (t1 - t0 < bestMbNo) bestMbNo = t1 - t0;
 }
