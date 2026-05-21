@@ -55,10 +55,33 @@ pub(all) struct WalkCtx {
   // Optional caller-supplied context: `uses:` refs known to be vulnerable
   // (typically populated from OSV.dev queries by the worker before linting).
   vuln_uses : Array[String]
+  // Optional caller-supplied denylist of `uses:` patterns. Each entry is a
+  // glob (`*`/`?`) matched against the step's `uses:` value — either the
+  // bare `owner/repo[/subpath]` or `owner/repo[/subpath]@ref`. Empty list
+  // keeps `forbidden-uses` dormant, matching zizmor's "no config → silent"
+  // default.
+  forbidden_uses : Array[String]
+  // Optional caller-supplied `owner/repo` list of archived repositories (in
+  // addition to a small hardcoded baseline). Worker resolves these from
+  // GitHub before linting; comparison is case-insensitive and operates on
+  // the bare `owner/repo` (subpath stripped).
+  archived_uses : Array[String]
+  // Optional caller-supplied `owner/repo@sha` list of refs whose pinned SHA
+  // does not belong to the claimed repository. Empty → rule is silent
+  // offline (matches zizmor `--no-online-audits`).
+  impostor_uses : Array[String]
+  // Optional caller-supplied `owner/repo@sha` list of refs whose pinned SHA
+  // belongs to the repo but does NOT match the version named in the
+  // trailing `# vN` comment. Empty → rule silent offline.
+  ref_mismatches : Array[String]
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
   kind : FileKind
+  // Raw source text. YAML parsing loses comments and line layout, but
+  // rules like `undocumented-permissions` need both — they re-scan the
+  // source. Empty string when no source is available.
+  source : String
 }
 
 ///|
@@ -137,6 +160,11 @@ pub fn prewalk(
   doc : @yaml.Yaml,
   vuln_uses? : Array[String] = [],
   kind? : FileKind = Unknown,
+  source? : String = "",
+  forbidden_uses? : Array[String] = [],
+  archived_uses? : Array[String] = [],
+  impostor_uses? : Array[String] = [],
+  ref_mismatches? : Array[String] = [],
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -224,6 +252,11 @@ pub fn prewalk(
     updates,
     vuln_uses,
     kind,
+    source,
+    forbidden_uses,
+    archived_uses,
+    impostor_uses,
+    ref_mismatches,
   }
 }
 
@@ -313,8 +346,8 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "unpinned-images",
       title: "Container image is not pinned by digest",
-      applies: workflow_only,
-      on_doc: no_doc(),
+      applies: workflow_or_action,
+      on_doc: Some(check_unpinned_images_doc),
       on_job: Some(check_unpinned_images),
       on_step: no_step(),
     },
@@ -345,18 +378,18 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "insecure-commands",
       title: "`ACTIONS_ALLOW_UNSECURE_COMMANDS` re-enables legacy commands",
-      applies: workflow_only,
+      applies: workflow_or_action,
       on_doc: Some(check_insecure_commands),
       on_job: no_job(),
       on_step: no_step(),
     },
     Rule::{
       id: "misfeature",
-      title: "`continue-on-error: true` masks real failures",
+      title: "GitHub Actions misfeatures (cmd shell, setup-python pip-install, continue-on-error)",
       applies: workflow_only,
-      on_doc: no_doc(),
+      on_doc: Some(check_misfeature_doc),
       on_job: Some(check_misfeature),
-      on_step: no_step(),
+      on_step: Some(check_misfeature_step),
     },
     Rule::{
       id: "job-permissions-required",
@@ -392,11 +425,11 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "artipacked",
-      title: "Checkout-then-upload-artifact leaks credentials",
-      applies: workflow_only,
+      title: "Credential persistence through GitHub Actions artifacts",
+      applies: workflow_or_action,
       on_doc: no_doc(),
       on_job: Some(check_artipacked),
-      on_step: no_step(),
+      on_step: Some(check_artipacked_step),
     },
     Rule::{
       id: "bot-conditions",
@@ -408,25 +441,33 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "excessive-permissions",
-      title: "Job grants many `write` permissions",
+      title: "Workflow or job grants overly broad `permissions:`",
       applies: workflow_only,
-      on_doc: no_doc(),
-      on_job: Some(check_excessive_permissions),
+      on_doc: Some(check_excessive_permissions),
+      on_job: no_job(),
       on_step: no_step(),
     },
     Rule::{
       id: "use-trusted-publishing",
       title: "Prefer OIDC trusted publishing over long-lived tokens",
-      applies: workflow_only,
+      applies: workflow_or_action,
       on_doc: no_doc(),
-      on_job: no_job(),
-      on_step: Some(check_trusted_publishing),
+      on_job: Some(check_trusted_publishing_job),
+      on_step: Some(check_trusted_publishing_step),
     },
     Rule::{
       id: "dependabot-cooldown",
       title: "Dependabot updates should configure `cooldown`",
       applies: unknown_only,
       on_doc: Some(check_dependabot_cooldown),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "dependabot-execution",
+      title: "Dependabot enables `insecure-external-code-execution`",
+      applies: unknown_only,
+      on_doc: Some(check_dependabot_execution),
       on_job: no_job(),
       on_step: no_step(),
     },
@@ -472,10 +513,10 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "obfuscation",
-      title: "Obfuscated uses ref (percent-encoded)",
+      title: "Obfuscated usage of GitHub Actions features",
       applies: workflow_or_action,
       on_doc: no_doc(),
-      on_job: no_job(),
+      on_job: Some(check_obfuscation_job),
       on_step: Some(check_obfuscation),
     },
     Rule::{
@@ -504,9 +545,9 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "superfluous-actions",
-      title: "Duplicate setup-* action in a job",
-      applies: workflow_only,
-      on_doc: no_doc(),
+      title: "Action functionality is already included by the runner",
+      applies: workflow_or_action,
+      on_doc: Some(check_superfluous_actions_doc),
       on_job: Some(check_superfluous_actions),
       on_step: no_step(),
     },
@@ -766,6 +807,86 @@ pub fn all_rules() -> Array[Rule] {
       on_job: no_job(),
       on_step: no_step(),
     },
+    Rule::{
+      id: "anonymous-definition",
+      title: "Workflow/action or job has no `name:`",
+      applies: workflow_or_action,
+      on_doc: Some(check_anonymous_definition),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "undocumented-permissions",
+      title: "Permissions block has no explanatory comments",
+      applies: workflow_only,
+      on_doc: Some(check_undocumented_permissions),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "forbidden-uses",
+      title: "`uses:` matches a caller-supplied denylist",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_forbidden_uses),
+    },
+    Rule::{
+      id: "github-app",
+      title: "Dangerous use of `actions/create-github-app-token`",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_github_app),
+    },
+    Rule::{
+      id: "archived-uses",
+      title: "Uses an action whose repository is archived",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_archived_uses_job),
+      on_step: Some(check_archived_uses_step),
+    },
+    Rule::{
+      id: "impostor-commit",
+      title: "Pinned SHA does not exist in the claimed repository",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_impostor_commit_job),
+      on_step: Some(check_impostor_commit_step),
+    },
+    Rule::{
+      id: "ref-version-mismatch",
+      title: "Pinned SHA does not match the version named in the trailing comment",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_ref_version_mismatch_job),
+      on_step: Some(check_ref_version_mismatch_step),
+    },
+    Rule::{
+      id: "matrix-values",
+      title: "Duplicate scalar entries in `strategy.matrix.<key>`",
+      applies: workflow_only,
+      on_doc: no_doc(),
+      on_job: Some(check_matrix_values_job),
+      on_step: None,
+    },
+    Rule::{
+      id: "yaml-anchor-issues",
+      title: "YAML anchor declared but never referenced",
+      applies: workflow_or_action,
+      on_doc: Some(check_yaml_anchor_issues),
+      on_job: None,
+      on_step: None,
+    },
+    Rule::{
+      id: "deprecated-action-inputs",
+      title: "Deprecated input on a popular action",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: None,
+      on_step: Some(check_deprecated_action_inputs),
+    },
   ]
 }
 
@@ -1021,27 +1142,67 @@ fn check_unpinned_uses(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Inspect an `actions/checkout` step's `with:` block and emit an
+/// `artipacked` diagnostic when the step leaves credentials persisted.
+///
+/// Behaviour mirrors upstream zizmor's Regular persona (pedantic):
+/// - Literal `persist-credentials: false` (bool or stringy `"false"`) is
+///   safe — emit nothing.
+/// - Literal `persist-credentials: true` (bool or stringy `"true"`) is an
+///   auditor-only finding and is suppressed under Regular.
+/// - Missing `persist-credentials` (or `with:` itself absent) → Warning
+///   with "does not set persist-credentials: false".
+/// - Templated `persist-credentials: ${{ ... }}` → same Warning.
+/// - `with:` itself is an expression (`with: ${{ fromJson(...) }}`) → Info
+///   with "may not set persist-credentials: false" (lower confidence).
+fn artipacked_emit_for_step(step : StepInfo, out : Array[Diagnostic]) -> Unit {
+  if !step.is_actions_checkout {
+    return
+  }
+  let unsafe_msg = "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false"
+  let maybe_msg = "credential persistence through GitHub Actions artifacts: may not set persist-credentials: false"
+  match step.raw.get("with") {
+    Some(Map(w)) =>
+      match w.get("persist-credentials") {
+        None => add_diag(out, "artipacked", Warning, unsafe_msg)
+        Some(Boolean(false)) => ()
+        Some(Boolean(true)) => () // auditor-only — silent under Regular
+        Some(String(s)) =>
+          match s.to_lower() {
+            "false" | "true" => ()
+            _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+          }
+        _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+      }
+    Some(String(_)) => add_diag(out, "artipacked", Info, maybe_msg)
+    _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+  }
+}
+
+///|
 fn check_artipacked(
   _ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  let mut checkout_unsafe = false
   for s in job.steps {
-    if s.is_actions_checkout {
-      if !s.has_persist_creds_false {
-        checkout_unsafe = true
-      }
-    } else if checkout_unsafe && s.is_upload_artifact {
-      add_diag(
-        out,
-        "artipacked",
-        Error,
-        "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
-      )
-      return
-    }
+    artipacked_emit_for_step(s, out)
   }
+}
+
+///|
+/// `on_step` for composite-action steps: composite actions reuse the
+/// caller's `GITHUB_TOKEN`, so an unsafe `actions/checkout` inside one
+/// is just as risky as in a workflow.
+fn check_artipacked_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.kind != FileKind::Action {
+    return
+  }
+  artipacked_emit_for_step(step, out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,66 +1251,466 @@ fn check_bot_conditions(
 }
 
 // ---------------------------------------------------------------------------
-// Rule: excessive-permissions (zizmor) — flags ≥ 3 `write` scopes per job
+// Rule: excessive-permissions (zizmor)
+//
+// Mirrors upstream's pedantic-mode behaviour: emit one finding per offending
+// `permissions:` shape at the workflow level (`read-all`, `write-all`, each
+// `write` entry of an Explicit map, or the *absence* of any `permissions:`
+// block) and additionally at each job's level when the job either picks
+// `read-all` / `write-all` or inherits the default token because no
+// parent-level `permissions:` block exists. Jobs that supply their own
+// Explicit map are not flagged — zizmor explicitly punts on per-key
+// over-scoping analysis there.
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_excessive_permissions(
-  _ctx : WalkCtx,
-  job : JobInfo,
-  out : Array[Diagnostic],
-) -> Unit {
-  match job.raw.get("permissions") {
-    Some(Map(perms)) => {
-      let mut writes = 0
-      perms.each(fn(_k, v) {
-        match v {
-          String("write") => writes = writes + 1
+fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  let workflow_perms = m.get("permissions")
+  let explicit_parent_permissions = match workflow_perms {
+    None => false
+    Some(_) => true
+  }
+  match workflow_perms {
+    None =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "default permissions used due to no permissions: block",
+      )
+    Some(String("read-all")) =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "uses read-all permissions",
+      )
+    Some(String("write-all")) =>
+      add_diag(
+        out,
+        "excessive-permissions",
+        Warning,
+        "uses write-all permissions",
+      )
+    Some(Map(perms)) =>
+      perms.each(fn(name, value) {
+        match value {
+          String("write") =>
+            add_diag(
+              out,
+              "excessive-permissions",
+              Warning,
+              "\{name}: write is overly broad at the workflow level",
+            )
           _ => ()
         }
       })
-      if writes >= 3 {
+    _ => ()
+  }
+  for job in ctx.jobs {
+    match job.raw.get("permissions") {
+      None =>
+        if !explicit_parent_permissions {
+          add_diag(
+            out,
+            "excessive-permissions",
+            Warning,
+            "job `\{job.name}`: default permissions used due to no permissions: block",
+          )
+        }
+      Some(String("read-all")) =>
         add_diag(
           out,
           "excessive-permissions",
           Warning,
-          "job `\{job.name}` grants \{writes} write permissions; consider narrowing the scope",
+          "job `\{job.name}`: uses read-all permissions",
         )
-      }
+      Some(String("write-all")) =>
+        add_diag(
+          out,
+          "excessive-permissions",
+          Warning,
+          "job `\{job.name}`: uses write-all permissions",
+        )
+      _ => ()
     }
-    _ => ()
   }
 }
 
 // ---------------------------------------------------------------------------
-// Rule: use-trusted-publishing (zizmor) — heuristic
+// Rule: use-trusted-publishing (zizmor)
 // ---------------------------------------------------------------------------
 
 ///|
-fn check_trusted_publishing(
-  _ctx : WalkCtx,
+/// True if `s` contains any of the URL substrings that mark a registry
+/// known to support OIDC trusted publishing.
+fn url_value_matches(value : @yaml.Yaml?, needle : String) -> Bool {
+  match value {
+    Some(String(s)) => s.to_lower().contains(needle)
+    _ => false
+  }
+}
+
+///|
+/// Action-based detection: returns Some(message) when the step's `uses:`
+/// pattern + `with:` inputs match an upstream-known credential-style
+/// publishing setup that should switch to OIDC.
+fn trusted_publishing_action_finding(step : StepInfo) -> String? {
+  match step.uses {
+    Some(u) => {
+      // Strip ref before pattern matching.
+      let bare = if step.at_idx >= 0 {
+        u[:step.at_idx].to_string()
+      } else {
+        u.to_string()
+      }
+      let lower = bare.to_lower()
+      let with_ = match step.with_ {
+        Some(w) => w
+        None => Map::from_array([])
+      }
+      if lower == "pypa/gh-action-pypi-publish" {
+        // Fires when `password:` input is present AND the target index
+        // is one we know supports trusted publishing (default pypi.org
+        // or one of the explicit pypi.org / test.pypi.org URLs).
+        let has_password = with_.contains("password")
+        if !has_password {
+          return None
+        }
+        let repo_url = match with_.get("repository-url") {
+          Some(v) => Some(v)
+          None => with_.get("repository_url")
+        }
+        let known = match repo_url {
+          Some(_) => url_value_matches(repo_url, "pypi.org")
+          None => true
+        }
+        if known {
+          return Some(
+            "PyPI publish uses an API token; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "rubygems/release-gem" {
+        // Fires unless `setup-trusted-publisher: true` is explicit.
+        let setup = match with_.get("setup-trusted-publisher") {
+          Some(@yaml.Yaml::Boolean(b)) => Some(b)
+          Some(@yaml.Yaml::String(s)) =>
+            if s.to_lower() == "true" {
+              Some(true)
+            } else if s.to_lower() == "false" {
+              Some(false)
+            } else {
+              None
+            }
+          _ => None
+        }
+        if setup == Some(false) {
+          return Some(
+            "rubygems/release-gem with `setup-trusted-publisher: false`; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "rubygems/configure-rubygems-credentials" {
+        if !with_.contains("api-token") {
+          return None
+        }
+        let server = with_.get("gem-server")
+        let known = match server {
+          Some(_) => url_value_matches(server, "rubygems.org")
+          None => true
+        }
+        if known {
+          return Some(
+            "rubygems/configure-rubygems-credentials uses an API token; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      if lower == "actions/setup-node" {
+        let reg = with_.get("registry-url")
+        let always_auth = match with_.get("always-auth") {
+          Some(@yaml.Yaml::Boolean(true)) => true
+          Some(@yaml.Yaml::String(s)) => s.to_lower() == "true"
+          _ => false
+        }
+        if always_auth && url_value_matches(reg, "registry.npmjs.org") {
+          return Some(
+            "actions/setup-node with `always-auth: true` to npmjs; prefer OIDC trusted publishing",
+          )
+        }
+        return None
+      }
+      None
+    }
+    None => None
+  }
+}
+
+///|
+/// Replace bash (`\<EOL>`) and PowerShell (`` `<EOL> ``) line
+/// continuations with a single space so multi-line publishing commands
+/// flatten into one logical line.
+fn collapse_continuations(s : String) -> String {
+  let chars : Array[Char] = []
+  for ch in s {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '\\' || c == '`') && i + 1 < n {
+      let c1 = chars[i + 1]
+      if c1 == '\n' {
+        buf.write_char(' ')
+        i = i + 2
+        continue
+      }
+      if c1 == '\r' && i + 2 < n && chars[i + 2] == '\n' {
+        buf.write_char(' ')
+        i = i + 3
+        continue
+      }
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  buf.to_string()
+}
+
+///|
+fn tokens_contain(tokens : Array[String], needle : String) -> Bool {
+  for t in tokens {
+    if t == needle {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn tokens_contain_prefix(tokens : Array[String], prefix : String) -> Bool {
+  for t in tokens {
+    if t.has_prefix(prefix) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Tokenize a shell line on ASCII whitespace.
+fn shell_tokens(line : String) -> Array[String] {
+  let out : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut has = false
+  for ch in line {
+    if ch == ' ' || ch == '\t' {
+      if has {
+        out.push(buf.to_string())
+        buf.reset()
+        has = false
+      }
+    } else {
+      buf.write_char(ch)
+      has = true
+    }
+  }
+  if has {
+    out.push(buf.to_string())
+  }
+  out
+}
+
+///|
+/// Returns true if `tokens` (a single flattened shell command line)
+/// invokes one of upstream zizmor's tracked publishing commands.
+fn shell_line_is_publish(tokens : Array[String]) -> Bool {
+  if tokens.length() == 0 {
+    return false
+  }
+  let cmd = tokens[0]
+  let rest : Array[String] = []
+  for k in 1..<tokens.length() {
+    rest.push(tokens[k])
+  }
+  if cmd == "cargo" {
+    return tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run") &&
+      !tokens_contain(rest, "-n")
+  }
+  if cmd == "twine" {
+    return tokens_contain(rest, "upload")
+  }
+  if cmd == "npm" || cmd == "pnpm" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "bun" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "yarn" {
+    return tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run") &&
+      !tokens_contain(rest, "-n")
+  }
+  if cmd == "gem" {
+    return tokens_contain(rest, "push")
+  }
+  if cmd == "nuget" || cmd == "nuget.exe" {
+    return tokens_contain(rest, "push")
+  }
+  if cmd == "dotnet" {
+    return tokens_contain(rest, "nuget") && tokens_contain(rest, "push")
+  }
+  if cmd == "poetry" {
+    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
+  }
+  if cmd == "hatch" || cmd == "pdm" {
+    return tokens_contain(rest, "publish")
+  }
+  if cmd == "uv" {
+    if tokens_contain(rest, "publish") {
+      return true
+    }
+    if tokens_contain(rest, "twine") && tokens_contain(rest, "upload") {
+      return true
+    }
+    return false
+  }
+  if cmd == "uvx" {
+    if (
+        tokens_contain(rest, "twine") ||
+        tokens_contain_prefix(rest, "twine==") ||
+        tokens_contain_prefix(rest, "twine@")
+      ) &&
+      tokens_contain(rest, "upload") {
+      return true
+    }
+    return false
+  }
+  if cmd == "python" || cmd.has_prefix("python3") {
+    return tokens_contain(rest, "-m") &&
+      tokens_contain(rest, "twine") &&
+      tokens_contain(rest, "upload")
+  }
+  if cmd == "pipx" {
+    if rest.length() > 0 && rest[0] == "run" {
+      let twine_like = tokens_contain(rest, "twine") ||
+        tokens_contain_prefix(rest, "twine==") ||
+        tokens_contain_prefix(rest, "twine@")
+      return twine_like && tokens_contain(rest, "upload")
+    }
+    return false
+  }
+  if cmd == "bundle" {
+    return tokens_contain(rest, "exec") &&
+      tokens_contain(rest, "gem") &&
+      tokens_contain(rest, "push")
+  }
+  if cmd == "bunx" {
+    let npm_like = tokens_contain(rest, "npm") ||
+      tokens_contain_prefix(rest, "npm@")
+    return npm_like &&
+      tokens_contain(rest, "publish") &&
+      !tokens_contain(rest, "--dry-run")
+  }
+  false
+}
+
+///|
+fn run_has_publish_cmd(run : String) -> Bool {
+  let normalized = collapse_continuations(run)
+  for line in normalized.split("\n") {
+    let trimmed = line.trim(chars=" \t\r").to_string()
+    if trimmed.length() == 0 {
+      continue
+    }
+    if shell_line_is_publish(shell_tokens(trimmed)) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// True if `permissions` map grants `id-token: write`.
+fn perms_has_id_token_write(value : @yaml.Yaml?) -> Bool {
+  match value {
+    Some(@yaml.Yaml::Map(m)) =>
+      match m.get("id-token") {
+        Some(@yaml.Yaml::String(s)) => s == "write"
+        _ => false
+      }
+    _ => false
+  }
+}
+
+///|
+/// `on_job` for `use-trusted-publishing`: action-based detection always
+/// fires; run-based detection is suppressed when the job carries
+/// `permissions.id-token: write` (workflow-level grant alone is enough
+/// for zizmor too, but propagating that here keeps the check tractable).
+fn check_trusted_publishing_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let job_id_token = perms_has_id_token_write(job.raw.get("permissions"))
+  let workflow_id_token = match ctx.workflow_map {
+    Some(m) => perms_has_id_token_write(m.get("permissions"))
+    None => false
+  }
+  let suppress_run = job_id_token || workflow_id_token
+  for step in job.steps {
+    match trusted_publishing_action_finding(step) {
+      Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+      None => ()
+    }
+    if !suppress_run {
+      match step.run {
+        Some(r) =>
+          if run_has_publish_cmd(r) {
+            add_diag(
+              out,
+              "use-trusted-publishing",
+              Info,
+              "publish command uses a long-lived token; prefer OIDC trusted publishing",
+            )
+          }
+        None => ()
+      }
+    }
+  }
+}
+
+///|
+/// `on_step` for composite-action steps: composite actions cannot
+/// declare permissions, so the run-based detection always applies.
+fn check_trusted_publishing_step(
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  if step.is_pypi_publish {
-    let has_password = match step.with_ {
-      Some(w) => w.contains("password")
-      None => false
-    }
-    if has_password {
-      add_diag(
-        out,
-        "use-trusted-publishing",
-        Info,
-        "PyPI publish uses an API token; prefer OIDC trusted publishing",
-      )
-    }
+  // Workflow steps are handled by `check_trusted_publishing_job` so
+  // they can see the enclosing job's permissions; skip them here.
+  if ctx.kind != FileKind::Action {
+    return
+  }
+  match trusted_publishing_action_finding(step) {
+    Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+    None => ()
   }
   match step.run {
     Some(r) =>
-      if r.contains("pkg-pr-new publish") ||
-        r.contains("npm publish") ||
-        r.contains("pnpm publish") {
+      if run_has_publish_cmd(r) {
         add_diag(
           out,
           "use-trusted-publishing",
@@ -1269,6 +1830,65 @@ fn is_pinned_image(image : String) -> Bool {
 }
 
 ///|
+/// Returns the matrix key referenced inside a `${{ matrix.X }}`-only
+/// container image expression, or None if the image is not such a pure
+/// reference.
+fn matrix_key_of_image(image : String) -> String? {
+  let s = image.trim(chars=" \t").to_string()
+  if !s.has_prefix("${{") || !s.has_suffix("}}") {
+    return None
+  }
+  let inner = s
+    .substring(start=3, end=s.length() - 2)
+    .trim(chars=" \t")
+    .to_string()
+  let needle = "matrix."
+  if !inner.has_prefix(needle) {
+    return None
+  }
+  let rest = inner.substring(start=needle.length()).to_string()
+  // Reject anything beyond a simple identifier (functions, dotted paths).
+  let chars = rest.to_array()
+  for ch in chars {
+    let ok = (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '_' ||
+      ch == '-'
+    if !ok {
+      return None
+    }
+  }
+  Some(rest)
+}
+
+///|
+/// Walks `matrix.include` and reports unpinned values of `field` (e.g. the
+/// key the container image dereferences with `${{ matrix.<field> }}`).
+fn unpinned_matrix_images(matrix : @yaml.Yaml, field : String) -> Array[String] {
+  let out : Array[String] = []
+  match matrix {
+    Map(m) =>
+      match m.get("include") {
+        Some(Array(entries)) =>
+          for e in entries {
+            match e {
+              Map(em) =>
+                match em.get(field) {
+                  Some(String(v)) => if !is_pinned_image(v) { out.push(v) }
+                  _ => ()
+                }
+              _ => ()
+            }
+          }
+        _ => ()
+      }
+    _ => ()
+  }
+  out
+}
+
+///|
 fn check_unpinned_images(
   _ctx : WalkCtx,
   job : JobInfo,
@@ -1278,17 +1898,70 @@ fn check_unpinned_images(
     Some(v) =>
       match extract_image(v) {
         Some(img) =>
-          if !is_pinned_image(img) {
-            add_diag(
-              out,
-              "unpinned-images",
-              Warning,
-              "container image `\{img}` is not pinned by digest",
-            )
+          // Resolve `${{ matrix.<key> }}` style images by walking the
+          // matrix's `include:` list — anything literally unpinned there
+          // still counts as unpinned.
+          match matrix_key_of_image(img) {
+            Some(key) =>
+              match job.raw.get("strategy") {
+                Some(Map(strat)) =>
+                  match strat.get("matrix") {
+                    Some(mx) =>
+                      for v2 in unpinned_matrix_images(mx, key) {
+                        add_diag(
+                          out,
+                          "unpinned-images",
+                          Warning,
+                          "matrix entry `\{key}: \{v2}` produces an unpinned container image",
+                        )
+                      }
+                    None => ()
+                  }
+                _ => ()
+              }
+            None =>
+              if !is_pinned_image(img) {
+                add_diag(
+                  out,
+                  "unpinned-images",
+                  Warning,
+                  "container image `\{img}` is not pinned by digest",
+                )
+              }
           }
         None => ()
       }
     None => ()
+  }
+}
+
+///|
+fn check_unpinned_images_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  // Docker actions declare their image at `runs.image` (or
+  // `runs.using: docker` + `runs.image: docker://…`).
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  match m.get("runs") {
+    Some(Map(r)) =>
+      match r.get("image") {
+        Some(String(img)) => {
+          // Local Dockerfile references (e.g. `image: Dockerfile`) don't
+          // pull a remote image, so they can't be unpinned.
+          let is_local = !img.contains("docker://") && !img.contains("/")
+          if !is_local && !is_pinned_image(img) {
+            add_diag(
+              out,
+              "unpinned-images",
+              Warning,
+              "docker-action image `\{img}` is not pinned by digest",
+            )
+          }
+        }
+        _ => ()
+      }
+    _ => ()
   }
 }
 
@@ -1401,34 +2074,32 @@ fn env_has_unsafe_commands(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let m = match ctx.workflow_map {
-    Some(m) => m
-    None => return
-  }
-  let flagged = match m.get("env") {
-    Some(Map(env)) => env_has_unsafe_commands(env)
-    _ => false
-  }
-  if flagged {
+  let fire = fn() {
     add_diag(
       out,
       "insecure-commands",
       Warning,
       "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
     )
-    return
+  }
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("env") {
+        Some(Map(env)) =>
+          if env_has_unsafe_commands(env) {
+            fire()
+            return
+          }
+        _ => ()
+      }
+    None => ()
   }
   // Job- and step-level env blocks also count.
   for j in ctx.jobs {
     match j.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          add_diag(
-            out,
-            "insecure-commands",
-            Warning,
-            "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-          )
+          fire()
           return
         }
       _ => ()
@@ -1437,23 +2108,66 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match s.raw.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            add_diag(
-              out,
-              "insecure-commands",
-              Warning,
-              "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-            )
+            fire()
             return
           }
         _ => ()
       }
     }
   }
+  // Composite-action steps share the same hazard.
+  for s in ctx.action_steps {
+    match s.raw.get("env") {
+      Some(Map(env)) =>
+        if env_has_unsafe_commands(env) {
+          fire()
+          return
+        }
+      _ => ()
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Rule: misfeature (zizmor) — `continue-on-error: true` at job level
+// Rule: misfeature (zizmor) — GHA misfeatures that bite users in practice:
+//   - `defaults.run.shell: cmd` (workflow or job) — Windows `cmd` swallows
+//     exit codes from inline `run:` blocks
+//   - `actions/setup-python` with `pip-install:` — the input is undocumented
+//     and silently no-ops on misuse
+//   - job-level `continue-on-error: true` — hides real failures
 // ---------------------------------------------------------------------------
+
+///|
+fn defaults_run_shell_is_cmd(raw : Map[String, @yaml.Yaml]) -> Bool {
+  match raw.get("defaults") {
+    Some(Map(d)) =>
+      match d.get("run") {
+        Some(Map(r)) =>
+          match r.get("shell") {
+            Some(String(s)) => s.to_lower() == "cmd"
+            _ => false
+          }
+        _ => false
+      }
+    _ => false
+  }
+}
+
+///|
+fn check_misfeature_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) =>
+      if defaults_run_shell_is_cmd(m) {
+        add_diag(
+          out,
+          "misfeature",
+          Info,
+          "workflow `defaults.run.shell: cmd` makes inline `run:` blocks swallow exit codes; prefer `pwsh`",
+        )
+      }
+    None => ()
+  }
+}
 
 ///|
 fn check_misfeature(
@@ -1471,6 +2185,42 @@ fn check_misfeature(
       )
     _ => ()
   }
+  if defaults_run_shell_is_cmd(job.raw) {
+    add_diag(
+      out,
+      "misfeature",
+      Info,
+      "job `\{job.name}` has `defaults.run.shell: cmd`, which swallows inline `run:` exit codes; prefer `pwsh`",
+    )
+  }
+}
+
+///|
+fn check_misfeature_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) => {
+      let lo = u.to_lower()
+      if lo.contains("actions/setup-python") {
+        match step.raw.get("with") {
+          Some(Map(w)) =>
+            if w.contains("pip-install") {
+              add_diag(
+                out,
+                "misfeature",
+                Info,
+                "`actions/setup-python` has no `pip-install:` input; this silently no-ops — run `pip install` in a separate step",
+              )
+            }
+          _ => ()
+        }
+      }
+    }
+    None => ()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1478,15 +2228,104 @@ fn check_misfeature(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Mirrors zizmor's `dependabot-cooldown`: each `updates:` entry is
+/// inspected independently and may produce up to four findings
+/// (missing block / no default-days / insufficient default-days /
+/// multi-ecosystem-group with effective cooldown). Threshold matches
+/// upstream's default `days = 7`.
 fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let threshold = 7
   for um in ctx.updates {
-    if !um.contains("cooldown") {
-      add_diag(
-        out,
-        "dependabot-cooldown",
-        Info,
-        "dependabot update has no `cooldown:` configured",
-      )
+    let cooldown = um.get("cooldown")
+    match cooldown {
+      None =>
+        add_diag(
+          out,
+          "dependabot-cooldown",
+          Info,
+          "missing cooldown configuration",
+        )
+      Some(@yaml.Yaml::Map(c)) => {
+        let dd = c.get("default-days")
+        let dd_int = match dd {
+          Some(@yaml.Yaml::Integer(n)) => Some(n)
+          Some(@yaml.Yaml::Real(d, repr=_)) => Some(d.to_int64())
+          _ => None
+        }
+        match dd_int {
+          None =>
+            add_diag(
+              out,
+              "dependabot-cooldown",
+              Info,
+              "no default-days configured",
+            )
+          Some(n) =>
+            if n < threshold.to_int64() {
+              add_diag(
+                out,
+                "dependabot-cooldown",
+                Info,
+                "insufficient default-days configured (less than \{threshold})",
+              )
+            }
+        }
+        // multi-ecosystem-group with effective cooldown (pedantic).
+        if um.contains("multi-ecosystem-group") && cooldown_is_effective(c) {
+          add_diag(
+            out,
+            "dependabot-cooldown",
+            Info,
+            "multi-ecosystem-group cooldowns do not batch updates correctly",
+          )
+        }
+      }
+      _ =>
+        add_diag(
+          out,
+          "dependabot-cooldown",
+          Info,
+          "missing cooldown configuration",
+        )
+    }
+  }
+}
+
+///|
+/// Returns true when the cooldown block has any positive day budget,
+/// matching zizmor's `Cooldown::effective`.
+fn cooldown_is_effective(c : Map[String, @yaml.Yaml]) -> Bool {
+  let fields = [
+    "default-days", "semver-major-days", "semver-minor-days", "semver-patch-days",
+  ]
+  for k in fields {
+    match c.get(k) {
+      Some(@yaml.Yaml::Integer(n)) => if n > 0L { return true }
+      Some(@yaml.Yaml::Real(d, repr=_)) => if d > 0.0 { return true }
+      _ => ()
+    }
+  }
+  false
+}
+
+///|
+/// Mirrors zizmor's `dependabot-execution`: a `dependabot.yml` update
+/// entry that sets `insecure-external-code-execution: allow` lets the
+/// dependency resolver run arbitrary scripts shipped by upstream
+/// packages (the `cargo`, `bundler`, `pip`, etc. ecosystems support it).
+fn check_dependabot_execution(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  for um in ctx.updates {
+    match um.get("insecure-external-code-execution") {
+      Some(v) =>
+        if yaml_scalar_text(v) == "allow" {
+          add_diag(
+            out,
+            "dependabot-execution",
+            Error,
+            "`insecure-external-code-execution: allow` lets dependency resolvers run arbitrary upstream code",
+          )
+        }
+      None => ()
     }
   }
 }
@@ -1770,6 +2609,233 @@ fn ref_has_percent_encoding(s : String) -> Bool {
 }
 
 ///|
+/// Returns the "obfuscation kind" (empty / `.` / `..`) for the first
+/// suspicious path segment in `head` (the part before `@`), or None.
+fn uses_path_obfuscation(head : String) -> String? {
+  // Skip the leading `owner/repo` segments — those are the first two
+  // slash-delimited parts and shouldn't be checked. Upstream checks
+  // *every* component including these for `.`/`..`/empty, but in
+  // practice owner/repo can never literally be `.` / `..` / empty, so
+  // walking from the start is safe.
+  let mut idx = 0
+  let parts = head.split("/")
+  for raw in parts {
+    let part = raw.to_string()
+    if idx >= 2 {
+      // 3rd+ component is a subpath piece.
+      if part.length() == 0 {
+        return Some("empty component")
+      }
+      if part == "." {
+        return Some("'.' component")
+      }
+      if part == ".." {
+        return Some("'..' component")
+      }
+    }
+    idx = idx + 1
+  }
+  None
+}
+
+///|
+/// True if `inner` (the contents of a `${{ ... }}` interpolation) can be
+/// reduced to a constant value statically. Mirrors zizmor's
+/// `Expr::constant_reducible`: literals are reducible; any property
+/// access (`foo.bar` / `foo[...]`) is presumed dynamic; functions are
+/// reducible only when they are one of the deterministic builtins
+/// (`contains`, `startswith`, `endswith`, `format`, `tojson`, `join`).
+/// Single-quoted string literals may contain `.` and identifier-looking
+/// text that should not be confused for context access.
+fn expression_is_constant_only(inner : String) -> Bool {
+  let lower = inner.to_lower()
+  let chars : Array[Char] = []
+  for ch in lower {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    // Skip single-quoted string literals (GitHub Actions syntax uses
+    // `''` as the escape for a single quote inside a string).
+    if c == '\'' {
+      i = i + 1
+      while i < n {
+        if chars[i] == '\'' {
+          if i + 1 < n && chars[i + 1] == '\'' {
+            i = i + 2
+            continue
+          }
+          i = i + 1
+          break
+        }
+        i = i + 1
+      }
+      continue
+    }
+    if is_ident_start(c) {
+      let start = i
+      while i < n && is_ident_cont(chars[i]) {
+        i = i + 1
+      }
+      // `-` is a legal identifier continuation in GitHub Actions
+      // expressions (see e.g. `runs-on`). zizmor's lexer also accepts it.
+      while i < n && chars[i] == '-' && i + 1 < n && is_ident_cont(chars[i + 1]) {
+        i = i + 1
+        while i < n && is_ident_cont(chars[i]) {
+          i = i + 1
+        }
+      }
+      let buf = StringBuilder::new()
+      for p in start..<i {
+        buf.write_char(chars[p])
+      }
+      let name = buf.to_string()
+      // Skip trailing whitespace before looking at the next token.
+      let mut k = i
+      while k < n && (chars[k] == ' ' || chars[k] == '\t') {
+        k = k + 1
+      }
+      let next = if k < n { chars[k] } else { ' ' }
+      // Property access — context or computed.
+      if next == '.' || next == '[' {
+        return false
+      }
+      // Function calls.
+      if next == '(' {
+        let safe = [
+          "contains", "startswith", "endswith", "format", "tojson", "fromjson", "join",
+        ]
+        let mut is_safe = false
+        for f in safe {
+          if name == f {
+            is_safe = true
+            break
+          }
+        }
+        if !is_safe {
+          return false
+        }
+        // Bare identifier that isn't a keyword/literal — treat as a
+        // context reference (e.g. `github` standalone or an unknown
+        // ident). Only `true`/`false`/`null` are literal keywords.
+      } else if name != "true" && name != "false" && name != "null" {
+        return false
+      }
+      continue
+    }
+    i = i + 1
+  }
+  true
+}
+
+///|
+/// Scans `text` for `${{ ... }}` interpolations. Returns true on the first
+/// match whose inner content is constant-only (and therefore reducible).
+fn text_has_reducible_expression(text : String) -> Bool {
+  let mut i = 0
+  let bytes = text
+  while i + 2 < bytes.length() {
+    let c0 = bytes[i]
+    if c0 == '$' && bytes[i + 1] == '{' && bytes[i + 2] == '{' {
+      // Find matching `}}`.
+      let mut j = i + 3
+      let mut found = false
+      while j + 1 < bytes.length() {
+        if bytes[j] == '}' && bytes[j + 1] == '}' {
+          found = true
+          break
+        }
+        j = j + 1
+      }
+      if found {
+        let inner = bytes[i + 3:j].to_string()
+        let trimmed = inner.trim(chars=" \t\r\n").to_string()
+        if trimmed.length() > 0 && expression_is_constant_only(trimmed) {
+          return true
+        }
+        i = j + 2
+        continue
+      }
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
+/// True when the bracketed expression is a non-literal lookup — i.e. it
+/// contains a `.` (property access) outside any quoted string. Literal
+/// indices like `1` or `'a.b'` (single-quoted strings with embedded dots)
+/// must stay static so we don't false-positive on the `obfuscation` audit.
+fn index_expr_is_computed(idx_text : String) -> Bool {
+  let chars = idx_text.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_double && ch == '\'' {
+      in_single = not(in_single)
+    } else if !in_single && ch == '"' {
+      in_double = not(in_double)
+    } else if !in_single && !in_double && ch == '.' {
+      return true
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
+/// Detects `name[expr]` where `expr` itself is a non-literal lookup
+/// (contains `.`). Matches upstream `computed_indices` pedantic finding.
+fn text_has_computed_index(text : String) -> Bool {
+  // Walk balanced `[...]` within `${{ ... }}` blocks.
+  let mut i = 0
+  while i + 2 < text.length() {
+    if text[i] == '$' && text[i + 1] == '{' && text[i + 2] == '{' {
+      let mut j = i + 3
+      while j + 1 < text.length() {
+        if text[j] == '}' && text[j + 1] == '}' {
+          break
+        }
+        if text[j] == '[' {
+          // Capture index expression up to matching `]`.
+          let mut k = j + 1
+          let mut nested = 1
+          while k < text.length() && nested > 0 {
+            if text[k] == '[' {
+              nested = nested + 1
+            } else if text[k] == ']' {
+              nested = nested - 1
+              if nested == 0 {
+                break
+              }
+            }
+            k = k + 1
+          }
+          if k < text.length() {
+            let idx_text = text[j + 1:k].to_string()
+            if index_expr_is_computed(idx_text) {
+              return true
+            }
+          }
+          j = k
+        }
+        j = j + 1
+      }
+      i = j + 2
+      continue
+    }
+    i = i + 1
+  }
+  false
+}
+
+///|
 fn check_obfuscation(
   _ctx : WalkCtx,
   step : StepInfo,
@@ -1778,16 +2844,98 @@ fn check_obfuscation(
   match step.uses {
     Some(u) =>
       if step.at_idx >= 0 {
+        let head = u[:step.at_idx].to_string()
         let ref_str = u[step.at_idx + 1:].to_owned()
         if ref_has_percent_encoding(ref_str) {
           add_diag(
             out,
             "obfuscation",
-            Warning,
+            Info,
             "uses ref contains percent-encoded characters; possible obfuscation",
           )
         }
+        match uses_path_obfuscation(head) {
+          Some(kind) =>
+            add_diag(out, "obfuscation", Info, "uses ref contains \{kind}")
+          None => ()
+        }
       }
+    None => ()
+  }
+  // `with:` block that is an expression — prevents static analysis.
+  match step.raw.get("with") {
+    Some(String(s)) => {
+      let t = s.trim(chars=" \t\r\n").to_string()
+      if t.has_prefix("${{") && t.has_suffix("}}") {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "use of an expression for `with:` prevents analysis",
+        )
+      }
+    }
+    _ => ()
+  }
+  // Expressions in `if:` / `run:` text.
+  match step.if_cond {
+    Some(c) =>
+      if text_has_reducible_expression(c) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "`if:` expression can be replaced by its static evaluation",
+        )
+      }
+    None => ()
+  }
+  match step.run {
+    Some(r) => {
+      if text_has_reducible_expression(r) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "expression can be replaced by its static evaluation",
+        )
+      }
+      if text_has_computed_index(r) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    }
+    None => ()
+  }
+  // Computed indices can also appear in `if:`.
+  match step.if_cond {
+    Some(c) =>
+      if text_has_computed_index(c) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_obfuscation_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.if_cond {
+    Some(c) => {
+      if text_has_reducible_expression(c) {
+        add_diag(
+          out,
+          "obfuscation",
+          Info,
+          "`if:` expression can be replaced by its static evaluation",
+        )
+      }
+      if text_has_computed_index(c) {
+        add_diag(out, "obfuscation", Info, "index expression is computed")
+      }
+    }
     None => ()
   }
 }
@@ -1919,13 +3067,40 @@ fn step_repo_prefix(s : StepInfo) -> String? {
 }
 
 ///|
-fn is_setup_action(name : String) -> Bool {
-  name == "actions/setup-node" ||
-  name == "actions/setup-python" ||
-  name == "actions/setup-go" ||
-  name == "actions/setup-java" ||
-  name == "actions/setup-dotnet" ||
-  name == "actions/setup-ruby"
+fn superfluous_action_replacement(name : String) -> String? {
+  // Mirror upstream zizmor SUPERFLUOUS_ACTIONS catalogue (v1.25.2).
+  if name == "ncipollo/release-action" ||
+    name == "softprops/action-gh-release" ||
+    name == "elgohr/Github-Release-Action" {
+    Some("use `gh release` in a script step")
+  } else if name == "peter-evans/create-pull-request" {
+    Some("use `gh pr create` in a script step")
+  } else if name == "peter-evans/create-or-update-comment" {
+    Some("use `gh pr comment` or `gh issue comment` in a script step")
+  } else if name == "dacbd/create-issue-action" {
+    Some("use `gh issue create` in a script step")
+  } else if name == "actions-ecosystem/action-add-labels" {
+    Some(
+      "use `gh issue edit --add-label` or `gh pr edit --add-label` in a script step",
+    )
+  } else if name == "actions-ecosystem/action-remove-labels" {
+    Some(
+      "use `gh issue edit --remove-label` or `gh pr edit --remove-label` in a script step",
+    )
+  } else if name == "svenstaro/upload-release-action" {
+    Some("use `gh release create` and `gh release upload` in a script step")
+  } else if name == "addnab/docker-run-action" {
+    Some("use `docker run` in a script step, or use a container step")
+  } else if name == "sergeysova/jq-action" {
+    Some("use `jq` in a script step")
+  } else if name == "dtolnay/rust-toolchain" {
+    Some("use `rustup` and/or `cargo` in a script step")
+  } else if name == "stefanzweifel/git-auto-commit-action" ||
+    name == "EndBug/add-and-commit" {
+    Some("use `git add`, `git commit`, and `git push` in a script step")
+  } else {
+    None
+  }
 }
 
 ///|
@@ -1934,54 +3109,179 @@ fn check_superfluous_actions(
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  let counts : Map[String, Int] = {}
   for s in job.steps {
     match step_repo_prefix(s) {
       Some(prefix) =>
-        if is_setup_action(prefix) {
-          let curr = match counts.get(prefix) {
-            Some(n) => n
-            None => 0
-          }
-          counts[prefix] = curr + 1
+        match superfluous_action_replacement(prefix) {
+          Some(hint) =>
+            add_diag(
+              out,
+              "superfluous-actions",
+              Info,
+              "step uses `\{prefix}` — \{hint}",
+            )
+          None => ()
         }
       None => ()
     }
   }
-  counts.each(fn(prefix, n) {
-    if n >= 2 {
-      let times = if n == 2 { "twice" } else { "\{n} times" }
-      add_diag(
-        out,
-        "superfluous-actions",
-        Info,
-        "job `\{job.name}` uses `\{prefix}` \{times}",
-      )
+}
+
+///|
+fn check_superfluous_actions_doc(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  // Composite action steps reuse the same SUPERFLUOUS_ACTIONS catalogue upstream.
+  for s in ctx.action_steps {
+    match step_repo_prefix(s) {
+      Some(prefix) =>
+        match superfluous_action_replacement(prefix) {
+          Some(hint) =>
+            add_diag(
+              out,
+              "superfluous-actions",
+              Info,
+              "step uses `\{prefix}` — \{hint}",
+            )
+          None => ()
+        }
+      None => ()
     }
-  })
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Rule: template-injection (zizmor + actionlint script-injection)
+//
+// Upstream's pedantic-mode behaviour boils down to: for every `${{ … }}`
+// expression that lands inside a `run:` script or a step `with:` input,
+// emit at least one finding. High-cap contexts (e.g.
+// `github.event.pull_request.title`) get the "untrusted … interpolated"
+// Error; everything else falls through to the pedantic "backstop" Info
+// ("any expression in a code context is a code smell"). karinto runs as
+// the pedantic-equivalent, so we emit both tiers.
 // ---------------------------------------------------------------------------
+
+///|
+/// Curated High-cap context patterns: substrings whose presence inside a
+/// `${{ … }}` span indicates attacker-controllable input. The list mirrors
+/// the Arbitrary-cap entries in zizmor's compiled FST that actually show
+/// up across the upstream fixture corpus.
+fn untrusted_context_patterns() -> Array[String] {
+  [
+    "github.event.pull_request.body", "github.event.pull_request.title", "github.event.pull_request.head.ref",
+    "github.event.pull_request.head.label", "github.event.pull_request.head.repo.description",
+    "github.event.pull_request.head.repo.homepage", "github.event.issue.title", "github.event.issue.body",
+    "github.event.comment.body", "github.event.review.body", "github.event.review_comment.body",
+    "github.event.discussion.title", "github.event.discussion.body", "github.event.workflow_run.head_branch",
+    "github.event.workflow_run.display_title", "github.event.workflow_run.head_commit.message",
+    "github.event.commits.", "github.event.head_commit.message", "github.event.pages.",
+    "github.head_ref", "github.event.changes.",
+  ]
+}
 
 ///|
 fn find_untrusted_in_text(t : String) -> String? {
   if !t.contains("${{") {
     return None
   }
-  let patterns = [
-    "github.event.pull_request.body", "github.event.pull_request.title", "github.event.pull_request.head.ref",
-    "github.event.pull_request.head.label", "github.event.issue.title", "github.event.issue.body",
-    "github.event.comment.body", "github.event.review.body", "github.event.review_comment.body",
-    "github.event.workflow_run.head_branch", "github.head_ref",
-  ]
-  for p in patterns {
+  for p in untrusted_context_patterns() {
     if t.contains(p) {
       return Some(p)
     }
   }
   None
+}
+
+///|
+/// True if `t` contains at least one `${{ … }}` template expression. Used
+/// as the pedantic-backstop trigger.
+fn text_has_template_expression(t : String) -> Bool {
+  t.contains("${{")
+}
+
+///|
+/// Emit the appropriate template-injection finding(s) for one piece of
+/// script-bearing text. Returns once per call site:
+///
+/// * High-cap match → `Error`, with the specific context echoed.
+/// * Otherwise, presence of any `${{ … }}` → `Info` (pedantic backstop).
+fn template_injection_emit(
+  text : String,
+  scope_label : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match find_untrusted_in_text(text) {
+    Some(p) =>
+      add_diag(
+        out,
+        "template-injection",
+        Error,
+        "untrusted `\{p}` interpolated into \{scope_label}",
+      )
+    None =>
+      if text_has_template_expression(text) {
+        add_diag(
+          out,
+          "template-injection",
+          Info,
+          "code injection via template expansion in \{scope_label}",
+        )
+      }
+  }
+}
+
+///|
+/// Map of action sink prefixes → list of `with:` input names whose value
+/// reaches a script interpreter. Mirrors zizmor's hardcoded extras + a
+/// curated subset of the CodeQL injection-sinks model covering every
+/// known sink that appears in the upstream fixture corpus.
+fn template_injection_sinks() -> Array[(String, Array[String])] {
+  [
+    ("actions/github-script", ["script"]),
+    ("amadevus/pwsh-script", ["script"]),
+    ("jannekem/run-python-script-action", ["script"]),
+    ("cardinalby/js-eval-action", ["expression"]),
+    ("addnab/docker-run-action", ["options", "run"]),
+    ("azure/cli", ["inlineScript"]),
+    ("azure/powershell", ["inlineScript"]),
+    ("mikefarah/yq", ["cmd"]),
+    ("tibdex/backport", ["title_template", "body_template"]),
+  ]
+}
+
+///|
+/// True if the step's `uses:` matches any registered sink, returning the
+/// list of input names that reach a script interpreter.
+fn step_template_sink_inputs(step : StepInfo) -> Array[String] {
+  match step.uses {
+    Some(u) => {
+      // `uses:` form is `owner/repo[/subpath][@ref]`. Strip ref and
+      // subpath before comparing — sinks key on the bare repo prefix.
+      let bare = match u.find("@") {
+        Some(i) => u.substring(start=0, end=i)
+        None => u
+      }
+      let canonical = (match bare.find("/") {
+        Some(i) =>
+          match bare.substring(start=i + 1).find("/") {
+            Some(j) => bare.substring(start=0, end=i + 1 + j)
+            None => bare
+          }
+        None => bare
+      }).to_lower()
+      for sink in template_injection_sinks() {
+        let prefix = sink.0
+        let inputs = sink.1
+        if canonical == prefix {
+          return inputs
+        }
+      }
+      []
+    }
+    None => []
+  }
 }
 
 ///|
@@ -1991,16 +3291,20 @@ fn check_template_injection(
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) =>
-      match find_untrusted_in_text(r) {
-        Some(p) =>
-          add_diag(
-            out,
-            "template-injection",
-            Error,
-            "untrusted `\{p}` interpolated into `run:` script",
-          )
-        None => ()
+    Some(r) => template_injection_emit(r, "`run:` script", out)
+    None => ()
+  }
+  let sink_inputs = step_template_sink_inputs(step)
+  if sink_inputs.length() == 0 {
+    return
+  }
+  match step.with_ {
+    Some(w) =>
+      for name in sink_inputs {
+        match w.get(name) {
+          Some(String(s)) => template_injection_emit(s, "`with.\{name}`", out)
+          _ => ()
+        }
       }
     None => ()
   }
@@ -2117,71 +3421,629 @@ fn check_overprovisioned_secrets(
 // ---------------------------------------------------------------------------
 
 ///|
-fn workflow_runs_on_release(ctx : WalkCtx) -> Bool {
+/// Trigger kinds collected from a workflow's `on:` block; mirrors upstream
+/// `ReleaseTrigger`. `has_release_branch` distinguishes a `push:branches`
+/// pattern whose name contains the substring `"release"` (case-insensitive),
+/// which suppresses the tag-push conditional heuristic.
+priv struct CacheTriggers {
+  has_tag_push : Bool
+  has_release_event : Bool
+  has_release_branch : Bool
+}
+
+///|
+fn cache_triggers_empty(t : CacheTriggers) -> Bool {
+  !t.has_tag_push && !t.has_release_event && !t.has_release_branch
+}
+
+///|
+fn cache_triggers_all_tag_or_release(t : CacheTriggers) -> Bool {
+  !cache_triggers_empty(t) && !t.has_release_branch
+}
+
+///|
+fn branch_pattern_is_release(s : String) -> Bool {
+  s.to_lower().contains("release")
+}
+
+///|
+fn collect_cache_triggers(ctx : WalkCtx) -> CacheTriggers {
+  let mut tag = false
+  let mut rel = false
+  let mut branch = false
   let m = match ctx.workflow_map {
     Some(m) => m
-    None => return false
+    None =>
+      return CacheTriggers::{
+        has_tag_push: false,
+        has_release_event: false,
+        has_release_branch: false,
+      }
   }
   match m.get("on") {
-    Some(String(s)) => s == "release"
-    Some(Array(arr)) => {
+    Some(String(s)) => if s == "release" { rel = true }
+    Some(Array(arr)) =>
       for item in arr {
         match item {
-          String(s) => if s == "release" { return true }
+          String(s) => if s == "release" { rel = true }
           _ => ()
         }
       }
-      false
-    }
-    Some(Map(om)) => {
-      let mut found = false
+    Some(Map(om)) =>
       om.each(fn(name, v) {
         if name == "release" {
-          found = true
+          rel = true
         }
         if name == "push" {
           match v {
-            Map(pm) => if pm.contains("tags") { found = true }
+            Map(pm) => {
+              if pm.contains("tags") {
+                tag = true
+              }
+              match pm.get("branches") {
+                Some(String(s)) =>
+                  if branch_pattern_is_release(s) {
+                    branch = true
+                  }
+                Some(Array(b)) =>
+                  for it in b {
+                    match it {
+                      String(s) =>
+                        if branch_pattern_is_release(s) {
+                          branch = true
+                        }
+                      _ => ()
+                    }
+                  }
+                _ => ()
+              }
+            }
             _ => ()
           }
         }
       })
-      found
-    }
-    _ => false
+    _ => ()
+  }
+  CacheTriggers::{
+    has_tag_push: tag,
+    has_release_event: rel,
+    has_release_branch: branch,
   }
 }
 
 ///|
-fn step_is_cache_restore(s : StepInfo) -> Bool {
+/// True if `uses` matches one of the curated publisher actions used by
+/// upstream zizmor to mark a job as "publishing artifacts at runtime".
+/// Comparison strips the `@ref` suffix and is case-insensitive.
+fn cache_uses_is_publisher(u : String) -> Bool {
+  let lo = u.to_lower()
+  let prefixes = [
+    "pypa/gh-action-pypi-publish", "rubygems/release-gem", "jreleaser/release-action",
+    "goreleaser/goreleaser-action", "softprops/action-gh-release", "release-drafter/release-drafter",
+    "googleapis/release-please-action", "redhat-actions/push-to-registry", "aws-actions/amazon-ecs-deploy-task-definition",
+    "aws-actions/aws-cloudformation-github-deploy", "azure/aci-deploy", "azure/container-apps-deploy-action",
+    "azure/functions-action", "azure/sql-action", "cloudflare/wrangler-action", "google-github-actions/deploy-appengine",
+    "google-github-actions/deploy-cloudrun", "google-github-actions/deploy-cloud-functions",
+  ]
+  for p in prefixes {
+    if lo.has_prefix(p + "@") || lo.has_prefix(p + "/") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn step_is_publisher_step(s : StepInfo) -> Bool {
   match s.uses {
-    Some(u) =>
-      u.has_prefix("actions/cache@") || u.has_prefix("actions/cache/restore@")
+    Some(u) => {
+      if cache_uses_is_publisher(u) {
+        return true
+      }
+      let lo = u.to_lower()
+      if lo.has_prefix("docker/build-push-action@") ||
+        lo.has_prefix("docker/build-push-action/") {
+        // Upstream: ControlExpr::single(Toggle::OptIn, "push", Boolean, true) —
+        // the 4th arg is `default_satisfied`, so when `push:` is absent the
+        // step is still treated as publishing. Only an explicit `push: false`
+        // (literal bool or stringy "false") clears it.
+        match s.with_ {
+          Some(w) =>
+            match w.get("push") {
+              Some(Boolean(false)) => false
+              Some(String(s)) => s.to_lower() != "false"
+              _ => true
+            }
+          _ => true
+        }
+      } else {
+        false
+      }
+    }
     None => false
   }
 }
 
 ///|
-fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  if !workflow_runs_on_release(ctx) {
-    return
-  }
-  for j in ctx.jobs {
-    let mut hit = false
-    for s in j.steps {
-      if step_is_cache_restore(s) {
-        hit = true
-        break
-      }
+fn job_has_publisher_step(j : JobInfo) -> Bool {
+  for s in j.steps {
+    if step_is_publisher_step(s) {
+      return true
     }
-    if hit {
-      add_diag(
-        out,
-        "cache-poisoning",
-        Error,
-        "release-publishing job restores from cache; risk of cache poisoning",
-      )
-      return
+  }
+  false
+}
+
+///|
+/// Per-step classification: NotSatisfied means no cache is in use.
+/// Satisfied means the step caches unconditionally (Always /
+/// DefaultBehaviour / DirectOptIn). Conditional carries an optional
+/// "would-enable-under-tag-push" result of evaluating the control
+/// expression — `Some(true)` means tag-push would still cache,
+/// `Some(false)` means it would not, `None` means uncertain.
+priv enum CacheStep {
+  CacheNotSatisfied
+  CacheSatisfied
+  CacheConditional(Bool?)
+}
+
+///|
+fn expr_to_string(value : @yaml.Yaml) -> String {
+  match value {
+    String(s) => s
+    Boolean(true) => "true"
+    Boolean(false) => "false"
+    Integer(n) => n.to_string()
+    _ => ""
+  }
+}
+
+///|
+/// Evaluate `${{ ... }}` under the assumption that the workflow is
+/// running under a tag-push (so `startsWith(github.ref, 'refs/tags/')`
+/// is true). Returns Some(b) for definitive results, None for anything
+/// the recogniser doesn't understand.
+fn eval_tag_push_expr(raw : String) -> Bool? {
+  let trimmed = raw.trim(chars=" \t\n\r").to_string()
+  if !trimmed.has_prefix("${{") || !trimmed.has_suffix("}}") {
+    return None
+  }
+  let inner = trimmed
+    .substring(start=3, end=trimmed.length() - 2)
+    .trim(chars=" \t\n\r")
+    .to_string()
+  eval_tag_push_inner(inner)
+}
+
+///|
+fn eval_tag_push_inner(s : String) -> Bool? {
+  let t = s.trim(chars=" \t\n\r").to_string()
+  if t == "true" {
+    return Some(true)
+  }
+  if t == "false" {
+    return Some(false)
+  }
+  if t.has_prefix("!") {
+    match eval_tag_push_inner(t.substring(start=1).to_string()) {
+      Some(b) => return Some(!b)
+      None => return None
+    }
+  }
+  // Match `startsWith(github.ref, 'refs/tags/')` permissively
+  // (any whitespace, single or double quotes).
+  let lo = t.to_lower()
+  if lo.has_prefix("startswith(") &&
+    lo.contains("github.ref") &&
+    (lo.contains("'refs/tags/'") || lo.contains("\"refs/tags/\"")) {
+    return Some(true)
+  }
+  None
+}
+
+///|
+fn classify_boolean_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(true)) => CacheSatisfied
+        Some(Boolean(false)) => CacheNotSatisfied
+        Some(String(s)) => {
+          let lo = s.to_lower()
+          if lo == "false" {
+            CacheNotSatisfied
+          } else if s.has_prefix("${{") {
+            CacheConditional(eval_tag_push_expr(s))
+          } else if lo == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else {
+            // boolish (any non-false, non-templated string)
+            CacheSatisfied
+          }
+        }
+        _ =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+      }
+  }
+}
+
+///|
+fn classify_boolean_optout(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  // OptOut Boolean: field=true → cache off, field=false → cache on.
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(true)) => CacheNotSatisfied
+        Some(Boolean(false)) => CacheSatisfied
+        Some(String(s)) => {
+          let lo = s.to_lower()
+          if lo == "false" {
+            CacheSatisfied
+          } else if s.has_prefix("${{") {
+            // For OptOut Boolean: cache-enabled iff expr-result is false.
+            let r = eval_tag_push_expr(s)
+            let would_enable = match r {
+              Some(b) => Some(!b)
+              None => None
+            }
+            CacheConditional(would_enable)
+          } else if lo == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else {
+            // boolish non-false string → cache off
+            CacheNotSatisfied
+          }
+        }
+        _ =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+      }
+  }
+}
+
+///|
+fn classify_freestring_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(String(s)) =>
+          if s == "" {
+            if satisfied_by_default {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          } else if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            CacheSatisfied
+          }
+        Some(Null) =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(Boolean(_)) => CacheSatisfied
+        Some(_) => CacheSatisfied
+      }
+  }
+}
+
+///|
+fn classify_exact_optin(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  allowed : Array[String],
+) -> CacheStep {
+  match with_ {
+    None => CacheNotSatisfied
+    Some(w) =>
+      match w.get(field) {
+        None => CacheNotSatisfied
+        Some(String(s)) =>
+          if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            let lo = s.to_lower()
+            let mut matched = false
+            for a in allowed {
+              if a.to_lower() == lo {
+                matched = true
+              }
+            }
+            if matched {
+              CacheSatisfied
+            } else {
+              CacheNotSatisfied
+            }
+          }
+        _ => CacheNotSatisfied
+      }
+  }
+}
+
+///|
+fn classify_exact_optout(
+  with_ : Map[String, @yaml.Yaml]?,
+  field : String,
+  allowed : Array[String],
+  satisfied_by_default : Bool,
+) -> CacheStep {
+  // OptOut Exact: value in allowed list → cache off, else cache on.
+  match with_ {
+    None =>
+      if satisfied_by_default {
+        CacheSatisfied
+      } else {
+        CacheNotSatisfied
+      }
+    Some(w) =>
+      match w.get(field) {
+        None =>
+          if satisfied_by_default {
+            CacheSatisfied
+          } else {
+            CacheNotSatisfied
+          }
+        Some(String(s)) =>
+          if s.has_prefix("${{") {
+            CacheConditional(None)
+          } else {
+            let lo = s.to_lower()
+            let mut matched = false
+            for a in allowed {
+              if a.to_lower() == lo {
+                matched = true
+              }
+            }
+            if matched {
+              CacheNotSatisfied
+            } else {
+              CacheSatisfied
+            }
+          }
+        Some(v) => {
+          let coerced = expr_to_string(v).to_lower()
+          let mut matched = false
+          for a in allowed {
+            if a.to_lower() == coerced {
+              matched = true
+            }
+          }
+          if matched {
+            CacheNotSatisfied
+          } else {
+            CacheSatisfied
+          }
+        }
+      }
+  }
+}
+
+///|
+fn cache_step_and(a : CacheStep, b : CacheStep) -> CacheStep {
+  match (a, b) {
+    (CacheNotSatisfied, _) | (_, CacheNotSatisfied) => CacheNotSatisfied
+    (CacheConditional(x), CacheConditional(y)) =>
+      match (x, y) {
+        (Some(false), _) | (_, Some(false)) => CacheConditional(Some(false))
+        (Some(true), Some(true)) => CacheConditional(Some(true))
+        _ => CacheConditional(None)
+      }
+    (CacheConditional(x), _) | (_, CacheConditional(x)) => CacheConditional(x)
+    _ => CacheSatisfied
+  }
+}
+
+///|
+fn cache_step_or(a : CacheStep, b : CacheStep) -> CacheStep {
+  match (a, b) {
+    (CacheSatisfied, _) | (_, CacheSatisfied) => CacheSatisfied
+    (CacheConditional(x), CacheConditional(y)) =>
+      match (x, y) {
+        (Some(true), _) | (_, Some(true)) => CacheConditional(Some(true))
+        (Some(false), Some(false)) => CacheConditional(Some(false))
+        _ => CacheConditional(None)
+      }
+    (CacheConditional(x), _) | (_, CacheConditional(x)) => CacheConditional(x)
+    _ => CacheNotSatisfied
+  }
+}
+
+///|
+fn classify_cache_aware_step(s : StepInfo) -> CacheStep {
+  let u = match s.uses {
+    Some(u) => u
+    None => return CacheNotSatisfied
+  }
+  // Strip ref before matching.
+  let bare = if s.at_idx >= 0 {
+    u.substring(start=0, end=s.at_idx).to_lower()
+  } else {
+    u.to_lower()
+  }
+  if bare == "actions/cache" || bare == "actions/cache/restore" {
+    return classify_boolean_optout(s.with_, "lookup-only", true)
+  }
+  if bare == "actions/setup-java" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "actions/setup-go" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "actions/setup-node" {
+    let c1 = classify_exact_optin(s.with_, "cache", ["npm", "yarn", "pnpm"])
+    let c2 = classify_boolean_optin(s.with_, "package-manager-cache", true)
+    return cache_step_or(c1, c2)
+  }
+  if bare == "actions/setup-python" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "actions/setup-dotnet" {
+    return classify_boolean_optin(s.with_, "cache", false)
+  }
+  if bare == "astral-sh/setup-uv" {
+    return classify_boolean_optin(s.with_, "enable-cache", true)
+  }
+  if bare == "swatinem/rust-cache" {
+    return classify_boolean_optout(s.with_, "lookup-only", true)
+  }
+  if bare == "ruby/setup-ruby" {
+    return classify_boolean_optin(s.with_, "bundler-cache", false)
+  }
+  if bare == "pyo3/maturin-action" {
+    return classify_boolean_optin(s.with_, "sccache", false)
+  }
+  if bare == "mlugg/setup-zig" {
+    return classify_boolean_optin(s.with_, "use-cache", true)
+  }
+  if bare == "oven-sh/setup-bun" {
+    return classify_boolean_optout(s.with_, "no-cache", true)
+  }
+  if bare == "determinatesystems/magic-nix-cache-action" {
+    return classify_boolean_optin(s.with_, "use-gha-cache", true)
+  }
+  if bare == "graalvm/setup-graalvm" {
+    return classify_freestring_optin(s.with_, "cache", false)
+  }
+  if bare == "gradle/actions/setup-gradle" {
+    return classify_boolean_optout(s.with_, "cache-disabled", true)
+  }
+  if bare == "docker/setup-buildx-action" {
+    let c1 = classify_boolean_optin(s.with_, "cache-binary", true)
+    let c2 = classify_freestring_optin(s.with_, "version", false)
+    return cache_step_and(c1, c2)
+  }
+  if bare == "actions-rust-lang/setup-rust-toolchain" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "mozilla-actions/sccache-action" {
+    return CacheSatisfied
+  }
+  if bare == "nix-community/cache-nix-action" {
+    return CacheSatisfied
+  }
+  if bare == "jdx/mise-action" {
+    return classify_boolean_optin(s.with_, "cache", true)
+  }
+  if bare == "ramsey/composer-install" {
+    return classify_exact_optout(
+      s.with_,
+      "ignore-cache",
+      ["yes", "true", "1"],
+      true,
+    )
+  }
+  if bare == "awalsh128/cache-apt-pkgs-action" {
+    return CacheSatisfied
+  }
+  CacheNotSatisfied
+}
+
+///|
+/// Decide whether a step's `CacheStep` value should produce a finding,
+/// given the workflow's collected triggers. Conditional findings can be
+/// suppressed (or upgraded) when the trigger set is purely tag/release.
+fn cache_step_should_emit(triggers : CacheTriggers, step : CacheStep) -> Bool {
+  match step {
+    CacheNotSatisfied => false
+    CacheSatisfied => true
+    CacheConditional(would_enable) =>
+      if cache_triggers_all_tag_or_release(triggers) {
+        match would_enable {
+          Some(false) => false // tag-push would disable caching → silenced
+          _ => true // Some(true) → upgraded to DirectOptIn; None → uncertain
+        }
+      } else {
+        true // no heuristic when a release-branch trigger is present
+      }
+  }
+}
+
+///|
+fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let triggers = collect_cache_triggers(ctx)
+  let workflow_publishing = !cache_triggers_empty(triggers)
+  for j in ctx.jobs {
+    let job_publishing = workflow_publishing || job_has_publisher_step(j)
+    if !job_publishing {
+      continue
+    }
+    for s in j.steps {
+      let usage = classify_cache_aware_step(s)
+      if cache_step_should_emit(triggers, usage) {
+        add_diag(
+          out,
+          "cache-poisoning",
+          Error,
+          "runtime artifacts potentially vulnerable to a cache poisoning attack",
+        )
+        return
+      }
     }
   }
 }
@@ -2205,6 +4067,22 @@ fn run_has_pipe_to_shell(r : String) -> Bool {
 }
 
 ///|
+/// Returns the canonical owner/name (lower-cased, no `@ref`, no path
+/// segments) of a tool-installer action that downloads a versioned tool
+/// at runtime. The list below matches zizmor's curated catalogue.
+fn tool_installer_action(uses : String) -> String? {
+  let lo = uses.to_lower()
+  let bare = bare_repo_of(lo)
+  let known = ["aquasecurity/setup-trivy", "1password/load-secrets-action"]
+  for k in known {
+    if bare == k {
+      return Some(k)
+    }
+  }
+  None
+}
+
+///|
 fn check_unpinned_tools(
   _ctx : WalkCtx,
   step : StepInfo,
@@ -2219,6 +4097,49 @@ fn check_unpinned_tools(
           Warning,
           "run step fetches and executes an external script without pinning",
         )
+        return
+      }
+    None => ()
+  }
+  // Known tool-installer actions: flag implicit-latest (`with:` missing or
+  // omits `version:`), explicit `version: latest`, and expression-based
+  // versions that resolve at workflow-trigger time.
+  match step.uses {
+    Some(u) =>
+      match tool_installer_action(u) {
+        Some(name) => {
+          let kind = match step.raw.get("with") {
+            Some(Map(w)) =>
+              match w.get("version") {
+                Some(String(v)) => {
+                  let lo = v.to_lower()
+                  if lo == "latest" {
+                    "explicit-latest"
+                  } else if v.contains("${{") {
+                    "dynamic"
+                  } else {
+                    "pinned"
+                  }
+                }
+                Some(_) => "pinned"
+                None => "implicit-latest"
+              }
+            _ => "implicit-latest"
+          }
+          let msg = match kind {
+            "implicit-latest" =>
+              "`\{name}` defaults to the latest tool version; pin via `with.version`"
+            "explicit-latest" =>
+              "`\{name}` is invoked with `version: latest`; pin to a specific version"
+            "dynamic" =>
+              "`\{name}` resolves `version` from an expression; pin to a literal version"
+            _ => ""
+          }
+          if msg.length() > 0 {
+            add_diag(out, "unpinned-tools", Warning, msg)
+          }
+        }
+        None => ()
       }
     None => ()
   }
@@ -2332,13 +4253,13 @@ fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
 ///|
 /// Count non-overlapping substring occurrences.
 fn count_substr(s : String, sub : String) -> Int {
-  let sl = s.length()
-  let subl = sub.length()
+  let sa = s.to_array()
+  let ba = sub.to_array()
+  let sl = sa.length()
+  let subl = ba.length()
   if subl == 0 || sl < subl {
     return 0
   }
-  let sa = s.to_array()
-  let ba = sub.to_array()
   let mut count = 0
   let mut i = 0
   while i <= sl - subl {
@@ -2716,32 +4637,158 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// True when the workflow's `on:` block includes `pull_request_target` or
+/// `workflow_run` — the privileged-trigger context under which writes to
+/// `$GITHUB_ENV` / `$GITHUB_PATH` become an arbitrary-code-execution sink.
+fn workflow_has_dangerous_trigger(ctx : WalkCtx) -> Bool {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return false
+  }
+  match m.get("on") {
+    Some(String(s)) => is_dangerous_trigger(s)
+    Some(Array(arr)) => {
+      for item in arr {
+        match item {
+          String(s) => if is_dangerous_trigger(s) { return true }
+          _ => ()
+        }
+      }
+      false
+    }
+    Some(Map(om)) => {
+      let mut hit = false
+      om.each(fn(name, _) { if is_dangerous_trigger(name) { hit = true } })
+      hit
+    }
+    _ => false
+  }
+}
+
+///|
+/// Heuristic "non-literal" check for the LHS of a `>>` redirect to
+/// `GITHUB_ENV`/`GITHUB_PATH`. Matches any shell variable, `$(...)`,
+/// command-substitution backticks, cmd-style `%var%`, or `${{ ... }}`
+/// expression. Single-quoted regions stay literal in bash, so `$` and
+/// backticks inside them are ignored — `echo '$HOME' >> $GITHUB_ENV`
+/// is a static write. Static-only writes (e.g. `echo foo=bar >> $GITHUB_ENV`)
+/// stay silent, matching upstream `bash_echo_arg_is_safe`.
+fn lhs_has_dynamic_token(lhs : String) -> Bool {
+  let chars = lhs.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_double && ch == '\'' {
+      in_single = not(in_single)
+      i = i + 1
+      continue
+    }
+    if !in_single && ch == '"' {
+      in_double = not(in_double)
+      i = i + 1
+      continue
+    }
+    if !in_single {
+      // Outside single-quotes: bash `$VAR` / `${VAR}` / `$(...)`,
+      // pwsh `$env:...`, the template expression `${{ ... }}`, or a
+      // command-substitution backtick — every one is dynamic.
+      if ch == '$' || ch == '`' {
+        return true
+      }
+    }
+    i = i + 1
+  }
+  // cmd `%VAR%` is unaffected by shell quoting (cmd doesn't use single quotes
+  // the same way); fall back to counting `%` occurrences.
+  let mut pct_count = 0
+  for part in lhs.split("%") {
+    let _ = part
+    pct_count = pct_count + 1
+  }
+  if pct_count >= 3 {
+    return true
+  }
+  false
+}
+
+///|
+/// Matches the three syntactic forms upstream recognises for a redirect to
+/// `GITHUB_ENV` / `GITHUB_PATH`:
+///   * bash       `>> $GITHUB_ENV` or `>> ${GITHUB_ENV}`
+///   * powershell `>> $env:GITHUB_ENV` or `>> ${env:GITHUB_ENV}` (case-insensitive)
+///   * cmd        `>> %GITHUB_ENV%`
+/// Returns the (label, target) on first hit per line, else None.
+fn detect_github_env_redirect(line : String) -> (String, String)? {
+  let lo = line.to_lower()
+  let pairs = [
+    ("$github_env", "GITHUB_ENV"),
+    ("${github_env}", "GITHUB_ENV"),
+    ("$env:github_env", "GITHUB_ENV"),
+    ("${env:github_env}", "GITHUB_ENV"),
+    ("%github_env%", "GITHUB_ENV"),
+    ("$github_path", "GITHUB_PATH"),
+    ("${github_path}", "GITHUB_PATH"),
+    ("$env:github_path", "GITHUB_PATH"),
+    ("${env:github_path}", "GITHUB_PATH"),
+    ("%github_path%", "GITHUB_PATH"),
+  ]
+  for entry in pairs {
+    let (needle, target) = entry
+    match lo.find(needle) {
+      Some(_) => return Some((needle, target))
+      None => ()
+    }
+  }
+  None
+}
+
+///|
 fn check_github_env(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  match step.run {
-    Some(r) => {
-      let to_env = r.contains("$GITHUB_ENV") || r.contains("${GITHUB_ENV}")
-      let to_path = r.contains("$GITHUB_PATH") || r.contains("${GITHUB_PATH}")
-      if !to_env && !to_path {
-        return
-      }
-      match find_untrusted_in_text(r) {
-        Some(p) => {
-          let target = if to_path { "$GITHUB_PATH" } else { "$GITHUB_ENV" }
+  let run = match step.run {
+    Some(r) => r
+    None => return
+  }
+  // Workflow steps require a dangerous trigger; composite-action steps
+  // are checked unconditionally — they may be invoked from any caller
+  // workflow, including one with `pull_request_target`.
+  if !ctx.action_is_composite && !workflow_has_dangerous_trigger(ctx) {
+    return
+  }
+  // Walk by line; for each redirect to GITHUB_ENV/GITHUB_PATH, fire when
+  // the LHS contains any non-literal token (variable/cmd-sub/template).
+  let lines = run.split("\n")
+  for ln in lines {
+    let line = ln.to_string()
+    // Only care about lines that include `>>`.
+    if !line.contains(">>") {
+      continue
+    }
+    let (_, target) = match detect_github_env_redirect(line) {
+      Some(p) => p
+      None => continue
+    }
+    match line.find(">>") {
+      Some(idx) => {
+        let lhs = line[:idx].to_string()
+        if lhs_has_dynamic_token(lhs) {
           add_diag(
             out,
             "github-env",
             Error,
-            "untrusted `\{p}` written to `\{target}`",
+            "write to `\{target}` may allow code execution",
           )
+          return
         }
-        None => ()
       }
+      None => ()
     }
-    None => ()
   }
 }
 
@@ -2750,28 +4797,45 @@ fn check_github_env(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Checks whether `text` references a secret via a transform that bypasses
+/// GitHub Actions' built-in redaction. Returns `Some(transform-name)` on
+/// hit. Looks for shell pipes that mangle the secret (base64/xxd/tr/cut/sed
+/// /awk) and for `fromJSON(secrets...)` / `fromJson(secrets...)` expressions
+/// (case-insensitive) that destructure JSON-typed secrets — both classes
+/// land an unredacted value in logs.
+fn unredacted_secret_transform(text : String) -> String? {
+  if !contains_secrets_ref(text) {
+    return None
+  }
+  let lo = text.to_lower()
+  let transforms = [
+    ("base64", "base64"),
+    ("xxd", "xxd"),
+    ("| tr ", "tr"),
+    ("| cut ", "cut"),
+    ("| sed ", "sed"),
+    ("| awk ", "awk"),
+    ("fromjson(secrets", "fromJSON"),
+  ]
+  for entry in transforms {
+    let (pat, name) = entry
+    if lo.contains(pat) {
+      return Some(name)
+    }
+  }
+  None
+}
+
+///|
 fn check_unredacted_secrets(
   _ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) => {
-      if !contains_secrets_ref(r) {
-        return
-      }
-      let transforms = [
-        ("base64", "base64"),
-        ("xxd", "xxd"),
-        ("| tr ", "tr"),
-        ("| cut ", "cut"),
-        ("| sed ", "sed"),
-        ("| awk ", "awk"),
-        ("fromJSON(secrets", "fromJSON"),
-      ]
-      for entry in transforms {
-        let (pat, name) = entry
-        if r.contains(pat) {
+    Some(r) =>
+      match unredacted_secret_transform(r) {
+        Some(name) => {
           add_diag(
             out,
             "unredacted-secrets",
@@ -2780,9 +4844,32 @@ fn check_unredacted_secrets(
           )
           return
         }
+        None => ()
       }
-    }
     None => ()
+  }
+  // zizmor also flags `env:` values that destructure JSON-typed secrets via
+  // `fromJSON(secrets.X)` — the unredacted field lands in the runner
+  // environment and gets echoed by any subsequent `run:` that references it.
+  match step.raw.get("env") {
+    Some(Map(env)) =>
+      env.each(fn(_k, v) {
+        match v {
+          String(s) =>
+            match unredacted_secret_transform(s) {
+              Some(name) =>
+                add_diag(
+                  out,
+                  "unredacted-secrets",
+                  Error,
+                  "secret is transformed (\{name}) in `env:` before logging; redaction will fail",
+                )
+              None => ()
+            }
+          _ => ()
+        }
+      })
+    _ => ()
   }
 }
 
@@ -3778,6 +5865,828 @@ fn is_reusable_only(m : Map[String, @yaml.Yaml]) -> Bool {
 }
 
 // ---------------------------------------------------------------------------
+// Rule: anonymous-definition (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `anonymous-definition` (audit/anonymous_definition.rs):
+/// fires when a workflow/action has no top-level `name:` and, in workflows,
+/// for each normal job that lacks its own `name:` (the job key is just an
+/// ID). Reusable-workflow caller jobs (`uses:` instead of `runs-on:`) are
+/// skipped — their identity is the called workflow, not a free-form label.
+/// zizmor only surfaces this under `--persona=pedantic`; karinto's parity
+/// run uses pedantic so we match the pedantic firings.
+fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  match ctx.workflow_map {
+    Some(m) => {
+      if !m.contains("name") {
+        let what = match ctx.kind {
+          Action => "action"
+          _ => "workflow"
+        }
+        add_diag(out, "anonymous-definition", Info, "\{what} has no `name:`")
+      }
+      if ctx.kind != FileKind::Action {
+        for j in ctx.jobs {
+          if j.uses is Some(_) {
+            continue
+          }
+          if !j.raw.contains("name") {
+            add_diag(
+              out,
+              "anonymous-definition",
+              Info,
+              "job `\{j.name}` has no `name:`",
+            )
+          }
+        }
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: undocumented-permissions (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `undocumented-permissions` (pedantic persona): a
+/// `permissions:` block whose entries lack explanatory comments is suspect.
+/// We re-scan the raw source because the YAML parser drops comments.
+///
+/// Heuristics:
+///   - `permissions: {}` (or any inline-flow value) — skip.
+///   - A block whose only entry is `contents: read` — skip (self-explanatory).
+///   - Otherwise, every key:value line in the block must have a non-empty
+///     trailing comment. An empty `#` does not count; any text after `#`
+///     (including a `zizmor: ignore[...]` directive) does.
+fn check_undocumented_permissions(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.source == "" {
+    return
+  }
+  let lines : Array[String] = []
+  for v in ctx.source.split("\n") {
+    lines.push(v.to_string())
+  }
+  let n = lines.length()
+  let mut i = 0
+  while i < n {
+    let line = lines[i]
+    let indent = leading_spaces(line)
+    let stripped = line.substring(start=indent).to_string()
+    // Header looks like `permissions:` (optionally followed by an inline
+    // value or comment). Skip if there's a non-empty inline value.
+    if has_permissions_header(stripped) {
+      let after = stripped.substring(start="permissions:".length()).to_string()
+      let after_trimmed = trim_ws(after)
+      // Strip any trailing comment.
+      let val = match index_of(after_trimmed, "#") {
+        Some(k) => trim_ws(after_trimmed.substring(start=0, end=k).to_string())
+        None => after_trimmed
+      }
+      if val != "" {
+        // Inline value (e.g. `permissions: {}`, `permissions: read-all`).
+        i = i + 1
+        continue
+      }
+      // Collect block lines: subsequent lines indented strictly deeper than
+      // the header. Stop at the first line with indent ≤ header indent.
+      let entries : Array[(Int, String, String)] = []
+      let mut j = i + 1
+      while j < n {
+        let body = lines[j]
+        let body_trim = trim_ws(body)
+        if body_trim == "" {
+          j = j + 1
+          continue
+        }
+        let body_indent = leading_spaces(body)
+        if body_indent <= indent {
+          break
+        }
+        // Pure-comment lines inside the block are skipped.
+        if body_trim.has_prefix("#") {
+          j = j + 1
+          continue
+        }
+        let after_pound = match index_of(body, "#") {
+          Some(k) => Some(body.substring(start=k + 1).to_string())
+          None => None
+        }
+        let before_pound = match index_of(body, "#") {
+          Some(k) => body.substring(start=0, end=k).to_string()
+          None => body
+        }
+        entries.push((j, before_pound, comment_text(after_pound)))
+        j = j + 1
+      }
+      // An entry is "documented" if it has a non-empty trailing comment, or if
+      // it is the self-explanatory `contents: read`. Fire when any entry is
+      // undocumented. Empty block -> nothing to flag.
+      if entries.length() > 0 {
+        let mut uncommented = 0
+        for e in entries {
+          let (_, before, comment) = e
+          let kv = trim_ws(before)
+          if comment == "" && kv != "contents: read" {
+            uncommented = uncommented + 1
+          }
+        }
+        if uncommented > 0 {
+          add_diag(
+            out,
+            "undocumented-permissions",
+            Info,
+            "permissions block has \{uncommented} entry/entries without explanatory comments",
+          )
+        }
+      }
+      i = j
+      continue
+    }
+    i = i + 1
+  }
+}
+
+///|
+/// Count leading ASCII space characters on a line. Tabs are not GitHub
+/// Actions YAML's indentation style, so this is sufficient.
+fn leading_spaces(s : String) -> Int {
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut k = 0
+  while k < n && chars[k] == ' ' {
+    k = k + 1
+  }
+  k
+}
+
+///|
+/// True iff `stripped` begins with `permissions:` as a top-level key. We
+/// reject `permissionsfoo:` and other look-alikes.
+fn has_permissions_header(stripped : String) -> Bool {
+  let needle = "permissions:"
+  if !stripped.has_prefix(needle) {
+    return false
+  }
+  let rest = stripped.substring(start=needle.length()).to_string()
+  if rest == "" {
+    return true
+  }
+  let chars = rest.to_array()
+  let c = chars[0]
+  c == ' ' || c == '\t' || c == '#'
+}
+
+///|
+/// Inline-comment payload after the `#`. Returns the comment body with
+/// surrounding whitespace stripped. An empty body (just `#` or `# `) is
+/// returned as the empty string.
+fn comment_text(after_pound : String?) -> String {
+  match after_pound {
+    Some(s) => trim_ws(s)
+    None => ""
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: forbidden-uses (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `forbidden-uses` (deny-list mode): flag any step whose
+/// `uses:` matches a caller-supplied glob pattern. Patterns can target the
+/// bare action (`owner/repo`) or a specific ref (`owner/repo@v1`); we test
+/// both forms so callers do not have to know which one the workflow used.
+/// Empty list keeps the rule dormant — zizmor's default config is also a
+/// no-op, so parity holds without a config plumbed through.
+fn check_forbidden_uses(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.forbidden_uses.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) => {
+      let bare = if step.at_idx >= 0 {
+        u.substring(start=0, end=step.at_idx).to_string()
+      } else {
+        u
+      }
+      for pat in ctx.forbidden_uses {
+        if glob_match(pat, u) || glob_match(pat, bare) {
+          add_diag(
+            out,
+            "forbidden-uses",
+            Warning,
+            "uses `\{u}` matches forbidden pattern `\{pat}`",
+          )
+          break
+        }
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: github-app (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Mirrors zizmor's `github-app` audit: a step using
+/// `actions/create-github-app-token` is dangerous when it
+///   1. sets `skip-token-revoke` to a truthy value or any expression,
+///   2. specifies `owner:` without `repositories:` (token scoped to the
+///      whole org), or
+///   3. omits all `permission-*` inputs (token inherits blanket
+///      installation permissions).
+/// Each independent issue fires a separate diagnostic on the same step.
+fn check_github_app(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let _ = ctx
+  match step.uses {
+    Some(u) => if !u.has_prefix("actions/create-github-app-token@") { return }
+    None => return
+  }
+  match step.with_ {
+    Some(w) => {
+      // skip-token-revoke: anything non-default is suspicious.
+      match w.get("skip-token-revoke") {
+        Some(v) => {
+          let raw = yaml_scalar_text(v)
+          let trimmed = trim_ws(raw)
+          if trimmed != "" && trimmed != "false" {
+            add_diag(
+              out,
+              "github-app",
+              Error,
+              "`skip-token-revoke` disables the post-job token revocation; leave it false",
+            )
+          }
+        }
+        None => ()
+      }
+      // owner without repositories.
+      let has_owner = match w.get("owner") {
+        Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+        None => false
+      }
+      let has_repos = match w.get("repositories") {
+        Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+        None => false
+      }
+      if has_owner && !has_repos {
+        add_diag(
+          out,
+          "github-app",
+          Error,
+          "`owner` set without `repositories`: token spans the entire installation; scope it with `repositories:`",
+        )
+      }
+      // No permission-* inputs at all.
+      let mut has_permission = false
+      w.each(fn(k, _v) {
+        if k.has_prefix("permission-") {
+          has_permission = true
+        }
+      })
+      if !has_permission {
+        add_diag(
+          out,
+          "github-app",
+          Error,
+          "no `permission-*` inputs: token inherits the App's blanket installation permissions",
+        )
+      }
+    }
+    None =>
+      // No `with:` at all → token inherits everything.
+      add_diag(
+        out,
+        "github-app",
+        Error,
+        "no `permission-*` inputs: token inherits the App's blanket installation permissions",
+      )
+  }
+}
+
+///|
+/// Render a YAML scalar as text. Booleans and integers serialize to their
+/// canonical form; expressions and quoted strings stay as the original
+/// literal. Non-scalars return the empty string.
+fn yaml_scalar_text(v : @yaml.Yaml) -> String {
+  match v {
+    String(s) => s
+    Integer(i) => i.to_string()
+    Real(_, repr~) => repr
+    Boolean(true) => "true"
+    Boolean(false) => "false"
+    Null => ""
+    _ => ""
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: archived-uses (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor maintains a hardcoded baseline of archived `owner/repo` slugs so
+/// the rule fires even in offline mode. Karinto mirrors that minimum so
+/// upstream-parity holds on the zizmor archived-uses fixture without a
+/// network round-trip. Worker callers extend the list at runtime via
+/// `archived_uses=`. Comparison is case-insensitive (zizmor's snapshot
+/// fires on both `actions/setup-ruby` and `ACTIONS/SETUP-RUBY`).
+fn archived_baseline() -> Array[String] {
+  ["actions/setup-ruby"]
+}
+
+///|
+fn is_archived_repo(repo : String, extra : Array[String]) -> Bool {
+  if repo == "" {
+    return false
+  }
+  let lo = repo.to_lower()
+  for r in archived_baseline() {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  for r in extra {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Extract `owner/repo` from a `uses:` value, stripping any subpath
+/// (`actions/cache/restore` → `actions/cache`) and `@ref` suffix. Returns
+/// `""` for local (`./...`) or docker (`docker://...`) refs that have no
+/// `owner/repo` form.
+fn bare_repo_of(uses : String) -> String {
+  if uses == "" || uses.has_prefix("./") || uses.has_prefix("docker://") {
+    return ""
+  }
+  let at = last_at_index(uses)
+  let head = if at >= 0 {
+    uses.substring(start=0, end=at).to_string()
+  } else {
+    uses
+  }
+  let mut slash = -1
+  let mut count = 0
+  let n = head.length()
+  let mut i = 0
+  while i < n {
+    match head.get_char(i) {
+      Some('/') => {
+        count = count + 1
+        if count == 2 {
+          slash = i
+          break
+        }
+      }
+      _ => ()
+    }
+    i = i + 1
+  }
+  if slash >= 0 {
+    head.substring(start=0, end=slash).to_string()
+  } else {
+    head
+  }
+}
+
+///|
+fn check_archived_uses_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) => {
+      let repo = bare_repo_of(u)
+      if is_archived_repo(repo, ctx.archived_uses) {
+        add_diag(
+          out,
+          "archived-uses",
+          Warning,
+          "uses `\{repo}`: repository is archived",
+        )
+      }
+    }
+    None => ()
+  }
+}
+
+///|
+fn check_archived_uses_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.uses {
+    Some(u) => {
+      let repo = bare_repo_of(u)
+      if is_archived_repo(repo, ctx.archived_uses) {
+        add_diag(
+          out,
+          "archived-uses",
+          Warning,
+          "uses `\{repo}`: repository is archived",
+        )
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: impostor-commit (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor's `impostor-commit` audit walks the GitHub API to confirm that a
+/// pinned SHA belongs to the claimed `owner/repo`. We cannot do that from
+/// the linter itself, so the Worker resolves it externally and passes the
+/// confirmed-impostor `owner/repo@sha` list via `impostor_uses=`. Empty
+/// list keeps the rule silent — matches zizmor's `--no-online-audits` mode.
+fn uses_listed(uses : String, listed : Array[String]) -> Bool {
+  if listed.length() == 0 || uses == "" {
+    return false
+  }
+  let lo = uses.to_lower()
+  for r in listed {
+    if lo == r.to_lower() {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn check_impostor_commit_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.impostor_uses.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.impostor_uses) {
+        add_diag(
+          out,
+          "impostor-commit",
+          Error,
+          "uses `\{u}`: SHA does not exist in the claimed repository",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_impostor_commit_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.impostor_uses.length() == 0 {
+    return
+  }
+  match job.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.impostor_uses) {
+        add_diag(
+          out,
+          "impostor-commit",
+          Error,
+          "uses `\{u}`: SHA does not exist in the claimed repository",
+        )
+      }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: ref-version-mismatch (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// zizmor's `ref-version-mismatch` checks whether a pinned SHA actually
+/// matches the tag mentioned in the trailing `# vN` comment. The
+/// resolution requires GitHub API access (tag → SHA), so karinto stays
+/// silent offline and relies on the Worker to thread the confirmed
+/// `owner/repo@sha` mismatches via `ref_mismatches=`. Empty list keeps
+/// the rule dormant — matches zizmor's `--no-online-audits` mode.
+fn check_ref_version_mismatch_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.ref_mismatches.length() == 0 {
+    return
+  }
+  match step.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.ref_mismatches) {
+        add_diag(
+          out,
+          "ref-version-mismatch",
+          Warning,
+          "uses `\{u}`: pinned SHA does not match the version in the trailing comment",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_ref_version_mismatch_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  if ctx.ref_mismatches.length() == 0 {
+    return
+  }
+  match job.uses {
+    Some(u) =>
+      if uses_listed(u, ctx.ref_mismatches) {
+        add_diag(
+          out,
+          "ref-version-mismatch",
+          Warning,
+          "uses `\{u}`: pinned SHA does not match the version in the trailing comment",
+        )
+      }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: matrix-values (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// actionlint's `matrix-values` flags duplicate scalar entries in a job's
+/// `strategy.matrix.<key>` array. We only handle scalars (string/int/
+/// real/bool) — non-scalar matrix shapes (`include`/`exclude` maps,
+/// nested arrays) are left to the engine work tracked under the broader
+/// matrix-typing audits.
+fn scalar_repr(y : @yaml.Yaml) -> String? {
+  match y {
+    @yaml.Yaml::String(s) => Some("s:" + s)
+    @yaml.Yaml::Integer(i) => Some("i:" + i.to_string())
+    @yaml.Yaml::Real(_, repr~) => Some("r:" + repr)
+    @yaml.Yaml::Boolean(b) => Some("b:" + b.to_string())
+    @yaml.Yaml::Null => Some("n:")
+    _ => None
+  }
+}
+
+///|
+fn matrix_value_display(y : @yaml.Yaml) -> String {
+  match y {
+    @yaml.Yaml::String(s) => s
+    @yaml.Yaml::Integer(i) => i.to_string()
+    @yaml.Yaml::Real(_, repr~) => repr
+    @yaml.Yaml::Boolean(b) => b.to_string()
+    @yaml.Yaml::Null => "null"
+    _ => "?"
+  }
+}
+
+///|
+fn check_matrix_values_job(
+  _ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let strategy = match job.raw.get("strategy") {
+    Some(@yaml.Yaml::Map(m)) => m
+    _ => return
+  }
+  let matrix = match strategy.get("matrix") {
+    Some(@yaml.Yaml::Map(m)) => m
+    _ => return
+  }
+  matrix.each(fn(key, value) {
+    if key == "include" || key == "exclude" {
+      return
+    }
+    match value {
+      @yaml.Yaml::Array(arr) => {
+        let seen : Map[String, Bool] = Map::new()
+        let reported : Map[String, Bool] = Map::new()
+        for entry in arr {
+          match scalar_repr(entry) {
+            Some(repr) =>
+              if seen.contains(repr) && !reported.contains(repr) {
+                reported[repr] = true
+                add_diag(
+                  out,
+                  "matrix-values",
+                  Error,
+                  "duplicate matrix value `\{matrix_value_display(entry)}` in `\{key}`",
+                )
+              } else {
+                seen[repr] = true
+              }
+            None => ()
+          }
+        }
+      }
+      _ => ()
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Rule: yaml-anchor-issues (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// actionlint's `yaml-anchors` check fires when a YAML anchor (`&name`) is
+/// declared but never referenced via an alias (`*name`). The YAML parser
+/// resolves anchors away before we see the document, so we re-scan the
+/// raw source for `&label` (declaration) and `*label` (alias) tokens.
+fn is_anchor_name_char(ch : Char) -> Bool {
+  (ch >= 'a' && ch <= 'z') ||
+  (ch >= 'A' && ch <= 'Z') ||
+  (ch >= '0' && ch <= '9') ||
+  ch == '_' ||
+  ch == '-'
+}
+
+///|
+fn is_anchor_start(ch : Char) -> Bool {
+  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+///|
+/// Collect `&name` / `*name` tokens from `line`, ignoring anything after
+/// the first unquoted `#` (YAML comment). Skip single-quoted regions to
+/// avoid false positives on tokens embedded in scalar strings.
+fn scan_anchor_tokens(
+  line : String,
+  declared : Map[String, Bool],
+  used : Map[String, Bool],
+) -> Unit {
+  let chars = line.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_single = false
+  let mut in_double = false
+  while i < n {
+    let ch = chars[i]
+    if !in_single && !in_double && ch == '#' {
+      return
+    }
+    if !in_double && ch == '\'' {
+      // YAML escapes a single-quote inside a single-quoted scalar as `''`;
+      // skip the pair and stay in the quoted region.
+      if in_single && i + 1 < n && chars[i + 1] == '\'' {
+        i = i + 2
+        continue
+      }
+      in_single = not(in_single)
+      i = i + 1
+      continue
+    }
+    if !in_single && ch == '"' {
+      in_double = not(in_double)
+      i = i + 1
+      continue
+    }
+    if !in_single && !in_double && (ch == '&' || ch == '*') {
+      let prev_ok = i == 0 ||
+        chars[i - 1] == ' ' ||
+        chars[i - 1] == '\t' ||
+        chars[i - 1] == ':' ||
+        chars[i - 1] == '[' ||
+        chars[i - 1] == ',' ||
+        chars[i - 1] == '-'
+      if prev_ok && i + 1 < n && is_anchor_start(chars[i + 1]) {
+        let mut j = i + 1
+        while j < n && is_anchor_name_char(chars[j]) {
+          j = j + 1
+        }
+        let name = line.substring(start=i + 1, end=j).to_string()
+        if ch == '&' {
+          declared[name] = true
+        } else {
+          used[name] = true
+        }
+        i = j
+        continue
+      }
+    }
+    i = i + 1
+  }
+}
+
+///|
+fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  if ctx.source == "" {
+    return
+  }
+  let declared : Map[String, Bool] = Map::new()
+  let used : Map[String, Bool] = Map::new()
+  for v in ctx.source.split("\n") {
+    scan_anchor_tokens(v.to_string(), declared, used)
+  }
+  let names : Array[String] = []
+  declared.each(fn(name, _) { names.push(name) })
+  // Stable order — sort by name.
+  names.sort()
+  for name in names {
+    if !used.contains(name) {
+      add_diag(
+        out,
+        "yaml-anchor-issues",
+        Warning,
+        "YAML anchor `&\{name}` is declared but never referenced",
+      )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: deprecated-action-inputs (actionlint)
+// ---------------------------------------------------------------------------
+
+///|
+/// Hardcoded baseline of `<owner/repo>` → `[(old, new)]` deprecation
+/// mappings for popular actions. actionlint pulls a much wider dataset
+/// from its bundled `popular-actions.json` (~200 actions); shipping
+/// that full table from the linter is tracked under
+/// `popular-action-inputs`. This baseline covers the cases most workflow
+/// authors actually hit. The Worker can extend coverage by supplying
+/// its own deprecation map at a later stage (out of scope here).
+fn deprecated_action_inputs_baseline() -> Array[
+  (String, Array[(String, String)]),
+] {
+  [
+    ("actions/setup-node", [("version", "node-version")]),
+    ("actions/setup-python", [("python_version", "python-version")]),
+    ("actions/setup-go", [("version", "go-version")]),
+    ("actions/setup-java", [("version", "java-version")]),
+    ("actions/setup-dotnet", [("version", "dotnet-version")]),
+  ]
+}
+
+///|
+fn check_deprecated_action_inputs(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let uses = match step.uses {
+    Some(u) => u
+    None => return
+  }
+  let with_ = match step.with_ {
+    Some(w) => w
+    None => return
+  }
+  let repo = bare_repo_of(uses)
+  if repo == "" {
+    return
+  }
+  let lo = repo.to_lower()
+  for entry in deprecated_action_inputs_baseline() {
+    if lo != entry.0.to_lower() {
+      continue
+    }
+    for pair in entry.1 {
+      if with_.contains(pair.0) {
+        add_diag(
+          out,
+          "deprecated-action-inputs",
+          Warning,
+          "\{entry.0} input `\{pair.0}` is deprecated; use `\{pair.1}`",
+        )
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rule: meaningless-comparison (actionlint)
 // ---------------------------------------------------------------------------
 
@@ -4479,7 +7388,9 @@ fn check_workflow_call_def(
 ///|
 /// Catch trivially-unsound boolean expressions that almost always indicate a
 /// misunderstanding of GHA's `always()` / `success()` / `failure()` /
-/// `cancelled()` semantics.
+/// `cancelled()` semantics, plus `if:` values whose YAML stringification
+/// always renders truthy (block scalars with trailing newlines, mixed
+/// plaintext + `${{ ... }}`).
 fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let seen : Map[String, Bool] = {}
   walk_strings(ctx.doc, fn(s) {
@@ -4519,6 +7430,72 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
     }
   })
+  // Step- and job-level `if:` values that mix `${{ ... }}` with surrounding
+  // plaintext (including the trailing `\n` left by `|` / `>` block scalars)
+  // get stringified by GitHub Actions, then tested for non-emptiness — so
+  // they evaluate truthy regardless of what the expression returns.
+  for job in ctx.jobs {
+    match job.if_cond {
+      Some(s) =>
+        if if_condition_is_unsound(s) {
+          add_diag(
+            out,
+            "unsound-condition",
+            Warning,
+            "job `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+          )
+        }
+      None => ()
+    }
+    for step in job.steps {
+      match step.if_cond {
+        Some(s) =>
+          if if_condition_is_unsound(s) {
+            add_diag(
+              out,
+              "unsound-condition",
+              Warning,
+              "step `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+            )
+          }
+        None => ()
+      }
+    }
+  }
+}
+
+///|
+/// True when an `if:` value, after parsing out `${{ ... }}` expressions,
+/// leaves any plaintext characters — including a stray space or a trailing
+/// `\n` (the canonical signature of `|` / `>` block scalars).
+fn if_condition_is_unsound(s : String) -> Bool {
+  if !s.contains("${{") {
+    return false
+  }
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let buf = StringBuilder::new()
+  while i < n {
+    if i + 2 < n &&
+      chars[i] == '$' &&
+      chars[i + 1] == '{' &&
+      chars[i + 2] == '{' {
+      let mut j = i + 3
+      while j + 1 < n && !(chars[j] == '}' && chars[j + 1] == '}') {
+        j = j + 1
+      }
+      if j + 1 < n {
+        i = j + 2
+      } else {
+        i = n
+      }
+    } else {
+      buf.write_char(chars[i])
+      i = i + 1
+    }
+  }
+  buf.to_string().length() > 0
 }
 
 ///|

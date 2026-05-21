@@ -111,6 +111,10 @@ pub fn lint(
   kind? : FileKind = Unknown,
   disabled? : Array[String] = [],
   vuln_uses? : Array[String] = [],
+  forbidden_uses? : Array[String] = [],
+  archived_uses? : Array[String] = [],
+  impostor_uses? : Array[String] = [],
+  ref_mismatches? : Array[String] = [],
 ) -> LintResult {
   let lines = count_lines(content)
   let merged_disabled = merge_inline_ignores(content, disabled)
@@ -131,7 +135,8 @@ pub fn lint(
       }
       let stats = compute_stats(doc, lines)
       let diagnostics = run_rules(
-        doc, resolved_kind, merged_disabled, vuln_uses,
+        doc, resolved_kind, merged_disabled, vuln_uses, content, forbidden_uses,
+        archived_uses, impostor_uses, ref_mismatches,
       )
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
@@ -267,8 +272,22 @@ fn run_rules(
   kind : FileKind,
   disabled : Array[String],
   vuln_uses : Array[String],
+  source : String,
+  forbidden_uses : Array[String],
+  archived_uses : Array[String],
+  impostor_uses : Array[String],
+  ref_mismatches : Array[String],
 ) -> Array[Diagnostic] {
-  let ctx = prewalk(doc, vuln_uses~, kind~)
+  let ctx = prewalk(
+    doc,
+    vuln_uses~,
+    kind~,
+    source~,
+    forbidden_uses~,
+    archived_uses~,
+    impostor_uses~,
+    ref_mismatches~,
+  )
   let out : Array[Diagnostic] = []
 
   // Filter once. Each scope iterates pre-built callback arrays — no per-step

@@ -11,9 +11,9 @@ pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
 
-pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String]) -> LintResult
+pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], impostor_uses? : Array[String], ref_mismatches? : Array[String]) -> LintResult
 
-pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind) -> WalkCtx
+pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], impostor_uses? : Array[String], ref_mismatches? : Array[String]) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
 
@@ -149,7 +149,12 @@ pub(all) struct WalkCtx {
   action_is_composite : Bool
   updates : Array[Map[String, @yaml.Yaml]]
   vuln_uses : Array[String]
+  forbidden_uses : Array[String]
+  archived_uses : Array[String]
+  impostor_uses : Array[String]
+  ref_mismatches : Array[String]
   kind : FileKind
+  source : String
 }
 
 // Type aliases

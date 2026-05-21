@@ -5,7 +5,6 @@
 // prefix); the catalogue's `origins` field preserves the zizmor lineage.
 
 ///|
-#skip("not implemented yet")
 test "anonymous-definition: workflow has no top-level `name`" {
   let yaml =
     #|on: push
@@ -22,17 +21,67 @@ test "anonymous-definition: workflow has no top-level `name`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
-test "archived-uses: action repo is archived" {
+test "anonymous-definition: workflow with explicit name is silent when jobs have names" {
+  let yaml =
+    #|name: build
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    name: Build everything
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+    ],
+  })
+}
+
+///|
+/// karinto carries a small hardcoded baseline that mirrors zizmor's offline
+/// detection (today: `actions/setup-ruby`). The Worker may extend it via
+/// `archived_uses=` once GitHub responds with `archived: true`. The
+/// comparison is case-insensitive (zizmor fires on `ACTIONS/SETUP-RUBY` too).
+test "archived-uses: hardcoded baseline fires on actions/setup-ruby" {
   let yaml =
     #|on: push
     #|jobs:
@@ -41,18 +90,42 @@ test "archived-uses: action repo is archived" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - uses: deprecated-org/abandoned-action@v1
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "archived-uses",
-        "severity": "warning",
-        "message": "uses `deprecated-org/abandoned-action`: repository is archived",
-      },
-    ],
-  })
+    #|      - uses: actions/setup-ruby@e932e7af67fc4a8fc77bd86b744acd4e42fe3543
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "archived-uses: caller-supplied list extends the baseline" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: my-org/legacy-action@v1
+  let res = @karinto.lint(yaml, archived_uses=["my-org/legacy-action"])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "archived-uses: dormant on non-listed repos" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@v4
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "archived-uses" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -75,9 +148,24 @@ test "artipacked: actions/checkout leaves credentials persisted" {
     "stats": { "jobs": 1, "steps": 2, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "checkout-persist-credentials-false",
@@ -86,8 +174,8 @@ test "artipacked: actions/checkout leaves credentials persisted" {
       },
       {
         "rule": "artipacked",
-        "severity": "error",
-        "message": "checkout persists credentials before upload-artifact; set `persist-credentials: false`",
+        "severity": "warning",
+        "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
       },
     ],
   })
@@ -111,9 +199,24 @@ test "bot-conditions: spoofable github.actor bot check" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `auto` has no `name:`",
       },
       {
         "rule": "bot-conditions",
@@ -147,14 +250,34 @@ test "cache-poisoning: cache restore in publish flow" {
     "stats": { "jobs": 1, "steps": 2, "lines": 15 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "cache-poisoning",
         "severity": "error",
-        "message": "release-publishing job restores from cache; risk of cache poisoning",
+        "message": "runtime artifacts potentially vulnerable to a cache poisoning attack",
       },
       {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `release` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
       },
     ],
   })
@@ -179,9 +302,24 @@ test "concurrency-limits: no concurrency on deploy workflow" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `deploy` has no `name:`",
       },
     ],
   })
@@ -209,9 +347,24 @@ test "dangerous-triggers: workflow uses pull_request_target" {
         "message": "trigger `pull_request_target` runs with write access to the base repo",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -233,45 +386,48 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
       {
         "rule": "dependabot-cooldown",
         "severity": "info",
-        "message": "dependabot update has no `cooldown:` configured",
+        "message": "missing cooldown configuration",
       },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
-test "dependabot-execution: dependabot trigger runs external code" {
+test "dependabot-execution: insecure-external-code-execution allowed" {
   let yaml =
-    #|on:
-    #|  pull_request:
-    #|    branches: [main]
-    #|jobs:
-    #|  test:
-    #|    if: github.actor == 'dependabot[bot]'
-    #|    runs-on: ubuntu-latest
-    #|    permissions:
-    #|      contents: read
-    #|    steps:
-    #|      - uses: actions/checkout@v4
-    #|        with:
-    #|          ref: ${{ github.event.pull_request.head.sha }}
-    #|      - run: npm install && npm test
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
-    "diagnostics": [
-      {
-        "rule": "dependabot-execution",
-        "severity": "error",
-        "message": "dependabot PR head SHA is checked out and code is executed without review",
-      },
-    ],
-  })
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: pip
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+    #|    insecure-external-code-execution: allow
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dependabot-execution" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
-test "excessive-permissions: job grants more than it needs" {
+test "dependabot-execution: deny is safe" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: pip
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+    #|    insecure-external-code-execution: deny
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dependabot-execution" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "excessive-permissions: workflow without `permissions:` block emits default-token finding" {
+  // Upstream punts on per-key analysis for *job-level* Explicit maps
+  // (`check_job_permissions` returns `None` for `Permissions::Explicit`).
+  // The only excessive-permissions hit here is therefore the workflow-level
+  // one for the missing parent `permissions:`.
   let yaml =
     #|on: push
     #|jobs:
@@ -290,22 +446,79 @@ test "excessive-permissions: job grants more than it needs" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
       {
-        "rule": "excessive-permissions",
-        "severity": "warning",
-        "message": "job `build` grants 4 write permissions; consider narrowing the scope",
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 4 entry/entries without explanatory comments",
       },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
-test "forbidden-uses: action not in allowlist" {
+test "excessive-permissions: workflow-level explicit `write` keys each fire" {
+  let yaml =
+    #|on: push
+    #|name: workflow-write-explicit
+    #|permissions:
+    #|  contents: write
+    #|  id-token: write
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "excessive-permissions" })
+  inspect(hits.length(), content="2")
+}
+
+///|
+test "excessive-permissions: workflow `permissions: {}` silences all jobs" {
+  let yaml =
+    #|on: push
+    #|name: workflow-empty-perms
+    #|permissions: {}
+    #|jobs:
+    #|  job1:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+    #|  job2:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "excessive-permissions" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "forbidden-uses: action matches caller-supplied denylist" {
+  // karinto threads the denylist through the worker boundary as a CSV
+  // (`?forbidden=…`). When the caller doesn't supply one, the rule is
+  // dormant — matching zizmor's "no config → silent" default.
   let yaml =
     #|on: push
     #|jobs:
@@ -315,22 +528,15 @@ test "forbidden-uses: action not in allowlist" {
     #|      contents: read
     #|    steps:
     #|      - uses: third-party/disallowed-action@v1
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "forbidden-uses",
-        "severity": "warning",
-        "message": "uses `third-party/disallowed-action`: not in the allowlist",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml, forbidden_uses=["third-party/*"], disabled=[
+    "unpinned-uses",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "forbidden-uses" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
-#skip("not implemented yet")
-test "github-app: GitHub App token exchanged at workflow scope" {
+test "forbidden-uses: dormant when no denylist provided" {
   let yaml =
     #|on: push
     #|jobs:
@@ -339,20 +545,51 @@ test "github-app: GitHub App token exchanged at workflow scope" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - id: token
-    #|        uses: tibdex/github-app-token@v2
-    #|      - run: echo "${{ steps.token.outputs.token }}"
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 10 },
-    "diagnostics": [
-      {
-        "rule": "github-app",
-        "severity": "warning",
-        "message": "GitHub App token is interpolated into a shell command",
-      },
-    ],
-  })
+    #|      - uses: third-party/disallowed-action@v1
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "forbidden-uses" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "github-app: skip-token-revoke true, owner-without-repositories, missing permission-*" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          skip-token-revoke: true
+    #|          owner: github
+    #|          client-id: ${{ vars.APP_ID }}
+    #|          private-key: ${{ secrets.APP_KEY }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="3")
+}
+
+///|
+test "github-app: scoped properly is silent" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          owner: github
+    #|          repositories: github/docs
+    #|          permission-issues: write
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -377,9 +614,24 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "message": "trigger `pull_request_target` runs with write access to the base repo",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "template-injection",
@@ -389,7 +641,7 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
       {
         "rule": "github-env",
         "severity": "error",
-        "message": "untrusted `github.event.pull_request.title` written to `$GITHUB_ENV`",
+        "message": "write to `GITHUB_ENV` may allow code execution",
       },
     ],
   })
@@ -417,9 +669,24 @@ test "hardcoded-container-credentials: plain password in container" {
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "hardcoded-container-credentials",
@@ -431,8 +698,12 @@ test "hardcoded-container-credentials: plain password in container" {
 }
 
 ///|
-#skip("not implemented yet")
-test "impostor-commit: SHA pin not present in claimed repo" {
+/// Confirming a SHA does NOT belong to the claimed repository requires a
+/// GitHub API call, which the linter cannot do offline. Mirrors zizmor's
+/// `--no-online-audits` behaviour: silent unless the Worker resolves the
+/// ref externally and threads the confirmed-impostor list through
+/// `impostor_uses=`.
+test "impostor-commit: silent without caller-supplied impostor list" {
   let yaml =
     #|on: push
     #|jobs:
@@ -442,17 +713,27 @@ test "impostor-commit: SHA pin not present in claimed repo" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "impostor-commit",
-        "severity": "error",
-        "message": "uses `actions/checkout@deadbeef…`: SHA does not exist in `actions/checkout`",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "impostor-commit" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "impostor-commit: fires when caller marks ref as impostor" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  let res = @karinto.lint(yaml, impostor_uses=[
+    "actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "impostor-commit" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
@@ -479,9 +760,24 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
         "message": "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
       },
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "deprecated-workflow-commands",
@@ -509,9 +805,24 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-uses",
@@ -568,9 +879,24 @@ test "misfeature: continue-on-error masks real failures" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "misfeature",
@@ -598,9 +924,24 @@ test "obfuscation: hex-encoded uses ref" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "checkout-persist-credentials-false",
@@ -614,8 +955,13 @@ test "obfuscation: hex-encoded uses ref" {
       },
       {
         "rule": "obfuscation",
-        "severity": "warning",
+        "severity": "info",
         "message": "uses ref contains percent-encoded characters; possible obfuscation",
+      },
+      {
+        "rule": "artipacked",
+        "severity": "warning",
+        "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
       },
     ],
   })
@@ -640,9 +986,24 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "overprovisioned-secrets",
@@ -658,8 +1019,11 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
 // compliant workflows. See rules_catalog.mbt.
 
 ///|
-#skip("not implemented yet")
-test "ref-version-mismatch: comment claims v5 but SHA is from v4" {
+/// Resolving `tag → SHA` to confirm a mismatch with the trailing `# vN`
+/// comment requires a GitHub API call. Mirrors zizmor's
+/// `--no-online-audits` behaviour: silent unless the Worker threads the
+/// confirmed-mismatch list through `ref_mismatches=`.
+test "ref-version-mismatch: silent without caller-supplied mismatch list" {
   let yaml =
     #|on: push
     #|jobs:
@@ -669,17 +1033,27 @@ test "ref-version-mismatch: comment claims v5 but SHA is from v4" {
     #|      contents: read
     #|    steps:
     #|      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v5
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 7 },
-    "diagnostics": [
-      {
-        "rule": "ref-version-mismatch",
-        "severity": "warning",
-        "message": "pinned SHA does not match the tag in the trailing comment (`v5`)",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "ref-version-mismatch" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "ref-version-mismatch: fires when caller marks ref as mismatched" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v5
+  let res = @karinto.lint(yaml, ref_mismatches=[
+    "actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ])
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "ref-version-mismatch" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
@@ -696,6 +1070,11 @@ test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
     "kind": "workflow",
     "stats": { "jobs": 1, "steps": 0, "lines": 7 },
     "diagnostics": [
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
       {
         "rule": "secrets-inherit",
         "severity": "error",
@@ -722,9 +1101,29 @@ test "secrets-outside-env: secrets accessed without an environment" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `deploy` has no `name:`",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
       },
       {
         "rule": "secrets-outside-env",
@@ -752,9 +1151,24 @@ test "self-hosted-runner: job runs on self-hosted runner" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "self-hosted-runner",
@@ -770,7 +1184,7 @@ test "self-hosted-runner: job runs on self-hosted runner" {
 // signal is only informational. See rules_catalog.mbt.
 
 ///|
-test "superfluous-actions: setup-node duplicated across steps" {
+test "superfluous-actions: dtolnay/rust-toolchain flagged" {
   let yaml =
     #|on: push
     #|jobs:
@@ -780,25 +1194,35 @@ test "superfluous-actions: setup-node duplicated across steps" {
     #|    permissions:
     #|      contents: read
     #|    steps:
-    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
-    #|        with:
-    #|          node-version: 20
-    #|      - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
-    #|        with:
-    #|          node-version: 22
+    #|      - uses: dtolnay/rust-toolchain@086dfa4efe372cfb6b375460a56e26a62a873d2e
   json_inspect(lint_json(yaml), content={
     "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 2, "lines": 14 },
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
       {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
       {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
         "rule": "superfluous-actions",
         "severity": "info",
-        "message": "job `build` uses `actions/setup-node` twice",
+        "message": "step uses `dtolnay/rust-toolchain` — use `rustup` and/or `cargo` in a script step",
       },
     ],
   })
@@ -821,9 +1245,24 @@ test "template-injection: untrusted input in run script" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `echo` has no `name:`",
       },
       {
         "rule": "template-injection",
@@ -877,9 +1316,24 @@ test "unpinned-images: container image uses a floating tag" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-images",
@@ -907,9 +1361,24 @@ test "unpinned-tools: pipe-to-shell installer in run" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-tools",
@@ -939,9 +1408,24 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unpinned-uses",
@@ -971,9 +1455,29 @@ test "unredacted-secrets: secret length manipulated before logging" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
       },
       {
         "rule": "unredacted-secrets",
@@ -1002,6 +1506,11 @@ test "unsound-condition: `always() && success()` is always true" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1010,6 +1519,16 @@ test "unsound-condition: `always() && success()` is always true" {
         "rule": "unsound-condition",
         "severity": "warning",
         "message": "`always() && success()` is always equivalent to `always()`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -1033,6 +1552,11 @@ test "unsound-contains: contains() with literal arg order swapped" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -1041,6 +1565,16 @@ test "unsound-contains: contains() with literal arg order swapped" {
         "rule": "unsound-contains",
         "severity": "warning",
         "message": "`contains('main', github.ref)` arguments look swapped",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -1068,9 +1602,29 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
     "stats": { "jobs": 1, "steps": 1, "lines": 14 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `publish` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
       },
       {
         "rule": "use-trusted-publishing",

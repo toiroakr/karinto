@@ -41,14 +41,14 @@ const yaml = buildWorkflow(numJobs, stepsPerJob);
 console.log(`YAML size: ${yaml.length} bytes, ${yaml.split("\n").length} lines`);
 
 // warmup
-for (let i = 0; i < 20; i++) lint_string(yaml, "", "");
+for (let i = 0; i < 20; i++) lint_string(yaml, "", "", "");
 
 const N = 5;
 const samples = [];
 for (let trial = 0; trial < N; trial++) {
   const t0 = performance.now();
   for (let i = 0; i < iters; i++) {
-    lint_string(yaml, "", "");
+    lint_string(yaml, "", "", "");
   }
   const t1 = performance.now();
   samples.push(t1 - t0);

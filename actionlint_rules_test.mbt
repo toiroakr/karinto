@@ -22,9 +22,24 @@ test "unexpected-keys: unknown key under job" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unexpected-keys",
@@ -51,6 +66,11 @@ test "missing-required-keys: workflow missing `on`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 8 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "missing-required-keys",
         "severity": "error",
         "message": "workflow is missing required key `on`",
@@ -59,6 +79,16 @@ test "missing-required-keys: workflow missing `on`" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -74,9 +104,19 @@ test "empty-mappings: empty jobs block" {
     "stats": { "jobs": 0, "steps": 0, "lines": 2 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "empty-mappings",
         "severity": "warning",
         "message": "workflow: `jobs:` is an empty mapping",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
       },
     ],
   })
@@ -99,9 +139,24 @@ test "invalid-mapping-values: runs-on must be string or array" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "invalid-mapping-values",
@@ -130,6 +185,11 @@ test "expression-syntax: malformed `${{` expression" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "expression-syntax",
         "severity": "error",
         "message": "expression syntax error: unterminated `${{`",
@@ -138,6 +198,16 @@ test "expression-syntax: malformed `${{` expression" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -187,6 +257,11 @@ test "unknown-context-or-function: unknown context name" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "unknown-context-or-function",
         "severity": "error",
         "message": "unknown context `githab` (did you mean `github`?)",
@@ -195,6 +270,16 @@ test "unknown-context-or-function: unknown context name" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -219,6 +304,11 @@ test "context-availability: `needs` referenced at workflow level" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -227,6 +317,16 @@ test "context-availability: `needs` referenced at workflow level" {
         "rule": "context-availability",
         "severity": "error",
         "message": "context `needs` is not available in workflow-level `env`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -341,6 +441,11 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -349,6 +454,21 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
         "rule": "meaningless-comparison",
         "severity": "warning",
         "message": "comparison `1 == 1` is always true",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "obfuscation",
+        "severity": "info",
+        "message": "`if:` expression can be replaced by its static evaluation",
       },
     ],
   })
@@ -379,6 +499,11 @@ test "job-needs-graph: dependency on undefined job" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "job-needs-graph",
         "severity": "error",
         "message": "job `build` needs undefined job `missing`",
@@ -388,13 +513,22 @@ test "job-needs-graph: dependency on undefined job" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
-test "matrix-values: duplicate matrix values" {
+test "matrix-values: duplicate scalar in matrix array" {
   let yaml =
     #|on: push
     #|jobs:
@@ -407,17 +541,29 @@ test "matrix-values: duplicate matrix values" {
     #|        node: [16, 16, 18]
     #|    steps:
     #|      - run: echo $NODE
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
-    "diagnostics": [
-      {
-        "rule": "matrix-values",
-        "severity": "error",
-        "message": "duplicate matrix value `16` in `node`",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "matrix-values" })
+  inspect(hits.length(), content="1")
+  inspect(hits[0].message, content="duplicate matrix value `16` in `node`")
+}
+
+///|
+test "matrix-values: silent on unique matrix entries" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  test:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    strategy:
+    #|      matrix:
+    #|        node: [16, 18, 20]
+    #|    steps:
+    #|      - run: echo $NODE
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "matrix-values" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -439,6 +585,11 @@ test "webhook-events: unknown event filter" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "webhook-events",
         "severity": "error",
         "message": "unknown webhook event `pushh` (did you mean `push`?)",
@@ -447,6 +598,16 @@ test "webhook-events: unknown event filter" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -473,6 +634,11 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
     "stats": { "jobs": 1, "steps": 1, "lines": 13 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -481,6 +647,16 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
         "rule": "workflow-dispatch-inputs",
         "severity": "error",
         "message": "workflow_dispatch input `level.type` must be one of choice/boolean/string/environment/number",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `noop` has no `name:`",
       },
     ],
   })
@@ -506,6 +682,11 @@ test "glob-patterns: invalid glob pattern in paths filter" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
@@ -514,6 +695,16 @@ test "glob-patterns: invalid glob pattern in paths filter" {
         "rule": "glob-patterns",
         "severity": "error",
         "message": "invalid glob `src/[unclosed`: unterminated character class",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -538,6 +729,11 @@ test "cron-and-timezone: out-of-range minute value" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "cron-and-timezone",
         "severity": "error",
         "message": "schedule.cron `60 * * * *`: minute: value `60` out of bounds [0-59]",
@@ -546,6 +742,16 @@ test "cron-and-timezone: out-of-range minute value" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -568,9 +774,24 @@ test "unknown-runner-label: unknown runner label" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "unknown-runner-label",
@@ -598,9 +819,24 @@ test "uses-syntax: missing @ref in uses" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "uses-syntax",
@@ -704,9 +940,24 @@ test "shell-name-per-os: pwsh on linux runner" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "shell-name-per-os",
@@ -740,6 +991,11 @@ test "invalid-env-var-name: env name starts with digit" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "invalid-env-var-name",
         "severity": "warning",
         "message": "env name `1FOO` does not match `[A-Za-z_][A-Za-z0-9_]*`",
@@ -748,6 +1004,16 @@ test "invalid-env-var-name: env name starts with digit" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -781,6 +1047,21 @@ test "permissions-syntax: unknown permission scope" {
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
       },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
+      },
     ],
   })
 }
@@ -805,9 +1086,24 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
     "stats": { "jobs": 1, "steps": 1, "lines": 12 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "reusable-workflow-definition",
         "severity": "error",
         "message": "workflow_call output `version` is missing `value:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
     ],
   })
@@ -830,6 +1126,11 @@ test "job-step-id-naming: job id has invalid characters" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "job-step-id-naming",
         "severity": "warning",
         "message": "job ID `build job` must match `[A-Za-z_][A-Za-z0-9_-]*`",
@@ -838,6 +1139,16 @@ test "job-step-id-naming: job id has invalid characters" {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build job` has no `name:`",
       },
     ],
   })
@@ -860,9 +1171,24 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "deprecated-workflow-commands",
@@ -891,9 +1217,24 @@ test "constant-if-condition: `if: true` always-on" {
     "stats": { "jobs": 1, "steps": 1, "lines": 10 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "concurrency-limits",
         "severity": "info",
         "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
       },
       {
         "rule": "constant-if-condition",
@@ -927,7 +1268,6 @@ test "action-yml-metadata: action.yml missing `runs`" {
 }
 
 ///|
-#skip("not implemented yet")
 test "deprecated-action-inputs: deprecated input on a popular action" {
   let yaml =
     #|on: push
@@ -940,21 +1280,38 @@ test "deprecated-action-inputs: deprecated input on a popular action" {
     #|      - uses: actions/setup-node@v4
     #|        with:
     #|          version: 20
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
-    "diagnostics": [
-      {
-        "rule": "deprecated-action-inputs",
-        "severity": "warning",
-        "message": "actions/setup-node input `version` is deprecated; use `node-version`",
-      },
-    ],
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "deprecated-action-inputs"
   })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="actions/setup-node input `version` is deprecated; use `node-version`",
+  )
 }
 
 ///|
-#skip("not implemented yet")
+test "deprecated-action-inputs: silent when current input is used" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/setup-node@v4
+    #|        with:
+    #|          node-version: 20
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "deprecated-action-inputs"
+  })
+  inspect(hits.length(), content="0")
+}
+
+///|
 test "yaml-anchor-issues: anchor declared but never referenced" {
   let yaml =
     #|on: push
@@ -965,15 +1322,31 @@ test "yaml-anchor-issues: anchor declared but never referenced" {
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
-  json_inspect(lint_json(yaml), content={
-    "kind": "workflow",
-    "stats": { "jobs": 1, "steps": 1, "lines": 8 },
-    "diagnostics": [
-      {
-        "rule": "yaml-anchor-issues",
-        "severity": "warning",
-        "message": "YAML anchor `&base` is declared but never referenced",
-      },
-    ],
-  })
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "yaml-anchor-issues" })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="YAML anchor `&base` is declared but never referenced",
+  )
+}
+
+///|
+test "yaml-anchor-issues: silent when anchor is aliased" {
+  let yaml =
+    #|on: push
+    #|defaults: &defaults
+    #|  run:
+    #|    shell: bash
+    #|jobs:
+    #|  build:
+    #|    defaults: *defaults
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "yaml-anchor-issues" })
+  inspect(hits.length(), content="0")
 }
