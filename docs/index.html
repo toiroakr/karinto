@@ -71,6 +71,31 @@
     border-bottom: 1px solid var(--border);
     padding-bottom: 6px;
   }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .tab {
+    font: inherit;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 8px 14px;
+    margin-bottom: -1px;
+    cursor: pointer;
+    color: var(--muted);
+    border-radius: 6px 6px 0 0;
+  }
+  .tab[aria-pressed="true"] {
+    color: var(--fg);
+    border-color: var(--border);
+    background: var(--bg);
+  }
+  .tab:hover { color: var(--fg); }
+  .tab-panel[hidden] { display: none; }
   form .row {
     display: flex;
     gap: 12px;
@@ -144,31 +169,54 @@
     color: var(--muted);
     min-height: 20px;
   }
-  .status .url {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
-    word-break: break-all;
-    background: var(--panel);
-    padding: 6px 8px;
-    border-radius: 4px;
-    display: inline-block;
-    margin-top: 4px;
-    color: var(--fg);
-  }
   .status.error { color: var(--err); }
   .status.ok { color: var(--ok); }
-  pre.output {
-    background: var(--code-bg);
+  .result {
+    margin-top: 12px;
+    padding: 16px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 14px 16px;
+    background: var(--panel);
+  }
+  .result[hidden] { display: none; }
+  .result .result-label {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .result .result-url {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .result .result-url:hover { filter: brightness(1.05); }
+  .result .result-curl {
+    margin: 14px 0 6px;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+  .result .result-curl-cmd {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
     overflow-x: auto;
     font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    margin: 0;
-    max-height: 70vh;
     color: var(--fg);
   }
-  pre.output.empty { color: var(--muted); }
   details {
     margin-top: 24px;
     padding: 0;
@@ -186,6 +234,13 @@
     background: var(--panel);
     padding: 1px 5px;
     border-radius: 3px;
+  }
+  details ol li code {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 6px 8px;
+    margin: 4px 0 2px;
   }
   details pre {
     background: var(--code-bg);
@@ -219,27 +274,40 @@
 
   <section>
     <h2>Try it on a public repo</h2>
-    <p>Enter an <code>owner/repo</code> and a path to a workflow or action file. The page
-    resolves the latest commit on the default branch and calls
-    <code>https://karinto.toiroakr.workers.dev</code> to lint it.</p>
+    <p>The page resolves the file's commit SHA via the GitHub API and then
+    builds a <code>karinto.toiroakr.workers.dev</code> URL you can open in a
+    new tab to read the JSON. (Direct navigation avoids cross-origin <code>fetch</code>
+    issues some privacy browsers have with <code>*.workers.dev</code>.)</p>
     <form id="lint-form" autocomplete="off">
-      <div class="row">
-        <div class="field">
-          <label for="repo">owner/repo</label>
-          <input id="repo" name="repo" type="text" placeholder="actions/checkout" required spellcheck="false" autocapitalize="off" />
+      <div class="tabs" aria-label="Input method">
+        <button type="button" id="tab-btn-split" class="tab" aria-pressed="true">Repo + path</button>
+        <button type="button" id="tab-btn-url" class="tab" aria-pressed="false">GitHub URL</button>
+      </div>
+      <div id="tab-split" class="tab-panel">
+        <div class="row">
+          <div class="field">
+            <label for="repo">owner/repo</label>
+            <input id="repo" name="repo" type="text" placeholder="actions/checkout" spellcheck="false" autocapitalize="off" />
+          </div>
+          <div class="field">
+            <label for="target">file path</label>
+            <input id="target" name="target" type="text" placeholder="action.yml" spellcheck="false" autocapitalize="off" />
+          </div>
         </div>
+      </div>
+      <div id="tab-url" class="tab-panel" hidden>
         <div class="field">
-          <label for="target">file path</label>
-          <input id="target" name="target" type="text" placeholder="action.yml" required spellcheck="false" autocapitalize="off" />
+          <label for="ghurl">GitHub file URL</label>
+          <input id="ghurl" name="ghurl" type="url" placeholder="https://github.com/actions/checkout/blob/main/action.yml" spellcheck="false" autocapitalize="off" />
         </div>
       </div>
       <div class="options">
         <label><input id="osv" type="checkbox" /> Include OSV.dev vulnerability scan <span style="color:var(--muted)">(adds 50–300&nbsp;ms)</span></label>
       </div>
-      <button id="submit" type="submit">Lint default branch</button>
+      <button id="submit" type="submit">Open lint result</button>
     </form>
     <div id="status" class="status" aria-live="polite"></div>
-    <pre id="output" class="output empty">// response will appear here</pre>
+    <div id="result" class="result" hidden></div>
   </section>
 
   <details>
@@ -247,14 +315,15 @@
     <p>Two unauthenticated GETs:</p>
     <ol>
       <li>
-        <code>https://api.github.com/repos/{owner}/{repo}/commits?per_page=1</code>
-        — resolves the latest commit SHA on the default branch.
+        <code>https://api.github.com/repos/{owner}/{repo}/commits?per_page=1&amp;sha={ref}</code>
+        — resolves a ref (default branch, branch name, tag, or short SHA from a pasted URL) to a full commit SHA.
       </li>
       <li>
         <code>https://karinto.toiroakr.workers.dev/{owner}/{repo}/{sha}/{file_path}</code>
         — lints the file at that pinned commit.
       </li>
     </ol>
+    <p>The Worker requires a 7–64-character hex SHA in the URL — literal <code>HEAD</code> / <code>main</code> won't work; resolve the ref first via the GitHub API.</p>
     <p>GitHub's unauthenticated API allows ~60 requests/hour per IP. The karinto Worker
     rate-limits at 60/minute per IP.</p>
     <p>You can reproduce the karinto call locally:</p>
@@ -275,20 +344,40 @@
   const form = document.getElementById("lint-form");
   const repoEl = document.getElementById("repo");
   const targetEl = document.getElementById("target");
+  const ghurlEl = document.getElementById("ghurl");
   const osvEl = document.getElementById("osv");
   const submitEl = document.getElementById("submit");
   const statusEl = document.getElementById("status");
-  const outputEl = document.getElementById("output");
+  const resultEl = document.getElementById("result");
+  const tabBtnSplit = document.getElementById("tab-btn-split");
+  const tabBtnUrl = document.getElementById("tab-btn-url");
+  const tabSplit = document.getElementById("tab-split");
+  const tabUrl = document.getElementById("tab-url");
+
+  let mode = "split"; // "split" | "url"
+
+  function setMode(next) {
+    mode = next;
+    const isSplit = next === "split";
+    tabBtnSplit.setAttribute("aria-pressed", String(isSplit));
+    tabBtnUrl.setAttribute("aria-pressed", String(!isSplit));
+    tabSplit.hidden = !isSplit;
+    tabUrl.hidden = isSplit;
+  }
+
+  const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  function htmlEscape(s) {
+    return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+  }
+
+  tabBtnSplit.addEventListener("click", () => setMode("split"));
+  tabBtnUrl.addEventListener("click", () => setMode("url"));
 
   function setStatus(html, kind) {
     statusEl.className = "status" + (kind ? " " + kind : "");
     statusEl.innerHTML = html;
   }
 
-  function showOutput(text, empty) {
-    outputEl.textContent = text;
-    outputEl.classList.toggle("empty", !!empty);
-  }
 
   function normalizeRepo(raw) {
     let s = raw.trim();
@@ -301,6 +390,68 @@
     return raw.trim().replace(/^\/+/, "");
   }
 
+  // Parse one of:
+  //   github.com/{owner}/{repo}/blob/{ref}/{path...}
+  //   github.com/{owner}/{repo}/tree/{ref}/{path...}
+  //   github.com/{owner}/{repo}/raw/{ref}/{path...}
+  //   raw.githubusercontent.com/{owner}/{repo}/{ref}/{path...}
+  //   karinto.toiroakr.workers.dev/{owner}/{repo}/{sha}/{path...}
+  //
+  // Returns `{ owner, name, candidates }` where `candidates` is a list of
+  // `{ ref, target }` splits to try in order. Branch / tag names can contain
+  // slashes (e.g. `release/1.0`), and the URL alone can't disambiguate where
+  // the ref ends and the file path begins, so we enumerate splits (shortest
+  // ref first) and let the caller probe the commits API.
+  function parseFullUrl(raw) {
+    const s = raw.trim();
+    let u;
+    try { u = new URL(s); } catch { return null; }
+    const rawSegs = u.pathname.split("/").filter(Boolean);
+    let segs;
+    try { segs = rawSegs.map((seg) => decodeURIComponent(seg)); } catch { return null; }
+    const host = u.host.toLowerCase();
+    if (host === "github.com") {
+      // /{owner}/{repo}/{blob|tree|raw}/{ref+path...}
+      if (segs.length >= 5 && /^(blob|tree|raw)$/i.test(segs[2])) {
+        return { owner: segs[0], name: segs[1], candidates: splitRefAndPath(segs.slice(3)) };
+      }
+      return null;
+    }
+    if (host === "raw.githubusercontent.com") {
+      // /{owner}/{repo}/{ref+path...}
+      if (segs.length >= 4) {
+        return { owner: segs[0], name: segs[1], candidates: splitRefAndPath(segs.slice(2)) };
+      }
+      return null;
+    }
+    if (host === "karinto.toiroakr.workers.dev") {
+      // Karinto URLs already pin a SHA — single candidate, no probing.
+      if (segs.length >= 4) {
+        return {
+          owner: segs[0],
+          name: segs[1],
+          candidates: [{ ref: segs[2], target: segs.slice(3).join("/") }],
+        };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  // Enumerate (ref, target) candidates from a remaining-path segment list.
+  // Shortest ref first so the common single-segment case (`main`, `master`,
+  // a tag) resolves in one API call.
+  function splitRefAndPath(rest) {
+    const splits = [];
+    for (let i = 1; i < rest.length; i++) {
+      splits.push({
+        ref: rest.slice(0, i).join("/"),
+        target: rest.slice(i).join("/"),
+      });
+    }
+    return splits;
+  }
+
   // Karinto joins path segments after the commit into a single nested path
   // (`/owner/repo/commit/.github/workflows/foo.yml`), so we leave slashes
   // intact and only encode each segment individually.
@@ -308,8 +459,24 @@
     return p.split("/").map(encodeURIComponent).join("/");
   }
 
+  // Wrap fetch so api.github.com transport failures carry context. We don't
+  // fetch the karinto Worker from here — privacy browsers (Arc, Brave) and
+  // tracker blockers often classify *.workers.dev as third-party and silently
+  // drop cross-origin fetches; direct navigation from a tap is reliable.
+  async function fetchWithContext(url, label, init) {
+    const merged = { cache: "no-store", ...(init || {}) };
+    try {
+      return await fetch(url, merged);
+    } catch (err) {
+      const msg = err?.message || String(err);
+      const e = new Error(`fetch to ${label} failed (${msg}).`);
+      e.cause = err;
+      throw e;
+    }
+  }
+
   async function ghJson(url) {
-    const res = await fetch(url, { headers: { "Accept": "application/vnd.github+json" } });
+    const res = await fetchWithContext(url, "api.github.com", { headers: { "Accept": "application/vnd.github+json" } });
     if (!res.ok) {
       let detail = "";
       try { detail = (await res.json()).message || ""; } catch (_) {}
@@ -320,74 +487,166 @@
     return res.json();
   }
 
-  async function run(e) {
-    e.preventDefault();
+  function readInputs() {
+    if (mode === "url") {
+      const raw = ghurlEl.value;
+      if (!raw.trim()) {
+        return { error: "Paste a GitHub file URL (e.g. <code>https://github.com/actions/checkout/blob/main/action.yml</code>)." };
+      }
+      const parsed = parseFullUrl(raw);
+      if (!parsed || parsed.candidates.length === 0) {
+        return { error: "Couldn't parse URL. Supported: <code>github.com/owner/repo/blob/&lt;ref&gt;/&lt;path&gt;</code>, <code>raw.githubusercontent.com/...</code>, or a karinto URL." };
+      }
+      return { owner: parsed.owner, name: parsed.name, candidates: parsed.candidates };
+    }
     const repo = normalizeRepo(repoEl.value);
     const target = normalizeTarget(targetEl.value);
     const m = repo.match(REPO_RE);
-    if (!m) {
-      setStatus("Repo must be in the form <code>owner/repo</code>.", "error");
+    if (!m) return { error: "Repo must be in the form <code>owner/repo</code>." };
+    if (!target) return { error: "Enter a file path (e.g. <code>action.yml</code> or <code>.github/workflows/ci.yml</code>)." };
+    return { owner: m[1], name: m[2], candidates: [{ ref: null, target }] };
+  }
+
+  async function resolveSha(owner, name, ref) {
+    // Already a full or short SHA — Worker accepts ≥7 hex chars.
+    if (ref && /^[0-9a-fA-F]{7,64}$/.test(ref)) return ref;
+    const refQuery = ref ? `&sha=${encodeURIComponent(ref)}` : "";
+    const commits = await ghJson(
+      `${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?per_page=1${refQuery}`,
+    );
+    if (!Array.isArray(commits) || commits.length === 0 || !commits[0].sha) {
+      const err = new Error(ref ? `No commits found for ref ${ref}.` : "No commits returned for the default branch.");
+      err.status = 404;
+      throw err;
+    }
+    return commits[0].sha;
+  }
+
+  // Walk the candidate (ref, target) splits in order. 404 / 422 from the
+  // commits API means the ref doesn't exist — try the next, longer ref.
+  // Any other error (network, rate limit, 5xx) aborts immediately.
+  async function resolveCandidates(owner, name, candidates) {
+    let lastErr = null;
+    for (const { ref, target } of candidates) {
+      try {
+        const sha = await resolveSha(owner, name, ref);
+        return { ref, target, sha };
+      } catch (err) {
+        if (err.status === 404 || err.status === 422) {
+          lastErr = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error("Couldn't resolve any ref / file-path split for that URL.");
+  }
+
+  async function run(e) {
+    e.preventDefault();
+    const input = readInputs();
+    if (input.error) {
+      setStatus(input.error, "error");
+      hideResult();
       return;
     }
-    if (!target) {
-      setStatus("Enter a file path (e.g. <code>action.yml</code> or <code>.github/workflows/ci.yml</code>).", "error");
-      return;
-    }
-    const [_, owner, name] = m;
+    const { owner, name, candidates } = input;
 
     submitEl.disabled = true;
-    showOutput("// response will appear here", true);
+    hideResult();
+
+    // Open a blank tab synchronously inside the user gesture so popup
+    // blockers (and Arc / Brave heuristics) don't kill the navigation that
+    // happens after `await resolveSha`. If the tab was blocked we fall back
+    // to rendering an inline link.
+    const popup = window.open("about:blank", "_blank");
 
     try {
-      setStatus(`Resolving latest commit on default branch of <code>${owner}/${name}</code>…`);
-      const commits = await ghJson(`${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?per_page=1`);
-      if (!Array.isArray(commits) || commits.length === 0 || !commits[0].sha) {
-        throw new Error("No commits returned for the default branch.");
-      }
-      const sha = commits[0].sha;
+      const initial = candidates[0];
+      const repoSlug = `${htmlEscape(owner)}/${htmlEscape(name)}`;
+      setStatus(
+        initial.ref
+          ? `Resolving <code>${repoSlug}</code>…`
+          : `Resolving latest commit on default branch of <code>${repoSlug}</code>…`,
+      );
+      const { ref, target, sha } = await resolveCandidates(owner, name, candidates);
       const shortSha = sha.slice(0, 7);
 
       let karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
       if (osvEl.checked) karintoUrl += "?osv=1";
 
-      setStatus(
-        `Resolved <code>${owner}/${name}@${shortSha}</code> · calling karinto…<br><span class="url">GET ${karintoUrl}</span>`,
-      );
+      showResult({ owner, name, shortSha, target, url: karintoUrl });
 
-      const t0 = performance.now();
-      const res = await fetch(karintoUrl);
-      const text = await res.text();
-      const elapsed = Math.round(performance.now() - t0);
-
-      let pretty = text;
-      try {
-        pretty = JSON.stringify(JSON.parse(text), null, 2);
-      } catch (_) {
-        // Non-JSON response (e.g. 403 from upstream) — show as-is.
+      if (popup && !popup.closed) {
+        popup.location.href = karintoUrl;
+        setStatus(
+          `Opened <code>${repoSlug}@${shortSha}</code> in a new tab.`,
+          "ok",
+        );
+      } else {
+        setStatus(
+          `Tap the link below to open the lint result. (Your browser blocked the auto-open.)`,
+          "ok",
+        );
       }
-      showOutput(pretty);
-
-      const kind = res.ok ? "ok" : "error";
-      setStatus(
-        `<strong>HTTP ${res.status}</strong> · ${elapsed} ms · <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code><br><span class="url">GET ${karintoUrl}</span>`,
-        kind,
-      );
     } catch (err) {
-      setStatus(`Error: ${err.message || err}`, "error");
-      showOutput("// no response", true);
+      if (popup && !popup.closed) popup.close();
+      setStatus(`Error: ${htmlEscape(err.message || err)}`, "error");
     } finally {
       submitEl.disabled = false;
     }
   }
 
+  function hideResult() {
+    resultEl.hidden = true;
+    resultEl.replaceChildren();
+  }
+
+  function makeEl(tag, className, textContent) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (textContent != null) e.textContent = textContent;
+    return e;
+  }
+
+  // Build the result panel via DOM APIs so user-controlled `owner` / `name` /
+  // `target` (which may contain HTML-special characters once we accept pasted
+  // GitHub URLs) can't inject markup.
+  function showResult({ owner, name, shortSha, target, url }) {
+    resultEl.hidden = false;
+    resultEl.replaceChildren();
+
+    const label = makeEl("p", "result-label");
+    label.append(
+      "Lint URL for ",
+      makeEl("code", null, `${owner}/${name}@${shortSha}`),
+      " · ",
+      makeEl("code", null, target),
+    );
+
+    const link = makeEl("a", "result-url", url);
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+
+    const curlLabel = makeEl("p", "result-curl", "Reproduce in a terminal:");
+    const curlCmd = makeEl("pre", "result-curl-cmd", `curl ${JSON.stringify(url)}`);
+
+    resultEl.append(label, link, curlLabel, curlCmd);
+  }
+
   form.addEventListener("submit", run);
 
   // Prefill from query string so links like
-  // ?repo=actions/checkout&target=action.yml are shareable.
+  // ?repo=actions/checkout&target=action.yml or ?url=https://github.com/... are shareable.
   const qs = new URLSearchParams(location.search);
   if (qs.get("repo")) repoEl.value = qs.get("repo");
   if (qs.get("target")) targetEl.value = qs.get("target");
   if (qs.get("osv") === "1") osvEl.checked = true;
+  if (qs.get("url")) {
+    ghurlEl.value = qs.get("url");
+    setMode("url");
+  }
 })();
 </script>
 </body>
