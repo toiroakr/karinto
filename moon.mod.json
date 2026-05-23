@@ -1,6 +1,6 @@
 {
   "name": "toiroakr/karinto",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "deps": {
     "moonbit-community/yaml": "0.0.4"
   },
