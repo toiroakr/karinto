@@ -1,5 +1,20 @@
 # karinto
 
+## 0.3.0
+
+### Minor Changes
+
+- [#16](https://github.com/toiroakr/karinto/pull/16) [`3b37ddf`](https://github.com/toiroakr/karinto/commit/3b37ddfd12998d9da91071aedc1eb0f9c2a3eb07) Thanks [@toiroakr](https://github.com/toiroakr)! - Add a GitHub Pages playground (`docs/index.html`) where users can enter
+  `owner/repo` and a workflow/action file path; the page resolves the latest
+  commit on the default branch via the GitHub API and calls the karinto
+  Worker, showing the JSON response inline. Deployment is automated through
+  `.github/workflows/deploy-pages.yml`.
+
+  The Worker (`cf/index.js`) now emits `Access-Control-Allow-Origin: *` on
+  every JSON response so browser-based clients (including the new
+  playground) can read the body. The API was already public and
+  credential-less, so this is purely additive.
+
 ## 0.2.1
 
 ### Patch Changes
