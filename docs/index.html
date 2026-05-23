@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>karinto — curl-able GitHub Actions linter</title>
+<meta name="description" content="Lint a workflow or action.yml file from any public GitHub repo via the karinto API. Returns JSON diagnostics." />
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1b1f23;
+    --muted: #6a737d;
+    --bg: #ffffff;
+    --panel: #f6f8fa;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --ok: #1a7f37;
+    --err: #cf222e;
+    --code-bg: #f6f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6edf3;
+      --muted: #8d96a0;
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --accent: #2f81f7;
+      --ok: #3fb950;
+      --err: #f85149;
+      --code-bg: #161b22;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+  }
+  header h1 {
+    margin: 0 0 4px;
+    font-size: 28px;
+    letter-spacing: -0.01em;
+  }
+  header p.tagline {
+    margin: 0 0 8px;
+    color: var(--muted);
+  }
+  header .links {
+    margin: 0 0 28px;
+    font-size: 14px;
+  }
+  header .links a {
+    color: var(--accent);
+    text-decoration: none;
+    margin-right: 14px;
+  }
+  header .links a:hover { text-decoration: underline; }
+  section {
+    margin-top: 32px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 0 0 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  form .row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  form .field {
+    flex: 1 1 280px;
+    display: flex;
+    flex-direction: column;
+  }
+  form label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  form input[type="text"] {
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  form input[type="text"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+  }
+  form .options {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  form .options label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+  form button {
+    font: inherit;
+    font-weight: 600;
+    padding: 8px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  form button:hover { filter: brightness(1.05); }
+  form button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .status {
+    margin: 16px 0 8px;
+    font-size: 14px;
+    color: var(--muted);
+    min-height: 20px;
+  }
+  .status .url {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    word-break: break-all;
+    background: var(--panel);
+    padding: 6px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+    color: var(--fg);
+  }
+  .status.error { color: var(--err); }
+  .status.ok { color: var(--ok); }
+  pre.output {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    margin: 0;
+    max-height: 70vh;
+    color: var(--fg);
+  }
+  pre.output.empty { color: var(--muted); }
+  details {
+    margin-top: 24px;
+    padding: 0;
+  }
+  details > summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 6px 0;
+  }
+  details code,
+  p code,
+  li code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--panel);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  details pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    overflow-x: auto;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  footer {
+    margin-top: 48px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>karinto</h1>
+    <p class="tagline"><code>curl</code>-able GitHub Actions linter. POST a workflow or <code>action.yml</code>, get JSON diagnostics back.</p>
+    <p class="links">
+      <a href="https://github.com/toiroakr/karinto">GitHub</a>
+      <a href="https://github.com/toiroakr/karinto#api">API reference</a>
+      <a href="https://github.com/toiroakr/karinto/blob/main/rules_catalog.md">Rule catalogue</a>
+    </p>
+  </header>
+
+  <section>
+    <h2>Try it on a public repo</h2>
+    <p>Enter an <code>owner/repo</code> and a path to a workflow or action file. The page
+    resolves the latest commit on the default branch and calls
+    <code>https://karinto.toiroakr.workers.dev</code> to lint it.</p>
+    <form id="lint-form" autocomplete="off">
+      <div class="row">
+        <div class="field">
+          <label for="repo">owner/repo</label>
+          <input id="repo" name="repo" type="text" placeholder="actions/checkout" required spellcheck="false" autocapitalize="off" />
+        </div>
+        <div class="field">
+          <label for="target">file path</label>
+          <input id="target" name="target" type="text" placeholder="action.yml" required spellcheck="false" autocapitalize="off" />
+        </div>
+      </div>
+      <div class="options">
+        <label><input id="osv" type="checkbox" /> Include OSV.dev vulnerability scan <span style="color:var(--muted)">(adds 50–300&nbsp;ms)</span></label>
+      </div>
+      <button id="submit" type="submit">Lint default branch</button>
+    </form>
+    <div id="status" class="status" aria-live="polite"></div>
+    <pre id="output" class="output empty">// response will appear here</pre>
+  </section>
+
+  <details>
+    <summary>What gets called</summary>
+    <p>Two unauthenticated GETs:</p>
+    <ol>
+      <li>
+        <code>https://api.github.com/repos/{owner}/{repo}/commits?per_page=1</code>
+        — resolves the latest commit SHA on the default branch.
+      </li>
+      <li>
+        <code>https://karinto.toiroakr.workers.dev/{owner}/{repo}/{sha}/{file_path}</code>
+        — lints the file at that pinned commit.
+      </li>
+    </ol>
+    <p>GitHub's unauthenticated API allows ~60 requests/hour per IP. The karinto Worker
+    rate-limits at 60/minute per IP.</p>
+    <p>You can reproduce the karinto call locally:</p>
+    <pre>curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"</pre>
+  </details>
+
+  <footer>
+    Source: <a href="https://github.com/toiroakr/karinto">toiroakr/karinto</a>
+  </footer>
+</main>
+
+<script>
+(() => {
+  const KARINTO = "https://karinto.toiroakr.workers.dev";
+  const GH_API = "https://api.github.com";
+  const REPO_RE = /^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/;
+
+  const form = document.getElementById("lint-form");
+  const repoEl = document.getElementById("repo");
+  const targetEl = document.getElementById("target");
+  const osvEl = document.getElementById("osv");
+  const submitEl = document.getElementById("submit");
+  const statusEl = document.getElementById("status");
+  const outputEl = document.getElementById("output");
+
+  function setStatus(html, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.innerHTML = html;
+  }
+
+  function showOutput(text, empty) {
+    outputEl.textContent = text;
+    outputEl.classList.toggle("empty", !!empty);
+  }
+
+  function normalizeRepo(raw) {
+    let s = raw.trim();
+    // Accept full GitHub URLs too, e.g. https://github.com/actions/checkout
+    s = s.replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    return s;
+  }
+
+  function normalizeTarget(raw) {
+    return raw.trim().replace(/^\/+/, "");
+  }
+
+  // Karinto joins path segments after the commit into a single nested path
+  // (`/owner/repo/commit/.github/workflows/foo.yml`), so we leave slashes
+  // intact and only encode each segment individually.
+  function encodePath(p) {
+    return p.split("/").map(encodeURIComponent).join("/");
+  }
+
+  async function ghJson(url) {
+    const res = await fetch(url, { headers: { "Accept": "application/vnd.github+json" } });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).message || ""; } catch (_) {}
+      const err = new Error(`GitHub API ${res.status}${detail ? ": " + detail : ""}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  async function run(e) {
+    e.preventDefault();
+    const repo = normalizeRepo(repoEl.value);
+    const target = normalizeTarget(targetEl.value);
+    const m = repo.match(REPO_RE);
+    if (!m) {
+      setStatus("Repo must be in the form <code>owner/repo</code>.", "error");
+      return;
+    }
+    if (!target) {
+      setStatus("Enter a file path (e.g. <code>action.yml</code> or <code>.github/workflows/ci.yml</code>).", "error");
+      return;
+    }
+    const [_, owner, name] = m;
+
+    submitEl.disabled = true;
+    showOutput("// response will appear here", true);
+
+    try {
+      setStatus(`Resolving latest commit on default branch of <code>${owner}/${name}</code>…`);
+      const commits = await ghJson(`${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?per_page=1`);
+      if (!Array.isArray(commits) || commits.length === 0 || !commits[0].sha) {
+        throw new Error("No commits returned for the default branch.");
+      }
+      const sha = commits[0].sha;
+      const shortSha = sha.slice(0, 7);
+
+      let karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
+      if (osvEl.checked) karintoUrl += "?osv=1";
+
+      setStatus(
+        `Resolved <code>${owner}/${name}@${shortSha}</code> · calling karinto…<br><span class="url">GET ${karintoUrl}</span>`,
+      );
+
+      const t0 = performance.now();
+      const res = await fetch(karintoUrl);
+      const text = await res.text();
+      const elapsed = Math.round(performance.now() - t0);
+
+      let pretty = text;
+      try {
+        pretty = JSON.stringify(JSON.parse(text), null, 2);
+      } catch (_) {
+        // Non-JSON response (e.g. 403 from upstream) — show as-is.
+      }
+      showOutput(pretty);
+
+      const kind = res.ok ? "ok" : "error";
+      setStatus(
+        `<strong>HTTP ${res.status}</strong> · ${elapsed} ms · <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code><br><span class="url">GET ${karintoUrl}</span>`,
+        kind,
+      );
+    } catch (err) {
+      setStatus(`Error: ${err.message || err}`, "error");
+      showOutput("// no response", true);
+    } finally {
+      submitEl.disabled = false;
+    }
+  }
+
+  form.addEventListener("submit", run);
+
+  // Prefill from query string so links like
+  // ?repo=actions/checkout&target=action.yml are shareable.
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("repo")) repoEl.value = qs.get("repo");
+  if (qs.get("target")) targetEl.value = qs.get("target");
+  if (qs.get("osv") === "1") osvEl.checked = true;
+})();
+</script>
+</body>
+</html>

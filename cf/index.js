@@ -699,7 +699,12 @@ function guessKindFromPath(path) {
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // Public, credential-less API — allow browser-based clients (e.g. the
+      // GitHub Pages playground at docs/index.html) to read the response.
+      "access-control-allow-origin": "*",
+    },
   });
 }
 
