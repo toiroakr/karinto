@@ -1,0 +1,50 @@
+name: preview-pages
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/preview-pages.yml'
+
+concurrency:
+  group: preview-pages-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # `archive: false` (upload-artifact v7+, Feb 2026) keeps files unzipped
+      # so the GitHub UI serves them with their native content-type. docs/
+      # is a single self-contained index.html, so opening the artifact in
+      # the browser renders the playground directly.
+      - id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-preview-pr-${{ github.event.pull_request.number }}
+          path: docs
+          archive: false
+          retention-days: 14
+
+      # PR comment requires write permission on the auto-token, which fork
+      # PRs don't get. The artifact itself still uploads for forks and is
+      # accessible via the run's "Artifacts" panel.
+      - name: Comment preview link
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: docs-preview
+          message: |
+            📄 **Docs preview** for `${{ github.event.pull_request.head.sha }}`:
+            ${{ steps.upload.outputs.artifact-url }}
+
+            Open the artifact and click `index.html` to view the playground
+            in your browser. Retained 14 days.
