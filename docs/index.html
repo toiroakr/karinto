@@ -315,8 +315,22 @@
     return p.split("/").map(encodeURIComponent).join("/");
   }
 
+  // Wrap fetch so transport failures (CORS rejection, content blocker, offline)
+  // carry the URL/label for diagnostics. iOS Safari otherwise surfaces a bare
+  // "Load failed" with no way to tell which call broke.
+  async function fetchWithContext(url, label, init) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      const msg = err?.message || String(err);
+      const e = new Error(`Couldn't reach ${label} (${msg}). Check your network — content blockers, iCloud Private Relay, or strict DNS can block this request.`);
+      e.cause = err;
+      throw e;
+    }
+  }
+
   async function ghJson(url) {
-    const res = await fetch(url, { headers: { "Accept": "application/vnd.github+json" } });
+    const res = await fetchWithContext(url, "api.github.com", { headers: { "Accept": "application/vnd.github+json" } });
     if (!res.ok) {
       let detail = "";
       try { detail = (await res.json()).message || ""; } catch (_) {}
@@ -362,7 +376,7 @@
       );
 
       const t0 = performance.now();
-      const res = await fetch(karintoUrl);
+      const res = await fetchWithContext(karintoUrl, "karinto.toiroakr.workers.dev");
       const text = await res.text();
       const elapsed = Math.round(performance.now() - t0);
 
