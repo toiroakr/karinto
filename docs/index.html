@@ -180,6 +180,14 @@
     margin-top: 4px;
     color: var(--fg);
   }
+  .status a.url {
+    text-decoration: underline;
+    text-decoration-color: var(--muted);
+    text-underline-offset: 3px;
+  }
+  .status a.url:hover {
+    text-decoration-color: var(--accent);
+  }
   .status.error { color: var(--err); }
   .status.ok { color: var(--ok); }
   pre.output {
@@ -477,6 +485,7 @@
     submitEl.disabled = true;
     showOutput("// response will appear here", true);
 
+    let karintoUrl = null;
     try {
       setStatus(
         ref
@@ -486,11 +495,11 @@
       const sha = await resolveSha(owner, name, ref);
       const shortSha = sha.slice(0, 7);
 
-      let karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
+      karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
       if (osvEl.checked) karintoUrl += "?osv=1";
 
       setStatus(
-        `Resolved <code>${owner}/${name}@${shortSha}</code> · calling karinto…<br><span class="url">GET ${karintoUrl}</span>`,
+        `Resolved <code>${owner}/${name}@${shortSha}</code> · calling karinto…<br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">GET ${karintoUrl}</a>`,
       );
 
       const t0 = performance.now();
@@ -508,11 +517,14 @@
 
       const kind = res.ok ? "ok" : "error";
       setStatus(
-        `<strong>HTTP ${res.status}</strong> · ${elapsed} ms · <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code><br><span class="url">GET ${karintoUrl}</span>`,
+        `<strong>HTTP ${res.status}</strong> · ${elapsed} ms · <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code><br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">GET ${karintoUrl}</a>`,
         kind,
       );
     } catch (err) {
-      setStatus(`Error: ${err.message || err}`, "error");
+      const tail = karintoUrl
+        ? `<br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">Open ${karintoUrl} in a new tab to bisect</a>`
+        : "";
+      setStatus(`Error: ${err.message || err}${tail}`, "error");
       showOutput("// no response", true);
     } finally {
       submitEl.disabled = false;
