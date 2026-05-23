@@ -169,39 +169,54 @@
     color: var(--muted);
     min-height: 20px;
   }
-  .status .url {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
-    word-break: break-all;
-    background: var(--panel);
-    padding: 6px 8px;
-    border-radius: 4px;
-    display: inline-block;
-    margin-top: 4px;
-    color: var(--fg);
-  }
-  .status a.url {
-    text-decoration: underline;
-    text-decoration-color: var(--muted);
-    text-underline-offset: 3px;
-  }
-  .status a.url:hover {
-    text-decoration-color: var(--accent);
-  }
   .status.error { color: var(--err); }
   .status.ok { color: var(--ok); }
-  pre.output {
-    background: var(--code-bg);
+  .result {
+    margin-top: 12px;
+    padding: 16px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 14px 16px;
+    background: var(--panel);
+  }
+  .result[hidden] { display: none; }
+  .result .result-label {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .result .result-url {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .result .result-url:hover { filter: brightness(1.05); }
+  .result .result-curl {
+    margin: 14px 0 6px;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+  .result .result-curl-cmd {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
     overflow-x: auto;
     font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    margin: 0;
-    max-height: 70vh;
     color: var(--fg);
   }
-  pre.output.empty { color: var(--muted); }
   details {
     margin-top: 24px;
     padding: 0;
@@ -259,8 +274,10 @@
 
   <section>
     <h2>Try it on a public repo</h2>
-    <p>The page resolves the file's commit SHA via the GitHub API and then calls
-    <code>https://karinto.toiroakr.workers.dev</code> to lint it.</p>
+    <p>The page resolves the file's commit SHA via the GitHub API and then
+    builds a <code>karinto.toiroakr.workers.dev</code> URL you can open in a
+    new tab to read the JSON. (Direct navigation avoids cross-origin <code>fetch</code>
+    issues some privacy browsers have with <code>*.workers.dev</code>.)</p>
     <form id="lint-form" autocomplete="off">
       <div class="tabs" role="tablist" aria-label="Input method">
         <button type="button" role="tab" id="tab-btn-split" class="tab" aria-selected="true" aria-controls="tab-split">Repo + path</button>
@@ -287,10 +304,10 @@
       <div class="options">
         <label><input id="osv" type="checkbox" /> Include OSV.dev vulnerability scan <span style="color:var(--muted)">(adds 50–300&nbsp;ms)</span></label>
       </div>
-      <button id="submit" type="submit">Lint</button>
+      <button id="submit" type="submit">Open lint result</button>
     </form>
     <div id="status" class="status" aria-live="polite"></div>
-    <pre id="output" class="output empty">// response will appear here</pre>
+    <div id="result" class="result" hidden></div>
   </section>
 
   <details>
@@ -331,7 +348,7 @@
   const osvEl = document.getElementById("osv");
   const submitEl = document.getElementById("submit");
   const statusEl = document.getElementById("status");
-  const outputEl = document.getElementById("output");
+  const resultEl = document.getElementById("result");
   const tabBtnSplit = document.getElementById("tab-btn-split");
   const tabBtnUrl = document.getElementById("tab-btn-url");
   const tabSplit = document.getElementById("tab-split");
@@ -356,10 +373,6 @@
     statusEl.innerHTML = html;
   }
 
-  function showOutput(text, empty) {
-    outputEl.textContent = text;
-    outputEl.classList.toggle("empty", !!empty);
-  }
 
   function normalizeRepo(raw) {
     let s = raw.trim();
@@ -414,15 +427,17 @@
     return p.split("/").map(encodeURIComponent).join("/");
   }
 
-  // Wrap fetch so transport failures (CORS rejection, content blocker, offline)
-  // carry the URL/label for diagnostics. iOS Safari otherwise surfaces a bare
-  // "Load failed" with no way to tell which call broke.
+  // Wrap fetch so api.github.com transport failures carry context. We don't
+  // fetch the karinto Worker from here — privacy browsers (Arc, Brave) and
+  // tracker blockers often classify *.workers.dev as third-party and silently
+  // drop cross-origin fetches; direct navigation from a tap is reliable.
   async function fetchWithContext(url, label, init) {
+    const merged = { cache: "no-store", ...(init || {}) };
     try {
-      return await fetch(url, init);
+      return await fetch(url, merged);
     } catch (err) {
       const msg = err?.message || String(err);
-      const e = new Error(`Couldn't reach ${label} (${msg}). Check your network — content blockers, iCloud Private Relay, or strict DNS can block this request.`);
+      const e = new Error(`fetch to ${label} failed (${msg}).`);
       e.cause = err;
       throw e;
     }
@@ -478,14 +493,20 @@
     const input = readInputs();
     if (input.error) {
       setStatus(input.error, "error");
+      hideResult();
       return;
     }
     const { owner, name, ref, target } = input;
 
     submitEl.disabled = true;
-    showOutput("// response will appear here", true);
+    hideResult();
 
-    let karintoUrl = null;
+    // Open a blank tab synchronously inside the user gesture so popup
+    // blockers (and Arc / Brave heuristics) don't kill the navigation that
+    // happens after `await resolveSha`. If the tab was blocked we fall back
+    // to rendering an inline link.
+    const popup = window.open("about:blank", "_blank");
+
     try {
       setStatus(
         ref
@@ -495,40 +516,44 @@
       const sha = await resolveSha(owner, name, ref);
       const shortSha = sha.slice(0, 7);
 
-      karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
+      let karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
       if (osvEl.checked) karintoUrl += "?osv=1";
 
-      setStatus(
-        `Resolved <code>${owner}/${name}@${shortSha}</code> · calling karinto…<br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">GET ${karintoUrl}</a>`,
-      );
+      showResult({ owner, name, shortSha, target, url: karintoUrl });
 
-      const t0 = performance.now();
-      const res = await fetchWithContext(karintoUrl, "karinto.toiroakr.workers.dev");
-      const text = await res.text();
-      const elapsed = Math.round(performance.now() - t0);
-
-      let pretty = text;
-      try {
-        pretty = JSON.stringify(JSON.parse(text), null, 2);
-      } catch (_) {
-        // Non-JSON response (e.g. 403 from upstream) — show as-is.
+      if (popup && !popup.closed) {
+        popup.location.href = karintoUrl;
+        setStatus(
+          `Opened <code>${owner}/${name}@${shortSha}</code> in a new tab.`,
+          "ok",
+        );
+      } else {
+        setStatus(
+          `Tap the link below to open the lint result. (Your browser blocked the auto-open.)`,
+          "ok",
+        );
       }
-      showOutput(pretty);
-
-      const kind = res.ok ? "ok" : "error";
-      setStatus(
-        `<strong>HTTP ${res.status}</strong> · ${elapsed} ms · <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code><br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">GET ${karintoUrl}</a>`,
-        kind,
-      );
     } catch (err) {
-      const tail = karintoUrl
-        ? `<br><a class="url" href="${karintoUrl}" target="_blank" rel="noopener">Open ${karintoUrl} in a new tab to bisect</a>`
-        : "";
-      setStatus(`Error: ${err.message || err}${tail}`, "error");
-      showOutput("// no response", true);
+      if (popup && !popup.closed) popup.close();
+      setStatus(`Error: ${err.message || err}`, "error");
     } finally {
       submitEl.disabled = false;
     }
+  }
+
+  function hideResult() {
+    resultEl.hidden = true;
+    resultEl.innerHTML = "";
+  }
+
+  function showResult({ owner, name, shortSha, target, url }) {
+    resultEl.hidden = false;
+    resultEl.innerHTML = `
+      <p class="result-label">Lint URL for <code>${owner}/${name}@${shortSha}</code> · <code>${target}</code></p>
+      <a class="result-url" href="${url}" target="_blank" rel="noopener">${url}</a>
+      <p class="result-curl">Reproduce in a terminal:</p>
+      <pre class="result-curl-cmd">curl ${JSON.stringify(url)}</pre>
+    `;
   }
 
   form.addEventListener("submit", run);
