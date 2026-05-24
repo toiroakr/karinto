@@ -1,5 +1,15 @@
 # karinto
 
+## 0.3.1
+
+### Patch Changes
+
+- [#18](https://github.com/toiroakr/karinto/pull/18) [`567f6c7`](https://github.com/toiroakr/karinto/commit/567f6c7ea362e7f857ab6cd0baf30947d8f00f50) Thanks [@toiroakr](https://github.com/toiroakr)! - Add a `preview-pages` workflow that uploads `docs/` as an unzipped artifact
+  (`actions/upload-artifact@v7` with `archive: false`, Feb 2026 feature) on
+  every PR touching the docs. The sticky PR comment links straight to the
+  artifact so reviewers can open `index.html` in the browser without a
+  GitHub Pages deploy.
+
 ## 0.3.0
 
 ### Minor Changes
