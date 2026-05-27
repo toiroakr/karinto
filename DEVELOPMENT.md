@@ -135,9 +135,10 @@ GitHub Actions wiring:
   updates) a "chore: release" PR that consumes them, bumps versions, and
   rewrites `CHANGELOG.md`. When that PR is merged (i.e. main has no pending
   changesets), the same workflow runs `scripts/release-publish.sh`:
-  builds, deploys to the production Worker, runs `cf/smoke.sh`, tags
-  `vX.Y.Z`, and creates a GitHub Release whose body is the new CHANGELOG
-  section.
+  builds, deploys to the production Worker, runs `cf/smoke.sh`, deploys an
+  immutable version-pinned snapshot Worker (`karinto-vX-Y-Z`, smoke-checked
+  too), tags `vX.Y.Z`, and creates a GitHub Release whose body is the new
+  CHANGELOG section.
 - `.github/workflows/upstream-parity.yml` — runs karinto against the
   vendored upstream fixtures and the matching upstream linter binary, and
   compares the diagnostics they emit (per-rule for zizmor / ghalint, source-
@@ -173,9 +174,21 @@ action keeps a "chore: release" PR open that previews the next version.
    - `moon update && moon test && moon build --target js --release`
    - `cd cf && npm ci && npx wrangler deploy`
    - `bash cf/smoke.sh` against `https://karinto.toiroakr.workers.dev`
+   - `npx wrangler deploy --env="" --name karinto-vX-Y-Z` — an immutable
+     snapshot Worker for the released version (`.` → `-` in the name),
+     smoke-checked at `https://karinto-vX-Y-Z.toiroakr.workers.dev`. Uses the
+     top-level config (like PR previews) so it has no CAPTURES binding and no
+     cron; it reads the shared KV but never writes. CI users pin to this URL
+     to avoid the always-latest endpoint shifting under them — see
+     [*Versioning & pinning*](README.md#versioning--pinning).
    - `npx changeset tag` — creates `v<version>` and pushes it
    - `changesets/action` then publishes a GitHub Release for that tag
      using the new CHANGELOG section as the body.
+
+   > **Retention:** pinned Workers accumulate one per release and are never
+   > auto-deleted (the free plan allows 100 Worker scripts). Prune stale
+   > versions manually from the Cloudflare dashboard, or via
+   > `npx wrangler delete --name karinto-vX-Y-Z`, when the list grows long.
 
 ### Required GitHub secrets
 

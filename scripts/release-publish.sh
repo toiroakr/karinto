@@ -34,6 +34,19 @@ fi
 npx wrangler deploy --env production "${PROD_VAR_FLAGS[@]}"
 npx wrangler deploy --config wrangler.maintenance.jsonc "${MAINT_VAR_FLAGS[@]}"
 bash smoke.sh
+
+# Version-pinned snapshot Worker. CI users who can't tolerate the
+# always-latest endpoint shifting under them (a new rule landing without
+# any change on their side) curl `karinto-vX-Y-Z.toiroakr.workers.dev`
+# instead, which is frozen to this release's bundle. Deployed against the
+# top-level config (like PR previews) so it has no CAPTURES binding and no
+# cron — it reads the shared KV but never writes captures or refreshes the
+# meta cache. workers.dev names can't contain dots, so `.` → `-`.
+VERSION=$(node -p "require('../package.json').version")
+PINNED_NAME="karinto-v${VERSION//./-}"
+PINNED_URL="https://${PINNED_NAME}.toiroakr.workers.dev"
+npx wrangler deploy --env="" --name "$PINNED_NAME"
+bash smoke.sh "$PINNED_URL"
 popd >/dev/null
 
 # Emits "New tag: <pkg>@<version>" — parsed by changesets/action so it knows

@@ -104,9 +104,14 @@ curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)"
       }
     ]
-  }
+  },
+  "engine_version": "0.3.1"
 }
 ```
+
+`engine_version` is present on every response (success and error). It is the
+version of the karinto engine that produced the diagnostics — see
+[*Versioning & pinning*](#versioning--pinning).
 
 In `repo` mode the result is wrapped:
 
@@ -119,6 +124,43 @@ In `repo` mode the result is wrapped:
   "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ]
 }
 ```
+
+## Versioning & pinning
+
+`https://karinto.toiroakr.workers.dev` always serves the **latest** release.
+That's convenient for ad-hoc use, but in CI it means a new rule (or a
+tightened existing one) can start failing a workflow you never touched.
+
+To get reproducible CI you have two complementary tools:
+
+- **Pinned endpoints.** Every release also deploys a frozen snapshot Worker
+  at `https://karinto-vX-Y-Z.toiroakr.workers.dev` (dots in the version
+  become dashes — e.g. `0.3.1` → `karinto-v0-3-1`). These are immutable: the
+  bundle never changes after the release, so the same request always yields
+  the same diagnostics. Point CI at one of these instead of the bare
+  endpoint, and bump it deliberately when you want the newer rules:
+
+  ```sh
+  curl -X POST --data-binary @.github/workflows/ci.yml \
+       https://karinto-v0-3-1.toiroakr.workers.dev
+  ```
+
+  Pinned endpoints carry the same security property as the latest one — you
+  POST YAML and get JSON back; no third-party code runs in your runner.
+
+- **`engine_version` assertions.** Every response includes the engine version
+  that produced it. Even against the latest endpoint you can fail loudly the
+  moment it drifts, instead of silently:
+
+  ```sh
+  res=$(curl -fsS -X POST --data-binary @workflow.yml \
+        https://karinto.toiroakr.workers.dev)
+  echo "$res" | jq -e '.engine_version == "0.3.1"' >/dev/null \
+    || { echo "karinto engine changed — review before bumping the pin"; exit 1; }
+  ```
+
+Released versions are listed under
+[GitHub Releases](https://github.com/toiroakr/karinto/releases).
 
 ## Private repositories
 

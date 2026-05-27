@@ -23,6 +23,15 @@
 // When the YAML is malformed the engine returns a `parse_error` field which
 // the handler propagates verbatim.
 
+// Stamped onto every response as `engine_version` so callers can detect when
+// the deployed engine has moved underneath them. Sourced from the
+// changesets-managed root manifest (kept in lockstep with `moon.mod.json` by
+// `scripts/sync-moon-version.mjs`), inlined by wrangler/esbuild at deploy
+// time, so the always-latest endpoint and each pinned
+// `karinto-vX-Y-Z.toiroakr.workers.dev` report exactly the version they ship.
+import pkg from "../package.json";
+const ENGINE_VERSION = pkg.version;
+
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
 // the import until the first request so it runs inside a handler.
@@ -76,11 +85,14 @@ export default {
           }),
         );
       }
-      return json(result);
+      return json({ ...result, engine_version: ENGINE_VERSION });
     } catch (err) {
       const status = err?.status ?? 400;
       log("error", { status, message: String(err?.message ?? err) });
-      return json({ ok: false, error: String(err?.message ?? err) }, status);
+      return json(
+        { ok: false, error: String(err?.message ?? err), engine_version: ENGINE_VERSION },
+        status,
+      );
     }
   },
 
