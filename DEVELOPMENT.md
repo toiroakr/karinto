@@ -181,14 +181,17 @@ action keeps a "chore: release" PR open that previews the next version.
      cron; it reads the shared KV but never writes. CI users pin to this URL
      to avoid the always-latest endpoint shifting under them — see
      [*Versioning & pinning*](README.md#versioning--pinning).
+   - `node ../scripts/manage-pinned-workers.mjs` — refreshes the
+     `karinto-vMAJOR` alias if this release is the new top within its major
+     (smoke-checked at `karinto-vMAJOR.toiroakr.workers.dev`) and deletes
+     exact-version Workers outside the retention set *(latest patch per
+     major)* ∪ *(top `PINNED_KEEP_RECENT` by SemVer)* ∪ *(just-released)*.
+     Aliases are never auto-deleted. Alias failures fail the release; prune
+     failures only warn — stale snapshots are an inventory concern, retried
+     next release.
    - `npx changeset tag` — creates `v<version>` and pushes it
    - `changesets/action` then publishes a GitHub Release for that tag
      using the new CHANGELOG section as the body.
-
-   > **Retention:** pinned Workers accumulate one per release and are never
-   > auto-deleted (the free plan allows 100 Worker scripts). Prune stale
-   > versions manually from the Cloudflare dashboard, or via
-   > `npx wrangler delete --name karinto-vX-Y-Z`, when the list grows long.
 
 ### Required GitHub secrets
 
@@ -212,6 +215,7 @@ hardcoded in the Worker / workflow.
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
 | `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
 | `CAPTURES_RECOVERY_RATIO` | 0.7 | When pruning fires, shrink to this fraction of the size limit (default → ≈ 4.79 GiB target). |
+| `PINNED_KEEP_RECENT` | 5 | Top-N retention for exact-version pinned Workers (`karinto-vX-Y-Z`). The "latest patch per major" set is kept on top of this regardless. |
 
 The last three take effect on the next release deploy (they're applied via
 `wrangler deploy --var` in `scripts/release-publish.sh`). `REPLAY_LIMIT` is

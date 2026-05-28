@@ -47,6 +47,15 @@ PINNED_NAME="karinto-v${VERSION//./-}"
 PINNED_URL="https://${PINNED_NAME}.toiroakr.workers.dev"
 npx wrangler deploy --env="" --name "$PINNED_NAME"
 bash smoke.sh "$PINNED_URL"
+
+# Refresh the `karinto-vMAJOR` alias to this release if it's the new top in
+# its major, then prune stale `karinto-vX-Y-Z` snapshots per the retention
+# policy (see scripts/manage-pinned-workers.mjs and the README "Versioning
+# & pinning" section). Alias failures fail the release; prune failures
+# only warn (stale snapshots retry next release).
+RELEASE_VERSION="$VERSION" \
+PINNED_KEEP_RECENT="${PINNED_KEEP_RECENT:-}" \
+  node ../scripts/manage-pinned-workers.mjs
 popd >/dev/null
 
 # Emits "New tag: <pkg>@<version>" — parsed by changesets/action so it knows

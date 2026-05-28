@@ -133,20 +133,39 @@ tightened existing one) can start failing a workflow you never touched.
 
 To get reproducible CI you have two complementary tools:
 
-- **Pinned endpoints.** Every release also deploys a frozen snapshot Worker
-  at `https://karinto-vX-Y-Z.toiroakr.workers.dev` (dots in the version
-  become dashes — e.g. `0.3.1` → `karinto-v0-3-1`). These are immutable: the
-  bundle never changes after the release, so the same request always yields
-  the same diagnostics. Point CI at one of these instead of the bare
-  endpoint, and bump it deliberately when you want the newer rules:
+- **Pinned endpoints.** Every release deploys two extra Workers alongside
+  the always-latest one:
+
+  - `https://karinto-vX-Y-Z.toiroakr.workers.dev` — an immutable snapshot
+    frozen to that release's bundle (dots become dashes, e.g. `0.3.1` →
+    `karinto-v0-3-1`). The same request always yields the same diagnostics.
+  - `https://karinto-vX.toiroakr.workers.dev` — a **major alias** that
+    tracks the latest patch within major `X` (so `karinto-v0` rolls forward
+    across `0.3.1 → 0.3.2 → 0.4.0`, but is shielded from a future `1.0.0`).
+
+  Point CI at one of these instead of the bare endpoint, and bump it
+  deliberately when you want newer rules:
 
   ```sh
+  # Maximally strict: never moves without you re-pinning.
   curl -X POST --data-binary @.github/workflows/ci.yml \
        https://karinto-v0-3-1.toiroakr.workers.dev
+
+  # Auto-update within a major (gets new rules + bug fixes, no breaking
+  # changes).
+  curl -X POST --data-binary @.github/workflows/ci.yml \
+       https://karinto-v0.toiroakr.workers.dev
   ```
 
   Pinned endpoints carry the same security property as the latest one — you
   POST YAML and get JSON back; no third-party code runs in your runner.
+
+  **Retention.** Exact-version snapshots are pruned on each release down to
+  *(the latest patch within every major)* ∪ *(the top 5 by SemVer)* ∪
+  *(the just-released version)*. In practice that means the latest patch of
+  every released major is always available as an exact pin, plus a sliding
+  window of the most recent patches. Major aliases (`karinto-vX`) are never
+  auto-deleted — they are the long-lived contract.
 
 - **`engine_version` assertions.** Every response includes the engine version
   that produced it. Even against the latest endpoint you can fail loudly the
