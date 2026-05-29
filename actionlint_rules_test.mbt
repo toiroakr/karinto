@@ -40,11 +40,13 @@ test "unexpected-keys: unknown key under job" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unexpected-keys",
         "severity": "error",
         "message": "job `build`: unknown key `typo`",
+        "job": "build",
       },
     ],
   })
@@ -89,6 +91,7 @@ test "missing-required-keys: workflow missing `on`" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -157,11 +160,13 @@ test "invalid-mapping-values: runs-on must be string or array" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "invalid-mapping-values",
         "severity": "error",
         "message": "job `build`: `runs-on` must be a string or array",
+        "job": "build",
       },
     ],
   })
@@ -208,6 +213,7 @@ test "expression-syntax: malformed `${{` expression" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -280,6 +286,7 @@ test "unknown-context-or-function: unknown context name" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -327,6 +334,7 @@ test "context-availability: `needs` referenced at workflow level" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -464,11 +472,13 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "obfuscation",
         "severity": "info",
         "message": "`if:` expression can be replaced by its static evaluation",
+        "job": "build",
       },
     ],
   })
@@ -522,6 +532,7 @@ test "job-needs-graph: dependency on undefined job" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -608,6 +619,7 @@ test "webhook-events: unknown event filter" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -657,6 +669,7 @@ test "workflow-dispatch-inputs: input type must be one of the allowed set" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `noop` has no `name:`",
+        "job": "noop",
       },
     ],
   })
@@ -705,6 +718,7 @@ test "glob-patterns: invalid glob pattern in paths filter" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -752,6 +766,7 @@ test "cron-and-timezone: out-of-range minute value" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -792,11 +807,13 @@ test "unknown-runner-label: unknown runner label" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unknown-runner-label",
         "severity": "warning",
         "message": "unknown runner label `ubunto-latest` (did you mean `ubuntu-latest`?)",
+        "job": "build",
       },
     ],
   })
@@ -837,11 +854,14 @@ test "uses-syntax: missing @ref in uses" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "uses-syntax",
         "severity": "error",
         "message": "uses `actions/checkout`: expected `owner/repo@ref`",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -958,11 +978,13 @@ test "shell-name-per-os: pwsh on linux runner" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "shell-name-per-os",
         "severity": "error",
         "message": "shell `cmd` is only available on Windows runners",
+        "job": "build",
       },
     ],
   })
@@ -1014,6 +1036,7 @@ test "invalid-env-var-name: env name starts with digit" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -1056,6 +1079,7 @@ test "permissions-syntax: unknown permission scope" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "undocumented-permissions",
@@ -1104,6 +1128,7 @@ test "reusable-workflow-definition: reusable workflow output not exposed" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -1149,6 +1174,7 @@ test "job-step-id-naming: job id has invalid characters" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build job` has no `name:`",
+        "job": "build job",
       },
     ],
   })
@@ -1189,11 +1215,14 @@ test "deprecated-workflow-commands: ::set-output workflow command" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "deprecated-workflow-commands",
         "severity": "warning",
         "message": "deprecated workflow command `::set-output`; use `$GITHUB_OUTPUT` instead",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1235,11 +1264,13 @@ test "constant-if-condition: `if: true` always-on" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "constant-if-condition",
         "severity": "warning",
         "message": "job `build` `if:` is constant `true` — remove or replace the condition",
+        "job": "build",
       },
     ],
   })

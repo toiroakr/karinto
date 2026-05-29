@@ -39,6 +39,7 @@ test "anonymous-definition: workflow has no top-level `name`" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -166,16 +167,20 @@ test "artipacked: actions/checkout leaves credentials persisted" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "artipacked",
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
+        "job": "build",
       },
     ],
   })
@@ -217,11 +222,13 @@ test "bot-conditions: spoofable github.actor bot check" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `auto` has no `name:`",
+        "job": "auto",
       },
       {
         "rule": "bot-conditions",
         "severity": "error",
         "message": "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
+        "job": "auto",
       },
     ],
   })
@@ -273,6 +280,7 @@ test "cache-poisoning: cache restore in publish flow" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `release` has no `name:`",
+        "job": "release",
       },
       {
         "rule": "undocumented-permissions",
@@ -320,6 +328,7 @@ test "concurrency-limits: no concurrency on deploy workflow" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `deploy` has no `name:`",
+        "job": "deploy",
       },
     ],
   })
@@ -365,6 +374,7 @@ test "dangerous-triggers: workflow uses pull_request_target" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -464,6 +474,7 @@ test "excessive-permissions: workflow without `permissions:` block emits default
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "undocumented-permissions",
@@ -632,16 +643,21 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "template-injection",
         "severity": "error",
         "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "github-env",
         "severity": "error",
         "message": "write to `GITHUB_ENV` may allow code execution",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -687,11 +703,13 @@ test "hardcoded-container-credentials: plain password in container" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "hardcoded-container-credentials",
         "severity": "error",
         "message": "container `credentials.password` is a literal; reference `${{ secrets.* }}` instead",
+        "job": "build",
       },
     ],
   })
@@ -778,11 +796,14 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "deprecated-workflow-commands",
         "severity": "warning",
         "message": "deprecated workflow command `::set-env`; use `$GITHUB_ENV` instead",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -823,16 +844,21 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unpinned-uses",
         "severity": "warning",
         "message": "uses `tj-actions/changed-files@v35` is not pinned to a full-length SHA",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "known-vulnerable-actions",
         "severity": "error",
         "message": "uses `tj-actions/changed-files@v35`: known compromised release",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -897,11 +923,13 @@ test "misfeature: continue-on-error masks real failures" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "misfeature",
         "severity": "info",
         "message": "job `build` has `continue-on-error: true`; failures will be hidden",
+        "job": "build",
       },
     ],
   })
@@ -942,26 +970,34 @@ test "obfuscation: hex-encoded uses ref" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "unpinned-uses",
         "severity": "warning",
         "message": "uses `actions/checkout@%76%34` is not pinned to a full-length SHA",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "obfuscation",
         "severity": "info",
         "message": "uses ref contains percent-encoded characters; possible obfuscation",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "artipacked",
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
+        "job": "build",
       },
     ],
   })
@@ -1004,11 +1040,13 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "overprovisioned-secrets",
         "severity": "warning",
         "message": "`toJSON(secrets)` exposes every secret; reference specific keys",
+        "job": "build",
       },
     ],
   })
@@ -1079,6 +1117,7 @@ test "secrets-inherit: reusable workflow call uses `secrets: inherit`" {
         "rule": "secrets-inherit",
         "severity": "error",
         "message": "job `call`: `secrets: inherit` forwards every secret",
+        "job": "call",
       },
     ],
   })
@@ -1119,16 +1158,20 @@ test "secrets-outside-env: secrets accessed without an environment" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `deploy` has no `name:`",
+        "job": "deploy",
       },
       {
         "rule": "template-injection",
         "severity": "info",
         "message": "code injection via template expansion in `run:` script",
+        "job": "deploy",
+        "step": { "index": 0 },
       },
       {
         "rule": "secrets-outside-env",
         "severity": "warning",
         "message": "job `deploy` uses `secrets.*` without protecting it with `environment:`",
+        "job": "deploy",
       },
     ],
   })
@@ -1169,11 +1212,13 @@ test "self-hosted-runner: job runs on self-hosted runner" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "self-hosted-runner",
         "severity": "warning",
         "message": "job `build` runs on a self-hosted runner",
+        "job": "build",
       },
     ],
   })
@@ -1218,11 +1263,13 @@ test "superfluous-actions: dtolnay/rust-toolchain flagged" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "superfluous-actions",
         "severity": "info",
         "message": "step uses `dtolnay/rust-toolchain` — use `rustup` and/or `cargo` in a script step",
+        "job": "build",
       },
     ],
   })
@@ -1263,11 +1310,14 @@ test "template-injection: untrusted input in run script" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `echo` has no `name:`",
+        "job": "echo",
       },
       {
         "rule": "template-injection",
         "severity": "error",
         "message": "untrusted `github.event.pull_request.body` interpolated into `run:` script",
+        "job": "echo",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1334,11 +1384,13 @@ test "unpinned-images: container image uses a floating tag" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unpinned-images",
         "severity": "warning",
         "message": "container image `node:20` is not pinned by digest",
+        "job": "build",
       },
     ],
   })
@@ -1379,11 +1431,14 @@ test "unpinned-tools: pipe-to-shell installer in run" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unpinned-tools",
         "severity": "warning",
         "message": "run step fetches and executes an external script without pinning",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1426,11 +1481,14 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "unpinned-uses",
         "severity": "warning",
         "message": "uses `actions/checkout@v4` is not pinned to a full-length SHA",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1473,16 +1531,21 @@ test "unredacted-secrets: secret length manipulated before logging" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "template-injection",
         "severity": "info",
         "message": "code injection via template expansion in `run:` script",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "unredacted-secrets",
         "severity": "error",
         "message": "secret is transformed (base64) before logging; redaction will fail",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1529,6 +1592,7 @@ test "unsound-condition: `always() && success()` is always true" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -1575,6 +1639,7 @@ test "unsound-contains: contains() with literal arg order swapped" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -1620,6 +1685,7 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `publish` has no `name:`",
+        "job": "publish",
       },
       {
         "rule": "undocumented-permissions",
@@ -1630,6 +1696,7 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "use-trusted-publishing",
         "severity": "info",
         "message": "PyPI publish uses an API token; prefer OIDC trusted publishing",
+        "job": "publish",
       },
     ],
   })
