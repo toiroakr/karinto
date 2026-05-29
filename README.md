@@ -103,7 +103,8 @@ curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65
       {
         "rule": "duplicate-job-step-ids",
         "severity": "error",
-        "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)"
+        "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)",
+        "job": "build"
       }
     ]
   },
@@ -114,6 +115,19 @@ curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65
 `engine_version` is present on every response (success and error). It is the
 version of the karinto engine that produced the diagnostics — see
 [*Versioning & pinning*](#versioning--pinning).
+
+Each diagnostic carries `rule`, `severity`, and `message`. When a finding can
+be tied to a location, it also includes:
+
+- `job` — the offending job's ID (the key under `jobs:`). Omitted for
+  workflow-global findings and for action-file steps.
+- `step` — the step the finding is about, as `{ "index": <0-based position in
+  the steps list>, "id": "<step id, when declared>" }`. `index` is always
+  present so a step is locatable even without an `id:`; `id` is omitted when
+  the step declares none.
+
+The YAML parser does not preserve source layout, so diagnostics do not carry
+line/column positions; `job`/`step` are the location handles instead.
 
 In `repo` mode the result is wrapped:
 
