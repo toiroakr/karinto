@@ -217,9 +217,13 @@ hardcoded in the Worker / workflow.
 | `CAPTURES_RECOVERY_RATIO` | 0.7 | When pruning fires, shrink to this fraction of the size limit (default → ≈ 4.79 GiB target). |
 | `PINNED_KEEP_RECENT` | 50 | Top-N retention for exact-version pinned Workers (`karinto-vX-Y-Z`). The "latest patch per major" set is kept on top of this regardless. The free-plan Workers cap is 100, so 50 leaves comfortable headroom for prod/staging/maintenance + per-PR preview + major-alias Workers. |
 
-The last three take effect on the next release deploy (they're applied via
-`wrangler deploy --var` in `scripts/release-publish.sh`). `REPLAY_LIMIT` is
-read directly by the workflows, so it applies immediately.
+`CAPTURE_CONTENT_LIMIT_KIB` / `CAPTURES_SIZE_LIMIT_MIB` /
+`CAPTURES_RECOVERY_RATIO` take effect on the next release deploy via
+`wrangler deploy --var` in `scripts/release-publish.sh`. `PINNED_KEEP_RECENT`
+is consumed by `scripts/manage-pinned-workers.mjs` at release time as a
+prune knob (not a Worker runtime var, so it isn't surfaced through
+`--var`). `REPLAY_LIMIT` is read by the workflows directly, so it applies
+immediately.
 
 ### Required repository settings
 
