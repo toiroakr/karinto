@@ -28,8 +28,8 @@
 //   RELEASE_VERSION — the X.Y.Z just deployed (no `v` prefix).
 //
 // Optional env:
-//   PINNED_KEEP_RECENT — default 30. Top-N retention by SemVer descending.
-//   The Cloudflare free tier caps at 100 Worker scripts; 30 leaves
+//   PINNED_KEEP_RECENT — default 50. Top-N retention by SemVer descending.
+//   The Cloudflare free tier caps at 100 Worker scripts; 50 leaves
 //   comfortable headroom for prod/staging/maintenance + per-PR previews +
 //   major aliases.
 //
@@ -51,7 +51,7 @@ const VERSION = process.env.RELEASE_VERSION;
 // top-N retention. `||` treats "" as missing. `"0"` is still truthy as a
 // string, so an explicit `PINNED_KEEP_RECENT=0` (keep only latest-per-major
 // + release) is honored.
-const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT || "30";
+const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT || "50";
 
 if (!TOKEN || !ACCOUNT) {
   fail("CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required");

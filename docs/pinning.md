@@ -51,15 +51,15 @@ Exact-version pinned Workers are auto-pruned on each release. The keep set
 is:
 
 > *(latest patch within every major)* ∪ *(top `PINNED_KEEP_RECENT` by
-> SemVer, default 30)* ∪ *(just-released)*
+> SemVer, default 50)* ∪ *(just-released)*
 
 A given `karinto-vX-Y-Z` URL is preserved as long as your pinned release is
-either the most recent patch in its major *or* one of the most recent 30
+either the most recent patch in its major *or* one of the most recent 50
 releases overall. It falls out and gets deleted once **both** of those
 have stopped holding: a strictly newer release in your major has shipped
 (so you've lost "latest patch within major") *and* your pin has slid out
-of the global top 30 by SemVer (releases in *any* major count toward the
-top-30 budget, so heavy patching of a newer major can push out an old pin
+of the global top 50 by SemVer (releases in *any* major count toward the
+top-50 budget, so heavy patching of a newer major can push out an old pin
 even when relatively few releases in your own major have happened).
 Hitting the URL afterward returns the Cloudflare "worker not found"
 `404`, not a karinto-shaped JSON response.

@@ -17,7 +17,7 @@ one:
 
 Exact-version snapshots are auto-pruned on each release down to *(the latest
 patch within every major)* ∪ *(the top `PINNED_KEEP_RECENT` versions by
-SemVer, default 30)* ∪ *(the just-released version)*, so the latest patch
+SemVer, default 50)* ∪ *(the just-released version)*, so the latest patch
 of every released major remains available as an exact pin indefinitely.
 Major aliases are never auto-deleted.
 
