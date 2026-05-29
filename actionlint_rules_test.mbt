@@ -986,6 +986,7 @@ test "shell-name-per-os: pwsh on linux runner" {
         "severity": "error",
         "message": "shell `cmd` is only available on Windows runners",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1160,6 +1161,7 @@ test "job-step-id-naming: job id has invalid characters" {
         "rule": "job-step-id-naming",
         "severity": "warning",
         "message": "job ID `build job` must match `[A-Za-z_][A-Za-z0-9_-]*`",
+        "job": "build job",
       },
       {
         "rule": "concurrency-limits",

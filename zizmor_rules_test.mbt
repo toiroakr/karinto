@@ -181,6 +181,7 @@ test "artipacked: actions/checkout leaves credentials persisted" {
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -998,6 +999,7 @@ test "obfuscation: hex-encoded uses ref" {
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1270,6 +1272,7 @@ test "superfluous-actions: dtolnay/rust-toolchain flagged" {
         "severity": "info",
         "message": "step uses `dtolnay/rust-toolchain` — use `rustup` and/or `cargo` in a script step",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })

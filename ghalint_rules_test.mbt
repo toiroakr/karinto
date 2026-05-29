@@ -387,6 +387,7 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })

@@ -1235,18 +1235,18 @@ fn artipacked_emit_for_step(step : StepInfo, out : Array[Diagnostic]) -> Unit {
   match step.raw.get("with") {
     Some(Map(w)) =>
       match w.get("persist-credentials") {
-        None => add_diag(out, "artipacked", Warning, unsafe_msg)
+        None => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
         Some(Boolean(false)) => ()
         Some(Boolean(true)) => () // auditor-only — silent under Regular
         Some(String(s)) =>
           match s.to_lower() {
             "false" | "true" => ()
-            _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+            _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
           }
-        _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+        _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
       }
-    Some(String(_)) => add_diag(out, "artipacked", Info, maybe_msg)
-    _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+    Some(String(_)) => add_diag_step(out, "artipacked", Info, maybe_msg, step)
+    _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
   }
 }
 
@@ -3185,11 +3185,12 @@ fn check_superfluous_actions(
       Some(prefix) =>
         match superfluous_action_replacement(prefix) {
           Some(hint) =>
-            add_diag(
+            add_diag_step(
               out,
               "superfluous-actions",
               Info,
               "step uses `\{prefix}` — \{hint}",
+              s,
             )
           None => ()
         }
@@ -3209,11 +3210,12 @@ fn check_superfluous_actions_doc(
       Some(prefix) =>
         match superfluous_action_replacement(prefix) {
           Some(hint) =>
-            add_diag(
+            add_diag_step(
               out,
               "superfluous-actions",
               Info,
               "step uses `\{prefix}` — \{hint}",
+              s,
             )
           None => ()
         }
@@ -4279,22 +4281,24 @@ fn check_uses_syntax(
 fn check_job_step_id_naming(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   for j in ctx.jobs {
     if !is_valid_id(j.name) {
-      add_diag(
+      add_diag_job(
         out,
         "job-step-id-naming",
         Warning,
         "job ID `\{j.name}` must match `[A-Za-z_][A-Za-z0-9_-]*`",
+        j.name,
       )
     }
     for s in j.steps {
       match s.raw.get("id") {
         Some(String(id)) =>
           if !is_valid_id(id) {
-            add_diag(
+            add_diag_step(
               out,
               "job-step-id-naming",
               Warning,
               "step ID `\{id}` must match `[A-Za-z_][A-Za-z0-9_-]*`",
+              s,
             )
           }
         _ => ()
@@ -4996,11 +5000,12 @@ fn check_shell_name_per_os(
           } else {
             "this OS"
           }
-          add_diag(
+          add_diag_step(
             out,
             "shell-name-per-os",
             Error,
             "shell `\{sh}` is only available on \{scope} runners",
+            s,
           )
         }
       None => ()
