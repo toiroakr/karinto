@@ -9,7 +9,7 @@ back JSON diagnostics. Rules are inspired by
 
 Public endpoint: `https://karinto.toiroakr.workers.dev`
 
-Documentation site: <https://toiroakr.github.io/karinto/>
+Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
