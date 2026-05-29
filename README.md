@@ -104,9 +104,14 @@ curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)"
       }
     ]
-  }
+  },
+  "engine_version": "0.3.1"
 }
 ```
+
+`engine_version` is present on every response (success and error). It is the
+version of the karinto engine that produced the diagnostics — see
+[*Versioning & pinning*](#versioning--pinning).
 
 In `repo` mode the result is wrapped:
 
@@ -116,9 +121,35 @@ In `repo` mode the result is wrapped:
   "repo": "actions/checkout",
   "commit": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "targets": ["action.yml"],
-  "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ]
+  "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ],
+  "engine_version": "0.3.1"
 }
 ```
+
+## Versioning & pinning
+
+`https://karinto.toiroakr.workers.dev` always serves the **latest** release.
+For reproducible CI, three options:
+
+- **Exact pin** — `https://karinto-vX-Y-Z.toiroakr.workers.dev` (immutable
+  snapshot per release; dots → dashes).
+- **Major alias** — `https://karinto-vX.toiroakr.workers.dev` (auto-rolls
+  within a major; shielded from a future `1.0.0`).
+- **Self-host** on your own Cloudflare account.
+
+```sh
+curl -X POST --data-binary @workflow.yml \
+     https://karinto-v0-3-1.toiroakr.workers.dev
+```
+
+Every response carries an `engine_version` field on both success and error
+paths, so even against the bare endpoint you can `jq -e '.engine_version
+== "0.3.1"'` to fail loudly the moment the engine drifts.
+
+Full guide — including the auto-prune retention rule and the 404 risk for
+long-untouched exact pins, self-hosting steps, and a Renovate preset for
+auto-bumping URL pins — in [`docs/pinning.md`](docs/pinning.md). Released
+versions are listed under [GitHub Releases](https://github.com/toiroakr/karinto/releases).
 
 ## Private repositories
 

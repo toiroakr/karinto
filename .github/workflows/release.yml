@@ -50,3 +50,6 @@ jobs:
           CAPTURE_CONTENT_LIMIT_KIB: ${{ vars.CAPTURE_CONTENT_LIMIT_KIB }}
           CAPTURES_SIZE_LIMIT_MIB: ${{ vars.CAPTURES_SIZE_LIMIT_MIB }}
           CAPTURES_RECOVERY_RATIO: ${{ vars.CAPTURES_RECOVERY_RATIO }}
+          # Top-N retention for `karinto-vX-Y-Z` pinned Workers. The
+          # "latest patch per major" set is kept on top of this regardless.
+          PINNED_KEEP_RECENT: ${{ vars.PINNED_KEEP_RECENT }}

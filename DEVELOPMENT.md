@@ -135,9 +135,10 @@ GitHub Actions wiring:
   updates) a "chore: release" PR that consumes them, bumps versions, and
   rewrites `CHANGELOG.md`. When that PR is merged (i.e. main has no pending
   changesets), the same workflow runs `scripts/release-publish.sh`:
-  builds, deploys to the production Worker, runs `cf/smoke.sh`, tags
-  `vX.Y.Z`, and creates a GitHub Release whose body is the new CHANGELOG
-  section.
+  builds, deploys to the production Worker, runs `cf/smoke.sh`, deploys an
+  immutable version-pinned snapshot Worker (`karinto-vX-Y-Z`, smoke-checked
+  too), tags `vX.Y.Z`, and creates a GitHub Release whose body is the new
+  CHANGELOG section.
 - `.github/workflows/upstream-parity.yml` — runs karinto against the
   vendored upstream fixtures and the matching upstream linter binary, and
   compares the diagnostics they emit (per-rule for zizmor / ghalint, source-
@@ -173,6 +174,21 @@ action keeps a "chore: release" PR open that previews the next version.
    - `moon update && moon test && moon build --target js --release`
    - `cd cf && npm ci && npx wrangler deploy`
    - `bash cf/smoke.sh` against `https://karinto.toiroakr.workers.dev`
+   - `npx wrangler deploy --env="" --name karinto-vX-Y-Z` — an immutable
+     snapshot Worker for the released version (`.` → `-` in the name),
+     smoke-checked at `https://karinto-vX-Y-Z.toiroakr.workers.dev`. Uses the
+     top-level config (like PR previews) so it has no CAPTURES binding and no
+     cron; it reads the shared KV but never writes. CI users pin to this URL
+     to avoid the always-latest endpoint shifting under them — see
+     [*Versioning & pinning*](docs/pinning.md).
+   - `node ../scripts/manage-pinned-workers.mjs` — refreshes the
+     `karinto-vMAJOR` alias if this release is the new top within its major
+     (smoke-checked at `karinto-vMAJOR.toiroakr.workers.dev`) and deletes
+     exact-version Workers outside the retention set *(latest patch per
+     major)* ∪ *(top `PINNED_KEEP_RECENT` by SemVer)* ∪ *(just-released)*.
+     Aliases are never auto-deleted. Alias failures fail the release; prune
+     failures only warn — stale snapshots are an inventory concern, retried
+     next release.
    - `npx changeset tag` — creates `v<version>` and pushes it
    - `changesets/action` then publishes a GitHub Release for that tag
      using the new CHANGELOG section as the body.
@@ -199,10 +215,15 @@ hardcoded in the Worker / workflow.
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
 | `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
 | `CAPTURES_RECOVERY_RATIO` | 0.7 | When pruning fires, shrink to this fraction of the size limit (default → ≈ 4.79 GiB target). |
+| `PINNED_KEEP_RECENT` | 50 | Top-N retention for exact-version pinned Workers (`karinto-vX-Y-Z`). The "latest patch per major" set is kept on top of this regardless. The free-plan Workers cap is 100, so 50 leaves comfortable headroom for prod/staging/maintenance + per-PR preview + major-alias Workers. |
 
-The last three take effect on the next release deploy (they're applied via
-`wrangler deploy --var` in `scripts/release-publish.sh`). `REPLAY_LIMIT` is
-read directly by the workflows, so it applies immediately.
+`CAPTURE_CONTENT_LIMIT_KIB` / `CAPTURES_SIZE_LIMIT_MIB` /
+`CAPTURES_RECOVERY_RATIO` take effect on the next release deploy via
+`wrangler deploy --var` in `scripts/release-publish.sh`. `PINNED_KEEP_RECENT`
+is consumed by `scripts/manage-pinned-workers.mjs` at release time as a
+prune knob (not a Worker runtime var, so it isn't surfaced through
+`--var`). `REPLAY_LIMIT` is read by the workflows directly, so it applies
+immediately.
 
 ### Required repository settings
 

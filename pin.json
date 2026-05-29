@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Auto-update karinto version pins (URLs and engine_version assertions). Extend via `github>toiroakr/karinto:pin`. See https://github.com/toiroakr/karinto/blob/main/docs/pinning.md#renovate-auto-bump.",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "karinto-vX-Y-Z.toiroakr.workers.dev URL pins (dashed form). Reads dashed git tags pushed alongside the dotted SemVer tags by scripts/release-publish.sh.",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/.+\\.ya?ml$/",
+        "/\\.sh$/",
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "karinto-v(?<currentValue>\\d+-\\d+-\\d+)\\.toiroakr\\.workers\\.dev"
+      ],
+      "depNameTemplate": "toiroakr/karinto",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^v(?<version>\\d+-\\d+-\\d+)$",
+      "versioningTemplate": "regex:^(?<major>\\d+)-(?<minor>\\d+)-(?<patch>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "engine_version literals in CI drift-detection assertions (e.g. `jq -e '.engine_version == \"0.3.1\"'`).",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/.+\\.ya?ml$/",
+        "/\\.sh$/"
+      ],
+      "matchStrings": [
+        "engine_version\\s*==\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "engine_version\\s*==\\s*'(?<currentValue>\\d+\\.\\d+\\.\\d+)'"
+      ],
+      "depNameTemplate": "toiroakr/karinto",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>\\d+\\.\\d+\\.\\d+)$",
+      "versioningTemplate": "semver"
+    }
+  ]
+}

@@ -121,4 +121,19 @@ else
   bad "percent-encoded traversal (status=$code): $res"
 fi
 
+# 10. every response carries a non-empty `engine_version` so CI can pin /
+#     assert the deployed engine (present on both success and error paths).
+res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
+if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then
+  ok "response carries engine_version ($(jq -r '.engine_version' <<<"$res"))"
+else
+  bad "engine_version missing on success: $res"
+fi
+res=$(curl -sS -X POST --data '' "$URL")
+if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then
+  ok "engine_version present on error path"
+else
+  bad "engine_version missing on error: $res"
+fi
+
 exit "$failed"

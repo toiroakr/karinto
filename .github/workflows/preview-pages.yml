@@ -3,8 +3,11 @@ name: preview-pages
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Narrowly scoped to the playground asset. Other docs/ files (e.g.
+    # `pinning.md`) render natively on GitHub and don't need an artifact
+    # preview.
     paths:
-      - 'docs/**'
+      - 'docs/index.html'
       - '.github/workflows/preview-pages.yml'
 
 concurrency:
@@ -22,15 +25,17 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      # `archive: false` (upload-artifact v7+, Feb 2026) keeps files unzipped
-      # so the GitHub UI serves them with their native content-type. docs/
-      # is a single self-contained index.html, so opening the artifact in
-      # the browser renders the playground directly.
+      # `archive: false` (upload-artifact v7+, Feb 2026) keeps the file
+      # unzipped so the GitHub UI serves it with its native content-type
+      # and the artifact opens directly as the rendered playground. The
+      # flag only supports a single-file upload, so this path is pinned to
+      # the playground asset (the rest of `docs/` is plain markdown that
+      # renders natively on GitHub).
       - id: upload
         uses: actions/upload-artifact@v7
         with:
           name: docs-preview-pr-${{ github.event.pull_request.number }}
-          path: docs
+          path: docs/index.html
           archive: false
           retention-days: 14
 
