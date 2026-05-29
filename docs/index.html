@@ -124,10 +124,36 @@
     background: var(--bg);
     color: var(--fg);
   }
-  form input[type="text"]:focus {
+  form input[type="text"]:focus,
+  form textarea:focus,
+  form select:focus {
     outline: 2px solid var(--accent);
     outline-offset: -1px;
     border-color: var(--accent);
+  }
+  form textarea {
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 220px;
+    resize: vertical;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+  form select {
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
   }
   form .options {
     display: flex;
@@ -273,15 +299,19 @@
   </header>
 
   <section>
-    <h2>Try it on a public repo</h2>
-    <p>The page resolves the file's commit SHA via the GitHub API and then
-    builds a <code>karinto.toiroakr.workers.dev</code> URL you can open in a
-    new tab to read the JSON. (Direct navigation avoids cross-origin <code>fetch</code>
-    issues some privacy browsers have with <code>*.workers.dev</code>.)</p>
+    <h2>Try it</h2>
+    <p>Lint a file from a public repo, or paste YAML directly. Repo modes
+    resolve the file's commit SHA via the GitHub API and build a
+    <code>karinto.toiroakr.workers.dev</code> URL you open in a new tab; the
+    <strong>Paste YAML</strong> tab POSTs your content straight to the linter
+    and opens the JSON in a new tab. (Navigation — rather than <code>fetch</code> —
+    avoids cross-origin issues some privacy browsers have with
+    <code>*.workers.dev</code>.)</p>
     <form id="lint-form" autocomplete="off">
       <div class="tabs" aria-label="Input method">
         <button type="button" id="tab-btn-split" class="tab" aria-pressed="true">Repo + path</button>
         <button type="button" id="tab-btn-url" class="tab" aria-pressed="false">GitHub URL</button>
+        <button type="button" id="tab-btn-content" class="tab" aria-pressed="false">Paste YAML</button>
       </div>
       <div id="tab-split" class="tab-panel">
         <div class="row">
@@ -299,6 +329,20 @@
         <div class="field">
           <label for="ghurl">GitHub file URL</label>
           <input id="ghurl" name="ghurl" type="url" placeholder="https://github.com/actions/checkout/blob/main/action.yml" spellcheck="false" autocapitalize="off" />
+        </div>
+      </div>
+      <div id="tab-content" class="tab-panel" hidden>
+        <div class="field">
+          <label for="content">workflow / action YAML</label>
+          <textarea id="content" name="content" spellcheck="false" autocapitalize="off" placeholder="name: CI&#10;on: push&#10;jobs:&#10;  build:&#10;    runs-on: ubuntu-latest&#10;    steps:&#10;      - uses: actions/checkout@v4"></textarea>
+        </div>
+        <div class="field" style="flex: 0 0 auto;">
+          <label for="ctype">type</label>
+          <select id="ctype" name="type">
+            <option value="">auto-detect</option>
+            <option value="workflow">workflow</option>
+            <option value="action">action</option>
+          </select>
         </div>
       </div>
       <div class="options">
@@ -328,6 +372,9 @@
     rate-limits at 60/minute per IP.</p>
     <p>You can reproduce the karinto call locally:</p>
     <pre>curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"</pre>
+    <p>The <strong>Paste YAML</strong> tab skips GitHub entirely and POSTs your
+    content to the Worker (a single request, no SHA resolution):</p>
+    <pre>curl -X POST --data-binary @workflow.yml "https://karinto.toiroakr.workers.dev?type=workflow"</pre>
   </details>
 
   <footer>
@@ -345,24 +392,29 @@
   const repoEl = document.getElementById("repo");
   const targetEl = document.getElementById("target");
   const ghurlEl = document.getElementById("ghurl");
+  const contentEl = document.getElementById("content");
+  const ctypeEl = document.getElementById("ctype");
   const osvEl = document.getElementById("osv");
   const submitEl = document.getElementById("submit");
   const statusEl = document.getElementById("status");
   const resultEl = document.getElementById("result");
-  const tabBtnSplit = document.getElementById("tab-btn-split");
-  const tabBtnUrl = document.getElementById("tab-btn-url");
-  const tabSplit = document.getElementById("tab-split");
-  const tabUrl = document.getElementById("tab-url");
 
-  let mode = "split"; // "split" | "url"
+  // mode key -> { btn, panel }
+  const tabs = {
+    split: { btn: document.getElementById("tab-btn-split"), panel: document.getElementById("tab-split") },
+    url: { btn: document.getElementById("tab-btn-url"), panel: document.getElementById("tab-url") },
+    content: { btn: document.getElementById("tab-btn-content"), panel: document.getElementById("tab-content") },
+  };
+
+  let mode = "split"; // "split" | "url" | "content"
 
   function setMode(next) {
     mode = next;
-    const isSplit = next === "split";
-    tabBtnSplit.setAttribute("aria-pressed", String(isSplit));
-    tabBtnUrl.setAttribute("aria-pressed", String(!isSplit));
-    tabSplit.hidden = !isSplit;
-    tabUrl.hidden = isSplit;
+    for (const [key, { btn, panel }] of Object.entries(tabs)) {
+      const active = key === next;
+      btn.setAttribute("aria-pressed", String(active));
+      panel.hidden = !active;
+    }
   }
 
   const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -370,8 +422,9 @@
     return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
   }
 
-  tabBtnSplit.addEventListener("click", () => setMode("split"));
-  tabBtnUrl.addEventListener("click", () => setMode("url"));
+  for (const [key, { btn }] of Object.entries(tabs)) {
+    btn.addEventListener("click", () => setMode(key));
+  }
 
   function setStatus(html, kind) {
     statusEl.className = "status" + (kind ? " " + kind : "");
@@ -488,6 +541,13 @@
   }
 
   function readInputs() {
+    if (mode === "content") {
+      const content = contentEl.value;
+      if (!content.trim()) {
+        return { error: "Paste a workflow or <code>action.yml</code> YAML to lint." };
+      }
+      return { contentMode: true, content, type: ctypeEl.value };
+    }
     if (mode === "url") {
       const raw = ghurlEl.value;
       if (!raw.trim()) {
@@ -550,6 +610,20 @@
       hideResult();
       return;
     }
+
+    // Content mode POSTs the pasted YAML to the Worker and opens the JSON in a
+    // new tab. We submit a hidden form (rather than fetch) so the navigation is
+    // same-origin-exempt — privacy browsers that drop cross-origin fetches to
+    // *.workers.dev still allow a form-submit navigation — and so payloads up
+    // to the Worker's 1 MiB body cap work where a GET query string wouldn't.
+    if (input.contentMode) {
+      hideResult();
+      postContent(input.content, input.type, osvEl.checked);
+      showContentResult(input.type, osvEl.checked);
+      setStatus("Posted your YAML to the linter — see the new tab for the JSON.", "ok");
+      return;
+    }
+
     const { owner, name, candidates } = input;
 
     submitEl.disabled = true;
@@ -602,6 +676,51 @@
     resultEl.replaceChildren();
   }
 
+  // Submit the pasted YAML as a form POST targeting a new tab. Called inside
+  // the submit handler (a user gesture) with no preceding await, so popup
+  // blockers leave the new tab alone.
+  function postContent(content, type, osv) {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = KARINTO;
+    form.target = "_blank";
+    form.acceptCharset = "utf-8";
+    form.style.display = "none";
+
+    const addField = (name, value) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+    addField("content", content);
+    if (type) addField("type", type);
+    if (osv) addField("osv", "1");
+
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  }
+
+  // Content mode has no shareable GET URL, so the result panel just shows the
+  // equivalent curl invocation.
+  function showContentResult(type, osv) {
+    resultEl.hidden = false;
+    resultEl.replaceChildren();
+
+    const params = [];
+    if (type) params.push("type=" + type);
+    if (osv) params.push("osv=1");
+    const url = KARINTO + (params.length ? "?" + params.join("&") : "");
+
+    const label = makeEl("p", "result-label", "Lint result opened in a new tab.");
+    const curlLabel = makeEl("p", "result-curl", "Reproduce in a terminal (save your YAML to workflow.yml):");
+    const curlCmd = makeEl("pre", "result-curl-cmd", `curl -X POST --data-binary @workflow.yml ${JSON.stringify(url)}`);
+
+    resultEl.append(label, curlLabel, curlCmd);
+  }
+
   function makeEl(tag, className, textContent) {
     const e = document.createElement(tag);
     if (className) e.className = className;
@@ -646,6 +765,11 @@
   if (qs.get("url")) {
     ghurlEl.value = qs.get("url");
     setMode("url");
+  }
+  if (qs.get("content")) {
+    contentEl.value = qs.get("content");
+    if (qs.get("type")) ctypeEl.value = qs.get("type");
+    setMode("content");
   }
 })();
 </script>
