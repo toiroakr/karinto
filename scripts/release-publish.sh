@@ -61,3 +61,12 @@ popd >/dev/null
 # Emits "New tag: <pkg>@<version>" — parsed by changesets/action so it knows
 # what GitHub Release to create.
 npx changeset tag
+
+# Push a dashed tag (`v0-3-2` pointing at the same commit as `v0.3.2`) so
+# Renovate users extending `github>toiroakr/karinto:pin` can match the
+# dashed URL pin (`karinto-v0-3-2.toiroakr.workers.dev`) against
+# `github-tags`. The dotted tag stays canonical (gets the GitHub Release);
+# the dashed one is a lightweight pointer used only by tooling.
+DASHED_TAG="v${VERSION//./-}"
+git tag "$DASHED_TAG" "v$VERSION"
+git push origin "$DASHED_TAG"

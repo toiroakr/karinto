@@ -180,7 +180,7 @@ action keeps a "chore: release" PR open that previews the next version.
      top-level config (like PR previews) so it has no CAPTURES binding and no
      cron; it reads the shared KV but never writes. CI users pin to this URL
      to avoid the always-latest endpoint shifting under them — see
-     [*Versioning & pinning*](README.md#versioning--pinning).
+     [*Versioning & pinning*](docs/pinning.md).
    - `node ../scripts/manage-pinned-workers.mjs` — refreshes the
      `karinto-vMAJOR` alias if this release is the new top within its major
      (smoke-checked at `karinto-vMAJOR.toiroakr.workers.dev`) and deletes
@@ -215,7 +215,7 @@ hardcoded in the Worker / workflow.
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
 | `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
 | `CAPTURES_RECOVERY_RATIO` | 0.7 | When pruning fires, shrink to this fraction of the size limit (default → ≈ 4.79 GiB target). |
-| `PINNED_KEEP_RECENT` | 5 | Top-N retention for exact-version pinned Workers (`karinto-vX-Y-Z`). The "latest patch per major" set is kept on top of this regardless. |
+| `PINNED_KEEP_RECENT` | 30 | Top-N retention for exact-version pinned Workers (`karinto-vX-Y-Z`). The "latest patch per major" set is kept on top of this regardless. The free-plan Workers cap is 100, so 30 leaves comfortable headroom for prod/staging/maintenance + per-PR preview + major-alias Workers. |
 
 The last three take effect on the next release deploy (they're applied via
 `wrangler deploy --var` in `scripts/release-publish.sh`). `REPLAY_LIMIT` is

@@ -28,7 +28,10 @@
 //   RELEASE_VERSION — the X.Y.Z just deployed (no `v` prefix).
 //
 // Optional env:
-//   PINNED_KEEP_RECENT — default 5. Top-N retention by SemVer descending.
+//   PINNED_KEEP_RECENT — default 30. Top-N retention by SemVer descending.
+//   The Cloudflare free tier caps at 100 Worker scripts; 30 leaves
+//   comfortable headroom for prod/staging/maintenance + per-PR previews +
+//   major aliases.
 //
 // Failure semantics: alias deploy/smoke failures exit non-zero (CI users
 // pinned to `karinto-vX` would otherwise see a stale alias). Individual
@@ -42,7 +45,7 @@ const API = "https://api.cloudflare.com/client/v4";
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID;
 const VERSION = process.env.RELEASE_VERSION;
-const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT ?? "5";
+const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT ?? "30";
 
 if (!TOKEN || !ACCOUNT) {
   fail("CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required");
