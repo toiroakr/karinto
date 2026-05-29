@@ -9,6 +9,8 @@ back JSON diagnostics. Rules are inspired by
 
 Public endpoint: `https://karinto.toiroakr.workers.dev`
 
+Documentation site: <https://toiroakr.github.io/karinto/>
+
 ## Coverage
 
 61 of 82 catalogued rules are active. They cover syntax, expression typing
