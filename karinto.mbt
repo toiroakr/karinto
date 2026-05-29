@@ -394,7 +394,7 @@ fn run_rules(
 /// Pre-existing context is preserved — a rule that already set `job`/`step`
 /// explicitly wins.
 fn stamp_step(out : Array[Diagnostic], start : Int, s : StepInfo) -> Unit {
-  let sref = StepRef::{ index: s.index, id: s.id }
+  let sref = StepRef::{ index: s.step_index, id: s.id }
   let mut k = start
   while k < out.length() {
     let d = out[k]
@@ -406,14 +406,7 @@ fn stamp_step(out : Array[Diagnostic], start : Int, s : StepInfo) -> Unit {
       Some(_) => d.step
       None => Some(sref)
     }
-    out[k] = Diagnostic::{
-      rule: d.rule,
-      severity: d.severity,
-      message: d.message,
-      pos: d.pos,
-      job,
-      step,
-    }
+    out[k] = Diagnostic::{ ..d, job, step }
     k = k + 1
   }
 }
@@ -427,15 +420,7 @@ fn stamp_job(out : Array[Diagnostic], start : Int, name : String) -> Unit {
     let d = out[k]
     match d.job {
       Some(_) => ()
-      None =>
-        out[k] = Diagnostic::{
-          rule: d.rule,
-          severity: d.severity,
-          message: d.message,
-          pos: d.pos,
-          job: Some(name),
-          step: d.step,
-        }
+      None => out[k] = Diagnostic::{ ..d, job: Some(name) }
     }
     k = k + 1
   }

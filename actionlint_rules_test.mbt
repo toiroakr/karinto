@@ -479,6 +479,7 @@ test "meaningless-comparison: meaningless comparison `1 == 1`" {
         "severity": "info",
         "message": "`if:` expression can be replaced by its static evaluation",
         "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })

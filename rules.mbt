@@ -29,10 +29,11 @@ pub(all) struct StepInfo {
   has_full_sha : Bool
   // Location context, populated during prewalk so findings can name their
   // step. `job` is the owning job's ID (`None` for action-file steps);
-  // `index` is the 0-based position in the steps list; `id` is the step
+  // `step_index` is the 0-based position in the steps list (distinct from
+  // `at_idx`, which is the `@` offset within a `uses` ref); `id` is the step
   // `id:` when declared.
   job : String?
-  index : Int
+  step_index : Int
   id : String?
 }
 
@@ -95,7 +96,7 @@ pub(all) struct WalkCtx {
 fn build_step_info(
   sm : Map[String, @yaml.Yaml],
   job : String?,
-  index : Int,
+  step_index : Int,
 ) -> StepInfo {
   let uses = get_string_field(sm, "uses")
   let run = get_string_field(sm, "run")
@@ -153,7 +154,7 @@ fn build_step_info(
     at_idx,
     has_full_sha,
     job,
-    index,
+    step_index,
     id,
   }
 }
@@ -163,13 +164,13 @@ fn build_steps(arr : Array[@yaml.Yaml], job : String?) -> Array[StepInfo] {
   let out : Array[StepInfo] = []
   // Index reflects the position in the YAML steps list (counting every
   // element) so it matches what an author sees in the file.
-  let mut index = 0
+  let mut step_index = 0
   for step in arr {
     match step {
-      Map(sm) => out.push(build_step_info(sm, job, index))
+      Map(sm) => out.push(build_step_info(sm, job, step_index))
       _ => ()
     }
-    index = index + 1
+    step_index = step_index + 1
   }
   out
 }
@@ -964,7 +965,7 @@ fn add_diag_step(
     message,
     pos: None,
     job: step.job,
-    step: Some(StepRef::{ index: step.index, id: step.id }),
+    step: Some(StepRef::{ index: step.step_index, id: step.id }),
   })
 }
 

@@ -140,7 +140,7 @@ pub(all) struct StepInfo {
   at_idx : Int
   has_full_sha : Bool
   job : String?
-  index : Int
+  step_index : Int
   id : String?
 }
 
