@@ -45,7 +45,13 @@ const API = "https://api.cloudflare.com/client/v4";
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID;
 const VERSION = process.env.RELEASE_VERSION;
-const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT ?? "30";
+// `||` (not `??`): GitHub Actions exports `vars.PINNED_KEEP_RECENT` as the
+// empty string when the repo variable is unset, which `??` would pass
+// through and `Number("")` would convert to 0 — silently disabling the
+// top-N retention. `||` treats "" as missing. `"0"` is still truthy as a
+// string, so an explicit `PINNED_KEEP_RECENT=0` (keep only latest-per-major
+// + release) is honored.
+const KEEP_RECENT_RAW = process.env.PINNED_KEEP_RECENT || "30";
 
 if (!TOKEN || !ACCOUNT) {
   fail("CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required");

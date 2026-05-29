@@ -121,7 +121,8 @@ In `repo` mode the result is wrapped:
   "repo": "actions/checkout",
   "commit": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "targets": ["action.yml"],
-  "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ]
+  "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ],
+  "engine_version": "0.3.1"
 }
 ```
 
