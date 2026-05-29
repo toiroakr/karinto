@@ -55,10 +55,14 @@ is:
 
 A given `karinto-vX-Y-Z` URL is preserved as long as your pinned release is
 either the most recent patch in its major *or* one of the most recent 30
-releases overall. Once **30 strictly newer patches in your major** have
-shipped, an old exact pin will fall outside both retention groups and be
-deleted; hitting that URL afterward returns the Cloudflare "worker not
-found" `404`, not a karinto-shaped JSON response.
+releases overall. It falls out and gets deleted once **both** of those
+have stopped holding: a strictly newer release in your major has shipped
+(so you've lost "latest patch within major") *and* your pin has slid out
+of the global top 30 by SemVer (releases in *any* major count toward the
+top-30 budget, so heavy patching of a newer major can push out an old pin
+even when relatively few releases in your own major have happened).
+Hitting the URL afterward returns the Cloudflare "worker not found"
+`404`, not a karinto-shaped JSON response.
 
 If you can't afford `404` when you forget to bump the pin:
 

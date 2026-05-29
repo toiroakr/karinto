@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Auto-update karinto version pins (URLs and engine_version assertions). Extend via `github>toiroakr/karinto:pin`. See https://github.com/toiroakr/karinto#renovate-integration.",
+  "description": "Auto-update karinto version pins (URLs and engine_version assertions). Extend via `github>toiroakr/karinto:pin`. See https://github.com/toiroakr/karinto/blob/main/docs/pinning.md#renovate-auto-bump.",
   "customManagers": [
     {
       "customType": "regex",
