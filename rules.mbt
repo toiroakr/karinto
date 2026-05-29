@@ -27,6 +27,14 @@ pub(all) struct StepInfo {
   has_shell : Bool
   at_idx : Int // -1 if no `@`
   has_full_sha : Bool
+  // Location context, populated during prewalk so findings can name their
+  // step. `job` is the owning job's ID (`None` for action-file steps);
+  // `step_index` is the 0-based position in the steps list (distinct from
+  // `at_idx`, which is the `@` offset within a `uses` ref); `id` is the step
+  // `id:` when declared.
+  job : String?
+  step_index : Int
+  id : String?
 }
 
 ///|
@@ -85,10 +93,15 @@ pub(all) struct WalkCtx {
 }
 
 ///|
-fn build_step_info(sm : Map[String, @yaml.Yaml]) -> StepInfo {
+fn build_step_info(
+  sm : Map[String, @yaml.Yaml],
+  job : String?,
+  step_index : Int,
+) -> StepInfo {
   let uses = get_string_field(sm, "uses")
   let run = get_string_field(sm, "run")
   let if_cond = get_string_field(sm, "if")
+  let id = get_string_field(sm, "id")
   let with_ : Map[String, @yaml.Yaml]? = match sm.get("with") {
     Some(Map(w)) => Some(w)
     _ => None
@@ -140,17 +153,24 @@ fn build_step_info(sm : Map[String, @yaml.Yaml]) -> StepInfo {
     has_shell,
     at_idx,
     has_full_sha,
+    job,
+    step_index,
+    id,
   }
 }
 
 ///|
-fn build_steps(arr : Array[@yaml.Yaml]) -> Array[StepInfo] {
+fn build_steps(arr : Array[@yaml.Yaml], job : String?) -> Array[StepInfo] {
   let out : Array[StepInfo] = []
+  // Index reflects the position in the YAML steps list (counting every
+  // element) so it matches what an author sees in the file.
+  let mut step_index = 0
   for step in arr {
     match step {
-      Map(sm) => out.push(build_step_info(sm))
+      Map(sm) => out.push(build_step_info(sm, job, step_index))
       _ => ()
     }
+    step_index = step_index + 1
   }
   out
 }
@@ -182,7 +202,7 @@ pub fn prewalk(
             match body {
               Map(jb) => {
                 let steps : Array[StepInfo] = match jb.get("steps") {
-                  Some(Array(arr)) => build_steps(arr)
+                  Some(Array(arr)) => build_steps(arr, Some(name))
                   _ => []
                 }
                 for s in steps {
@@ -208,7 +228,7 @@ pub fn prewalk(
         Some(Map(runs)) =>
           match runs.get("steps") {
             Some(Array(arr)) =>
-              for s in build_steps(arr) {
+              for s in build_steps(arr, None) {
                 action_steps.push(s)
               }
             _ => ()
@@ -897,7 +917,56 @@ fn add_diag(
   severity : Severity,
   message : String,
 ) -> Unit {
-  out.push(Diagnostic::{ rule, severity, message, pos: None })
+  out.push(Diagnostic::{
+    rule,
+    severity,
+    message,
+    pos: None,
+    job: None,
+    step: None,
+  })
+}
+
+///|
+/// Emit a finding tagged with the job it concerns. For `on_job`/`on_step`
+/// rules the engine stamps job context automatically; this helper is for
+/// `on_doc` rules that iterate jobs themselves (e.g. `anonymous-definition`).
+fn add_diag_job(
+  out : Array[Diagnostic],
+  rule : String,
+  severity : Severity,
+  message : String,
+  job : String,
+) -> Unit {
+  out.push(Diagnostic::{
+    rule,
+    severity,
+    message,
+    pos: None,
+    job: Some(job),
+    step: None,
+  })
+}
+
+///|
+/// Emit a finding tagged with the step (and its owning job) it concerns. Used
+/// by `on_doc` rules that walk steps directly. `index`/`id` come from the
+/// step's `StepInfo`.
+fn add_diag_step(
+  out : Array[Diagnostic],
+  rule : String,
+  severity : Severity,
+  message : String,
+  step : StepInfo,
+) -> Unit {
+  out.push(Diagnostic::{
+    rule,
+    severity,
+    message,
+    pos: None,
+    job: step.job,
+    step: Some(StepRef::{ index: step.step_index, id: step.id }),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -912,11 +981,12 @@ fn check_id_unique(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     let lower = name.to_lower()
     match lowered.get(lower) {
       Some(prev) =>
-        add_diag(
+        add_diag_job(
           out,
           "duplicate-job-step-ids",
           Error,
           "duplicate job ID `\{name}` (conflicts with `\{prev}` case-insensitively)",
+          name,
         )
       None => lowered[lower] = name
     }
@@ -936,11 +1006,12 @@ fn check_steps_id_unique_pre(
         let lower = id.to_lower()
         match seen.get(lower) {
           Some(prev) =>
-            add_diag(
+            add_diag_step(
               out,
               "duplicate-job-step-ids",
               Error,
               "duplicate step ID `\{id}` (conflicts with `\{prev}` case-insensitively)",
+              s,
             )
           None => seen[lower] = id
         }
@@ -1164,18 +1235,18 @@ fn artipacked_emit_for_step(step : StepInfo, out : Array[Diagnostic]) -> Unit {
   match step.raw.get("with") {
     Some(Map(w)) =>
       match w.get("persist-credentials") {
-        None => add_diag(out, "artipacked", Warning, unsafe_msg)
+        None => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
         Some(Boolean(false)) => ()
         Some(Boolean(true)) => () // auditor-only — silent under Regular
         Some(String(s)) =>
           match s.to_lower() {
             "false" | "true" => ()
-            _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+            _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
           }
-        _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+        _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
       }
-    Some(String(_)) => add_diag(out, "artipacked", Info, maybe_msg)
-    _ => add_diag(out, "artipacked", Warning, unsafe_msg)
+    Some(String(_)) => add_diag_step(out, "artipacked", Info, maybe_msg, step)
+    _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
   }
 }
 
@@ -3114,11 +3185,12 @@ fn check_superfluous_actions(
       Some(prefix) =>
         match superfluous_action_replacement(prefix) {
           Some(hint) =>
-            add_diag(
+            add_diag_step(
               out,
               "superfluous-actions",
               Info,
               "step uses `\{prefix}` — \{hint}",
+              s,
             )
           None => ()
         }
@@ -3138,11 +3210,12 @@ fn check_superfluous_actions_doc(
       Some(prefix) =>
         match superfluous_action_replacement(prefix) {
           Some(hint) =>
-            add_diag(
+            add_diag_step(
               out,
               "superfluous-actions",
               Info,
               "step uses `\{prefix}` — \{hint}",
+              s,
             )
           None => ()
         }
@@ -4208,22 +4281,24 @@ fn check_uses_syntax(
 fn check_job_step_id_naming(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   for j in ctx.jobs {
     if !is_valid_id(j.name) {
-      add_diag(
+      add_diag_job(
         out,
         "job-step-id-naming",
         Warning,
         "job ID `\{j.name}` must match `[A-Za-z_][A-Za-z0-9_-]*`",
+        j.name,
       )
     }
     for s in j.steps {
       match s.raw.get("id") {
         Some(String(id)) =>
           if !is_valid_id(id) {
-            add_diag(
+            add_diag_step(
               out,
               "job-step-id-naming",
               Warning,
               "step ID `\{id}` must match `[A-Za-z_][A-Za-z0-9_-]*`",
+              s,
             )
           }
         _ => ()
@@ -4925,11 +5000,12 @@ fn check_shell_name_per_os(
           } else {
             "this OS"
           }
-          add_diag(
+          add_diag_step(
             out,
             "shell-name-per-os",
             Error,
             "shell `\{sh}` is only available on \{scope} runners",
+            s,
           )
         }
       None => ()
@@ -5892,11 +5968,12 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             continue
           }
           if !j.raw.contains("name") {
-            add_diag(
+            add_diag_job(
               out,
               "anonymous-definition",
               Info,
               "job `\{j.name}` has no `name:`",
+              j.name,
             )
           }
         }

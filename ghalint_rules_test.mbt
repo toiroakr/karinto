@@ -45,6 +45,7 @@ test "permissions-read-all-forbidden: workflow `permissions: read-all` is forbid
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -95,6 +96,7 @@ test "workflow-env-no-secrets: secrets referenced in workflow-level env" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -137,11 +139,13 @@ test "job-env-no-secrets: secrets referenced in job-level env" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "job-env-no-secrets",
         "severity": "error",
         "message": "job `build` env `TOKEN` references `secrets.*`; scope it to the step instead",
+        "job": "build",
       },
     ],
   })
@@ -191,16 +195,21 @@ test "github-app-limit-repositories: GitHub App token scoped to whole org" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "github-app-limit-repositories",
         "severity": "warning",
         "message": "GitHub App token request is missing `repositories:` scope",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "github-app-limit-permissions",
         "severity": "warning",
         "message": "GitHub App token request is missing `permissions:` scope",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -246,11 +255,14 @@ test "github-app-limit-permissions: GitHub App token requests no permissions" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "github-app-limit-permissions",
         "severity": "warning",
         "message": "GitHub App token request is missing `permissions:` scope",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -312,11 +324,13 @@ test "job-timeout-minutes-required: job is missing `timeout-minutes`" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "job-timeout-minutes-required",
         "severity": "warning",
         "message": "job `build` does not declare `timeout-minutes:`",
+        "job": "build",
       },
     ],
   })
@@ -359,16 +373,21 @@ test "checkout-persist-credentials-false: actions/checkout `persist-credentials`
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "checkout-persist-credentials-false",
         "severity": "error",
         "message": "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+        "job": "build",
+        "step": { "index": 0 },
       },
       {
         "rule": "artipacked",
         "severity": "warning",
         "message": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false",
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })

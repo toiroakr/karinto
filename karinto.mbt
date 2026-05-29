@@ -25,11 +25,28 @@ pub(all) struct Position {
 } derive(Eq, Debug, ToJson)
 
 ///|
+/// Identifies the step a finding belongs to, within its owning job (or, for
+/// composite actions, within the action's `runs.steps`).
+///
+/// - `index`: 0-based position of the step in the steps list. Always present,
+///   so a step is locatable even when it declares no `id:`.
+/// - `id`: the step's `id:` value when declared.
+pub(all) struct StepRef {
+  index : Int
+  id : String?
+} derive(Eq, Debug)
+
+///|
 pub(all) struct Diagnostic {
   rule : String
   severity : Severity
   message : String
   pos : Position?
+  // Owning job's ID (the key under `jobs:`). `None` for workflow-global
+  // findings and for action-file steps (which have no job).
+  job : String?
+  // The step a finding is about, when the finding is step-scoped.
+  step : StepRef?
 } derive(Eq, Debug)
 
 ///|
@@ -42,6 +59,16 @@ pub impl ToJson for Severity with to_json(self) {
 }
 
 ///|
+pub impl ToJson for StepRef with to_json(self) {
+  let m : Map[String, Json] = { "index": self.index.to_json() }
+  match self.id {
+    Some(id) => m["id"] = id.to_json()
+    None => ()
+  }
+  m.to_json()
+}
+
+///|
 pub impl ToJson for Diagnostic with to_json(self) {
   let m : Map[String, Json] = {
     "rule": self.rule.to_json(),
@@ -50,6 +77,14 @@ pub impl ToJson for Diagnostic with to_json(self) {
   }
   match self.pos {
     Some(p) => m["pos"] = p.to_json()
+    None => ()
+  }
+  match self.job {
+    Some(j) => m["job"] = j.to_json()
+    None => ()
+  }
+  match self.step {
+    Some(s) => m["step"] = s.to_json()
     None => ()
   }
   m.to_json()
@@ -325,25 +360,70 @@ fn run_rules(
   // persist-credentials-false before artipacked).
   if step_cbs.length() > 0 {
     for s in ctx.workflow_steps {
+      let start = out.length()
       for f in step_cbs {
         f(ctx, s, out)
       }
+      stamp_step(out, start, s)
     }
     for s in ctx.action_steps {
+      let start = out.length()
       for f in step_cbs {
         f(ctx, s, out)
       }
+      stamp_step(out, start, s)
     }
   }
   // Job scope.
   if job_cbs.length() > 0 {
     for j in ctx.jobs {
+      let start = out.length()
       for f in job_cbs {
         f(ctx, j, out)
       }
+      stamp_job(out, start, j.name)
     }
   }
   out
+}
+
+///|
+/// Attach step (and owning-job) context to every diagnostic a step-scoped
+/// rule pushed during its callback. A step rule only ever reasons about the
+/// single step it was handed, so any finding it produced is about that step.
+/// Pre-existing context is preserved — a rule that already set `job`/`step`
+/// explicitly wins.
+fn stamp_step(out : Array[Diagnostic], start : Int, s : StepInfo) -> Unit {
+  let sref = StepRef::{ index: s.step_index, id: s.id }
+  let mut k = start
+  while k < out.length() {
+    let d = out[k]
+    let job = match d.job {
+      Some(_) => d.job
+      None => s.job
+    }
+    let step = match d.step {
+      Some(_) => d.step
+      None => Some(sref)
+    }
+    out[k] = Diagnostic::{ ..d, job, step }
+    k = k + 1
+  }
+}
+
+///|
+/// Attach the owning job's ID to every diagnostic a job-scoped rule pushed,
+/// unless the rule already set one (e.g. a more specific step context).
+fn stamp_job(out : Array[Diagnostic], start : Int, name : String) -> Unit {
+  let mut k = start
+  while k < out.length() {
+    let d = out[k]
+    match d.job {
+      Some(_) => ()
+      None => out[k] = Diagnostic::{ ..d, job: Some(name) }
+    }
+    k = k + 1
+  }
 }
 
 ///|

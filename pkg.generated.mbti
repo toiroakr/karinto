@@ -36,6 +36,8 @@ pub(all) struct Diagnostic {
   severity : Severity
   message : String
   pos : Position?
+  job : String?
+  step : StepRef?
 } derive(Eq, @debug.Debug)
 pub impl ToJson for Diagnostic
 
@@ -137,7 +139,16 @@ pub(all) struct StepInfo {
   has_shell : Bool
   at_idx : Int
   has_full_sha : Bool
+  job : String?
+  step_index : Int
+  id : String?
 }
+
+pub(all) struct StepRef {
+  index : Int
+  id : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for StepRef
 
 pub(all) struct WalkCtx {
   doc : @yaml.Yaml

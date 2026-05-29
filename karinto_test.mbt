@@ -43,6 +43,7 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "rule": "duplicate-job-step-ids",
         "severity": "error",
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)",
+        "job": "build",
       },
       {
         "rule": "excessive-permissions",
@@ -63,11 +64,13 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `Build` has no `name:`",
+        "job": "Build",
       },
       {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -96,6 +99,8 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "rule": "duplicate-job-step-ids",
         "severity": "error",
         "message": "duplicate step ID `a` (conflicts with `A` case-insensitively)",
+        "job": "build",
+        "step": { "index": 1, "id": "a" },
       },
       {
         "rule": "excessive-permissions",
@@ -116,6 +121,7 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -160,6 +166,7 @@ test "permissions-write-all-forbidden: write-all permission rejected at workflow
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -203,11 +210,13 @@ test "job-permissions-required: missing job permissions" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
       {
         "rule": "job-permissions-required",
         "severity": "warning",
         "message": "job `build` does not declare `permissions:`",
+        "job": "build",
       },
     ],
   })
@@ -243,6 +252,7 @@ test "job-permissions-required: satisfied when workflow-level permissions presen
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
@@ -287,6 +297,7 @@ test "disable: skip a rule with a glob pattern" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "job": "build",
       },
     ],
   })
