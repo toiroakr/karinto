@@ -67,6 +67,12 @@ npx changeset tag
 # dashed URL pin (`karinto-v0-3-2.toiroakr.workers.dev`) against
 # `github-tags`. The dotted tag stays canonical (gets the GitHub Release);
 # the dashed one is a lightweight pointer used only by tooling.
+#
+# Tag HEAD directly rather than dereferencing `v$VERSION`: `changeset tag`
+# prints `New tag: <pkg>@<version>` on stdout (consumed by
+# changesets/action) but the actual git tag it creates for a
+# single-package repo is `v<version>` — that mismatch is easy to misread,
+# so use HEAD which is unambiguously the release commit either way.
 DASHED_TAG="v${VERSION//./-}"
-git tag "$DASHED_TAG" "v$VERSION"
+git tag "$DASHED_TAG"
 git push origin "$DASHED_TAG"
