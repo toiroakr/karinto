@@ -41,7 +41,18 @@ under arbitrary path prefixes.
 | `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected. Hex-shaped refs are accepted at face value — a short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
 | `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
+| `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
+| `archived` | string | Caller-supplied `owner/repo` list (GitHub reports `archived: true`) for `archived-uses`. |
+| `impostor` | string | Caller-supplied `owner/repo@sha` list of confirmed impostor commits for `impostor-commit`. |
+| `ref_mismatches` | string | Caller-supplied `owner/repo@sha` list whose pin disagrees with the trailing `# vN` comment, for `ref-version-mismatch`. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
+
+The last four feed rules whose verdict depends on live GitHub repo / SHA / tag
+state that the Worker cannot resolve itself. The **caller** (typically a CI
+action runner) resolves them via the GitHub API and passes the result in;
+each accepts at most 200 comma-separated entries of 256 characters. An
+empty/omitted value leaves the rule on its offline baseline. See
+[*Action-side context*](docs/action-context.md) for how to populate them.
 
 ### Examples
 

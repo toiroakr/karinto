@@ -21,12 +21,14 @@
 ///                            match the version named in the trailing
 ///                            comment (`ref-version-mismatch`)
 ///
-/// The Cloudflare Worker HTTP handler (`cf/index.js`) currently only wires
-/// `vuln_uses_str` (populated from OSV.dev when the request sets `osv=1`).
-/// The remaining inputs are part of `lint_string`'s contract so callers
-/// embedding the Worker directly — tests, the dark-launch replayer,
-/// downstream integrations — can supply them; HTTP routing for them is a
-/// future change.
+/// The Cloudflare Worker HTTP handler (`cf/index.js`) wires every input.
+/// `vuln_uses_str` is populated from OSV.dev when the request sets `osv=1`;
+/// the remaining four are passed straight through from the matching request
+/// parameters (`forbidden`, `archived`, `impostor`, `ref_mismatches`), since
+/// the Worker cannot resolve repo/SHA/tag state on its own — the caller (an
+/// action runner) resolves them via the GitHub API and supplies the CSV.
+/// Callers embedding the Worker directly — tests, the dark-launch replayer,
+/// downstream integrations — can also supply them positionally.
 ///
 /// Returns a JSON string with the lint diagnostics and metadata.
 

@@ -52,6 +52,12 @@ const MAX_BODY_BYTES = 1_048_576;
 const MAX_DISABLE_PATTERNS = 64;
 const MAX_DISABLE_PATTERN_LEN = 128;
 const MAX_TARGETS = 50;
+// Caller-supplied augmentation lists (`forbidden` / `archived` / `impostor` /
+// `ref_mismatches`) feed rules whose verdict depends on data the caller
+// resolved out-of-band (GitHub API). They are comma-separated `uses:` refs or
+// globs, so the entries are short and few in practice.
+const MAX_USES_ENTRIES = 200;
+const MAX_USES_ENTRY_LEN = 256;
 
 export default {
   async fetch(request, env, ctx) {
@@ -398,6 +404,10 @@ const KNOWN_KEYS = new Set([
   "targets",
   "osv",
   "no_capture",
+  "forbidden",
+  "archived",
+  "impostor",
+  "ref_mismatches",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -433,16 +443,17 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture|forbidden|archived|impostor|ref_mismatches)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
+  const ctx = sanitizeCallerContext(params);
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
 
   if (params.repo) {
-    return await handleRepo(params, pathTarget, disable, type, useOsv, worker);
+    return await handleRepo(params, pathTarget, disable, type, useOsv, worker, ctx);
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
@@ -451,7 +462,18 @@ async function handle(params, env, pathTarget) {
     throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
   }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
-  return JSON.parse(worker.lint_string(params.content, type, disable, vuln));
+  return JSON.parse(
+    worker.lint_string(
+      params.content,
+      type,
+      disable,
+      vuln,
+      ctx.forbidden,
+      ctx.archived,
+      ctx.impostor,
+      ctx.refMismatches,
+    ),
+  );
 }
 
 // Reject overly long / numerous / multi-star `disable=` patterns. The matcher
@@ -483,6 +505,47 @@ function sanitizeDisable(raw) {
     if (countChar(p, "*") > 1) {
       throw httpError(
         `disable pattern allows at most one '*' (got: ${truncatePreview(p)})`,
+        400,
+      );
+    }
+  }
+  return pieces.join(",");
+}
+
+// Caller-supplied augmentation for rules whose verdict depends on data only
+// the caller can resolve (GitHub repo/SHA/tag state). The Worker does not
+// fetch these itself — an action runner resolves them via the GitHub API and
+// passes them in. Each is a comma-separated list; an empty/absent value leaves
+// the corresponding rule on its offline baseline (see `worker/worker.mbt`).
+function sanitizeCallerContext(params) {
+  return {
+    forbidden: sanitizeUsesList(params.forbidden, "forbidden"),
+    archived: sanitizeUsesList(params.archived, "archived"),
+    impostor: sanitizeUsesList(params.impostor, "impostor"),
+    refMismatches: sanitizeUsesList(params.ref_mismatches, "ref_mismatches"),
+  };
+}
+
+function sanitizeUsesList(raw, label) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError(`\`${label}\` must be a string`, 400);
+  }
+  const pieces = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) return "";
+  if (pieces.length > MAX_USES_ENTRIES) {
+    throw httpError(
+      `too many ${label} entries (max ${MAX_USES_ENTRIES})`,
+      400,
+    );
+  }
+  for (const p of pieces) {
+    if (p.length > MAX_USES_ENTRY_LEN) {
+      throw httpError(
+        `${label} entry too long (max ${MAX_USES_ENTRY_LEN} chars, got ${p.length}; starts: ${truncatePreview(p)})`,
         400,
       );
     }
@@ -527,7 +590,7 @@ function validateTargetPath(path) {
   }
 }
 
-async function handleRepo(params, pathTarget, disable, type, useOsv, worker) {
+async function handleRepo(params, pathTarget, disable, type, useOsv, worker, ctx) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
@@ -599,7 +662,21 @@ async function handleRepo(params, pathTarget, disable, type, useOsv, worker) {
     }
     const guessKind = type || guessKindFromPath(path);
     const vuln = useOsv ? await fetchVulnUses(raw, worker) : "";
-    files.push({ path, ...JSON.parse(worker.lint_string(raw, guessKind, disable, vuln)) });
+    files.push({
+      path,
+      ...JSON.parse(
+        worker.lint_string(
+          raw,
+          guessKind,
+          disable,
+          vuln,
+          ctx.forbidden,
+          ctx.archived,
+          ctx.impostor,
+          ctx.refMismatches,
+        ),
+      ),
+    });
   }
   return {
     ok: files.every((f) => f.ok !== false),
@@ -778,15 +855,25 @@ async function captureRequest(env, params, result, headers) {
 function normalizeRequest(params) {
   const out = { content: params.content };
   if (params.type) out.type = params.type;
-  if (params.disable) {
-    out.disable = params.disable
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .sort()
-      .join(",");
+  if (params.disable) out.disable = normalizeCsvField(params.disable);
+  // Caller-supplied augmentation changes the verdict, so capture it too or a
+  // replay would diverge from the original response.
+  if (params.forbidden) out.forbidden = normalizeCsvField(params.forbidden);
+  if (params.archived) out.archived = normalizeCsvField(params.archived);
+  if (params.impostor) out.impostor = normalizeCsvField(params.impostor);
+  if (params.ref_mismatches) {
+    out.ref_mismatches = normalizeCsvField(params.ref_mismatches);
   }
   return out;
+}
+
+function normalizeCsvField(raw) {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .sort()
+    .join(",");
 }
 
 async function sha256Hex(str) {
