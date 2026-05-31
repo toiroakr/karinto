@@ -243,11 +243,11 @@ const ARCHIVED_CHECK_MAX = 200;
 // (sha256), so each run samples a different slice; coverage accumulates in KV.
 const ARCHIVED_MINE_MAX_OBJECTS = 200;
 // Re-verify cadence, split by current status. A not-yet-archived repo is
-// re-checked every 30 days to catch it *becoming* archived (the signal the
-// rule exists for). An already-archived repo is re-checked far less often
-// (180 days) because un-archiving is rare and the only cost of staleness is a
-// lingering (correct-until-recently) warning.
-const ARCHIVED_RECHECK_ACTIVE_MS = 30 * 24 * 60 * 60 * 1000;
+// re-checked weekly to catch it *becoming* archived reasonably promptly (the
+// signal the rule exists for). An already-archived repo is re-checked far less
+// often (180 days) because un-archiving is rare and the only cost of staleness
+// is a lingering (correct-until-recently) warning.
+const ARCHIVED_RECHECK_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000;
 const ARCHIVED_RECHECK_ARCHIVED_MS = 180 * 24 * 60 * 60 * 1000;
 // Bound the cache so it can't grow without limit; oldest checks are evicted.
 const ARCHIVED_CACHE_MAX = 5000;
