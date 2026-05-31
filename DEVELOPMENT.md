@@ -112,57 +112,40 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
 | Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
 
-Both the production and staging Workers carry two crons, routed in
-`index.js` on `event.cron`:
+The production and staging Workers carry a single daily cron (`0 2 * * *`) that
+refreshes the `api.github.com/meta` payload (key `meta`), consulted on the
+request path to exempt GitHub-hosted Actions runner IPs from the per-IP rate
+limit.
 
-- **`0 2 * * *` (daily)** refreshes the `api.github.com/meta` payload (key
-  `meta`), consulted on the request path to exempt GitHub-hosted Actions runner
-  IPs from the per-IP rate limit.
-- **`*/10 * * * *` (every 10 minutes)** runs the `archived-uses` sweep,
-  maintaining the archived `owner/repo` baseline (key `archived:list`) the
-  request path reads. There is no committed seed: candidates are discovered on
-  the request path, which enqueues each external `uses:` repo it sees into the
-  D1 `pending` worklist (`INSERT OR IGNORE`, off the hot path via
-  `ctx.waitUntil`). Each run:
-    1. drains up to 1000 rows from `pending`,
-    2. adds a small rotating slice of the *current* archived set, sized so the
-       whole set is re-verified roughly weekly across the runs (this is what
-       catches un-archives),
-    3. confirms up to `ARCHIVED_CHECKS_PER_RUN` (40) of them against the GitHub
-       API `archived` flag, stopping early on a 403/429,
-    4. `DELETE`s **only the repos it actually resolved** — overflow, repos past
-       the per-run cap, and the tail after a rate-limit stop stay queued for the
-       next run (and are also re-enqueued by traffic),
-    5. publishes the archived set to KV **only when it changed** (an `archived`
-       flag flips rarely, so most runs are no-ops — this keeps KV writes far
-       under the Free-plan 1000/day even at 144 runs/day).
+The archived `owner/repo` baseline for `archived-uses` (key `archived:list`) is
+**not** maintained by the Worker — verifying repos against the GitHub API from
+the Worker would fight the Workers **Free** plan's ~50-subrequest-per-invocation
+limit and the unauthenticated 60-req/hour quota (shared across Cloudflare's
+egress IPs). Instead the work is split:
 
-  **Why every 10 min, capped at 40?** On the Workers **Free** plan a single
-  invocation may make at most **50 subrequests** (shared with the daily meta
-  fetch), so 40 leaves headroom — the cap is bounded by the subrequest limit,
-  not the GitHub quota. Throughput therefore comes from *frequency*
-  (~40 × 144 ≈ 5760 checks/day) rather than batch size, and each run also gets a
-  fresh GitHub rate-limit window. On **Workers Paid** (1000 subrequests) raise
-  `ARCHIVED_CHECKS_PER_RUN` in `cf/index.js`; to change the cadence, edit both
-  `ARCHIVED_CRON` there and `triggers.crons` in `cf/wrangler.jsonc` (and keep
-  `CRON_RUNS_PER_DAY` in sync so the weekly rotation stays sized correctly).
+- **Worker (request path)** discovers candidates: it enqueues each external
+  `uses:` repo it serves into the D1 `pending` worklist (`INSERT OR IGNORE`, off
+  the hot path via `ctx.waitUntil`), and reads `archived:list` from KV (memoized
+  per-isolate, fail-open) to feed the rule. There is no committed seed.
+- **CI (`.github/workflows/refresh-archived.yml`, daily)** does the verifying:
+  `scripts/refresh-archived.mjs` reads the current KV baseline + drains
+  `pending`, confirms each repo's `archived` flag against the GitHub API
+  (re-checking the existing baseline too, so un-archives are caught), writes the
+  updated baseline back to KV when it changed, and `DELETE`s the repos it
+  resolved from `pending`. Anything it couldn't reach (rate-limit tail, transient
+  error) stays queued for the next run and is re-enqueued by traffic regardless.
 
-  Setting the optional `GITHUB_TOKEN` Worker secret lifts the GitHub quota from
-  the unauthenticated 60/hour (shared across Cloudflare's egress IPs, so
-  effectively less — at 40 checks/run the 10-minute cadence would otherwise
-  exhaust it) to an authenticated 5000/hour, making the frequent runs reliable.
-  It does **not** raise the per-run cap (that's the subrequest limit). To set
-  it:
+  GitHub Actions has a full 5000-req/hour budget (with a token) and no
+  subrequest ceiling, so a single daily run comfortably re-verifies the whole
+  set. The job runs with the workflow's `github.token` (1000 req/hour, enough to
+  read public repos' `archived` flag); set the optional `ARCHIVED_REFRESH_TOKEN`
+  repo secret to a public-read PAT to get the full 5000/hour. The job is skipped
+  on deployments without D1 (`if: vars.D1_DATABASE_ID != ''`).
 
-  ```sh
-  cd cf
-  # Create a GitHub fine-grained or classic PAT with PUBLIC read access only
-  # (no scopes needed for public repos; `public_repo` is enough for a classic
-  # token). The sweep only reads each repo's `archived` flag.
-  D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
-  wrangler secret put GITHUB_TOKEN --config wrangler.deploy.jsonc --env production
-  # paste the token when prompted; repeat with --env staging if desired
-  ```
+  > Because the baseline lives in KV out-of-band, `archived-uses` findings are
+  > excluded from the dark-launch replay diff (see
+  > `scripts/diff-rules/2026-05-archived-uses-baseline.mjs`): the KV set can
+  > differ between capture and replay independently of any code change.
 
 The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
 provisioned once. Its `database_id` is **not** committed: `cf/wrangler.jsonc`
@@ -202,6 +185,10 @@ GitHub Actions wiring:
   the PR closes.
 - `.github/workflows/deploy-staging.yml` — deploys to staging on every push
   to `main`.
+- `.github/workflows/refresh-archived.yml` — daily cron that runs
+  `scripts/refresh-archived.mjs` to maintain the `archived-uses` KV baseline
+  (drains the D1 worklist, verifies repos against the GitHub API, writes KV).
+  Skipped when `vars.D1_DATABASE_ID` is unset.
 - `.github/workflows/release.yml` — runs on every push to `main` via
   `changesets/action`. When pending changesets are present it opens (or
   updates) a "chore: release" PR that consumes them, bumps versions, and
@@ -275,6 +262,7 @@ action keeps a "chore: release" PR open that previews the next version.
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
 | `R2_ACCESS_KEY_ID` (optional) | Created in CF Dashboard → R2 → Manage R2 API Tokens. Scoped to **read-only** on the `karinto-captures` bucket. Enables the PR dark-launch replay step. |
 | `R2_SECRET_ACCESS_KEY` (optional) | The matching secret from the same R2 API token. |
+| `ARCHIVED_REFRESH_TOKEN` (optional) | A GitHub PAT with public read access (classic `public_repo`, or a fine-grained token with no extra scopes). Lets `refresh-archived.yml` use the 5000-req/hour quota instead of the job token's 1000/hour. Only needed if the worklist outgrows 1000 checks/day. |
 
 ### Optional GitHub variables
 

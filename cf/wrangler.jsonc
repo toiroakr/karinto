@@ -96,11 +96,10 @@
 				}
 			],
 			"triggers": {
-				// Daily meta allow-list refresh + 10-minute archived-uses sweep.
-				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
+				// Daily meta allow-list refresh. The archived-uses baseline is
+				// maintained by .github/workflows/refresh-archived.yml, not here.
 				"crons": [
-					"0 2 * * *",
-					"*/10 * * * *"
+					"0 2 * * *"
 				]
 			},
 			"r2_buckets": [
@@ -141,11 +140,10 @@
 				}
 			],
 			"triggers": {
-				// Daily meta allow-list refresh + 10-minute archived-uses sweep.
-				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
+				// Daily meta allow-list refresh. The archived-uses baseline is
+				// maintained by .github/workflows/refresh-archived.yml, not here.
 				"crons": [
-					"0 2 * * *",
-					"*/10 * * * *"
+					"0 2 * * *"
 				]
 			}
 		}

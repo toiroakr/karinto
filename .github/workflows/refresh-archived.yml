@@ -1,0 +1,52 @@
+name: refresh-archived
+
+# Maintain the `archived-uses` baseline (KV key `archived:list`). The Worker
+# enqueues every external `uses:` repo it serves into the D1 `pending` worklist;
+# this job verifies them against the GitHub API (no Worker subrequest/rate-limit
+# ceilings here) and writes the result to KV. See scripts/refresh-archived.mjs.
+
+on:
+  schedule:
+    # Daily, offset from the Worker's 02:00 meta cron.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-archived
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # No D1 provisioned (e.g. a fork) → no worklist to drain; skip cleanly.
+    if: vars.D1_DATABASE_ID != ''
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cf/package-lock.json
+
+      - name: Install cf deps
+        working-directory: cf
+        run: npm ci
+
+      - name: Render deploy config
+        working-directory: cf
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+        run: node ../scripts/prepare-wrangler-d1.mjs
+
+      - name: Refresh archived baseline
+        working-directory: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # A PAT (5000 req/hr) if provided, else the job token (1000/hr) —
+          # both can read a public repo's `archived` flag.
+          GH_TOKEN: ${{ secrets.ARCHIVED_REFRESH_TOKEN || github.token }}
+        run: node ../scripts/refresh-archived.mjs

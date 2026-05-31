@@ -67,9 +67,11 @@ const MAX_TARGETS = 50;
 const MAX_USES_ENTRIES = 200;
 const MAX_USES_ENTRY_LEN = 256;
 // KV-published baseline of archived `owner/repo` slugs (the `archived-uses`
-// rule reads this on the request path). The daily cron maintains it from a D1
-// `pending` worklist; see `refreshArchivedList`. Merged into the `archived`
-// augmentation so callers without a GITHUB_TOKEN still get the popular cases.
+// rule reads this on the request path). It is maintained out-of-band by the
+// .github/workflows/refresh-archived.yml CI job, which drains the D1 `pending`
+// worklist this Worker fills, verifies each repo against the GitHub API, and
+// writes this key — so the Worker never calls the API on the hot path. Merged
+// into the `archived` augmentation so callers get the popular cases for free.
 // Memoized per-isolate with a TTL so we don't read KV on every request (same
 // pattern as the /meta cache).
 const ARCHIVED_KV_KEY = "archived:list";
@@ -78,26 +80,6 @@ let _archivedPromise;
 let _archivedExpiresAt = 0;
 // At most this many `uses:` repos enqueued into D1 per request (non-blocking).
 const PENDING_ENQUEUE_MAX = 100;
-// Drain at most this many pending rows per cron run before checking.
-const PENDING_DRAIN_MAX = 1000;
-// Repos deleted per DELETE statement — kept under D1's bound-parameter cap.
-const PENDING_DELETE_CHUNK = 50;
-// Re-verify the whole archived set roughly every N days. The sweep runs every
-// 10 minutes (see ARCHIVED_CRON), so the per-run rotation slice is sized over
-// `ARCHIVED_ROTATION_DAYS * CRON_RUNS_PER_DAY` runs.
-const ARCHIVED_ROTATION_DAYS = 7;
-const CRON_RUNS_PER_DAY = 144; // every 10 minutes
-// Repos checked per cron run. The binding ceiling is the Workers Free-plan
-// subrequest limit — 50 per invocation — so this stays at 40 for headroom
-// regardless of GITHUB_TOKEN: a token lifts GitHub's hourly quota (60 → 5000)
-// but not the subrequest limit. Daily throughput comes from the cadence
-// (~40 × 144 ≈ 5760), not batch size. On Workers Paid (1000 subrequests) this
-// can be raised.
-const ARCHIVED_CHECKS_PER_RUN = 40;
-// Cron schedules (must match cf/wrangler.jsonc `triggers.crons`). The meta
-// allow-list only needs a daily refresh; the archived sweep runs every 10 min.
-const META_CRON = "0 2 * * *";
-const ARCHIVED_CRON = "*/10 * * * *";
 
 export default {
   async fetch(request, env, ctx) {
@@ -151,18 +133,15 @@ export default {
     }
   },
 
-  // Two crons (see cf/wrangler.jsonc). The daily META_CRON refreshes the
-  // GitHub Actions IP allow-list so per-IP rate limiting can exempt CI
-  // traffic; on fetch failure we leave whatever is already in KV (the request
-  // path falls back to a direct fetch if KV is empty). The 10-minute
-  // ARCHIVED_CRON drains the archived-uses worklist — frequent small runs keep
-  // each one under the Free-plan subrequest cap while draining the backlog
-  // quickly. `event.cron` selects which runs; an unknown/absent cron (e.g. a
-  // manual trigger) runs both.
-  async scheduled(event, env, ctx) {
-    const cron = event?.cron;
-    if (cron !== ARCHIVED_CRON) ctx.waitUntil(refreshMetaCache(env));
-    if (cron !== META_CRON) ctx.waitUntil(refreshArchivedList(env));
+  // Daily cron — refresh the GitHub Actions IP allow-list so per-IP rate
+  // limiting can exempt CI traffic. On fetch failure we leave whatever is
+  // already in KV; the request path falls back to a direct fetch if KV is
+  // empty (e.g. immediately after a fresh deploy). The archived-uses baseline
+  // (`archived:list`) is NOT maintained here — the .github/workflows/
+  // refresh-archived.yml CI job verifies repos against the GitHub API (no
+  // Worker subrequest/rate-limit ceilings) and writes the KV key directly.
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(refreshMetaCache(env));
   },
 };
 
@@ -264,8 +243,8 @@ async function refreshMetaCache(env) {
 }
 
 // Bare `owner/repo` slugs of the external `uses:` refs in a lint result — the
-// candidates for the archived-status sweep. Subpaths (reusable-workflow paths)
-// are collapsed to `owner/repo`.
+// candidates the CI archived-status sweep verifies. Subpaths (reusable-workflow
+// paths) are collapsed to `owner/repo`.
 function candidateRepos(result) {
   const out = new Set();
   const add = (cands) => {
@@ -295,133 +274,6 @@ async function enqueuePending(env, repos) {
     .slice(0, PENDING_ENQUEUE_MAX)
     .map((r) => stmt.bind(r));
   if (batch.length) await env.DB.batch(batch);
-}
-
-// Archived-status sweep, run every 10 minutes. The D1 `pending` worklist
-// (filled from request traffic) supplies freshly-seen repos; a small rotating
-// slice of the current archived set is re-verified each run so the whole set
-// cycles roughly weekly (catching un-archives) without bursting past the API
-// rate limit. Only the repos actually resolved this run are deleted from
-// `pending`; anything not reached stays queued (and is also re-enqueued by
-// traffic). The archived set is published to KV (`archived:list`) for the
-// request path, but only when it changed. Set the optional `GITHUB_TOKEN`
-// Worker secret to lift the unauthenticated 60-req/hour GitHub quota to
-// 5000/hour (the per-run cap is bounded by the Worker subrequest limit, not
-// the token).
-async function refreshArchivedList(env) {
-  if (!env?.KV) return;
-  const archivedSet = new Set(await loadArchivedList(env).catch(() => []));
-  // Snapshot the current KV payload so we can skip the write when nothing
-  // changed. The sweep runs every 10 minutes but an `archived` flag flips
-  // rarely, so most runs are no-ops — and Workers Free caps KV at 1000
-  // writes/day, which a blind write-per-run would otherwise approach.
-  const before = JSON.stringify([...archivedSet].sort());
-
-  let pending = [];
-  if (env.DB) {
-    try {
-      const res = await env.DB.prepare("SELECT repo FROM pending LIMIT ?")
-        .bind(PENDING_DRAIN_MAX)
-        .all();
-      pending = (res.results || []).map((r) => r.repo).filter(Boolean);
-    } catch (e) {
-      log("archived_pending_read_error", { message: String(e?.message ?? e) });
-    }
-  }
-
-  const archivedArr = [...archivedSet];
-  const rotation = sampleRandom(
-    archivedArr,
-    Math.ceil(archivedArr.length / (ARCHIVED_ROTATION_DAYS * CRON_RUNS_PER_DAY)),
-  );
-
-  const worklist = [
-    ...new Set(
-      [...pending, ...rotation]
-        .filter((s) => typeof s === "string")
-        .map((s) => s.trim().toLowerCase()),
-    ),
-  ]
-    .filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s))
-    .slice(0, ARCHIVED_CHECKS_PER_RUN);
-
-  const headers = {
-    "user-agent": "karinto-worker",
-    accept: "application/vnd.github+json",
-  };
-  if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
-
-  let rateLimited = false;
-  let checked = 0;
-  // Repos we got a definitive answer for this run — only these are removed
-  // from `pending`. Everything we didn't reach (overflow beyond the SELECT
-  // limit, repos past the per-run cap, and the tail after a rate-limit stop)
-  // stays queued for the next run instead of being silently dropped.
-  const drained = [];
-  for (const repo of worklist) {
-    let res;
-    try {
-      res = await fetch(`https://api.github.com/repos/${repo}`, { headers });
-    } catch {
-      // Transient network error: keep prior status and leave the repo queued
-      // so the next run retries it.
-      continue;
-    }
-    if (res.status === 403 || res.status === 429) {
-      rateLimited = true; // out of API budget — stop, keep the rest queued
-      break;
-    }
-    checked++;
-    drained.push(repo);
-    if (res.status === 404) {
-      archivedSet.delete(repo); // repo gone / renamed
-      continue;
-    }
-    if (!res.ok) continue;
-    const data = await res.json();
-    if (data?.archived === true) archivedSet.add(repo);
-    else archivedSet.delete(repo);
-  }
-
-  // Remove only the repos we actually resolved. D1 caps bound parameters per
-  // statement, so delete in chunks. Repos still in use that we didn't reach
-  // are also re-enqueued by traffic, so nothing is lost either way.
-  if (env.DB && drained.length) {
-    try {
-      for (let i = 0; i < drained.length; i += PENDING_DELETE_CHUNK) {
-        const chunk = drained.slice(i, i + PENDING_DELETE_CHUNK);
-        const placeholders = chunk.map(() => "?").join(",");
-        await env.DB.prepare(`DELETE FROM pending WHERE repo IN (${placeholders})`)
-          .bind(...chunk)
-          .run();
-      }
-    } catch (e) {
-      log("archived_pending_delete_error", { message: String(e?.message ?? e) });
-    }
-  }
-
-  const after = JSON.stringify([...archivedSet].sort());
-  const written = after !== before;
-  if (written) await env.KV.put(ARCHIVED_KV_KEY, after);
-  log("cron_archived_refreshed", {
-    pending: pending.length,
-    rotation: rotation.length,
-    checked,
-    archived: archivedSet.size,
-    rateLimited,
-    written,
-  });
-}
-
-// Fisher–Yates sample of up to `n` distinct items (non-mutating).
-function sampleRandom(arr, n) {
-  if (n >= arr.length) return [...arr];
-  const copy = [...arr];
-  for (let i = 0; i < n; i++) {
-    const j = i + Math.floor(Math.random() * (copy.length - i));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy.slice(0, n);
 }
 
 async function fetchMeta() {
