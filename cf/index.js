@@ -242,8 +242,13 @@ const ARCHIVED_CHECK_MAX = 200;
 // Cap on capture objects read per run so mining stays bounded. Keys are random
 // (sha256), so each run samples a different slice; coverage accumulates in KV.
 const ARCHIVED_MINE_MAX_OBJECTS = 200;
-// Re-verify a repo's archived status at most this often (30 days).
-const ARCHIVED_RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
+// Re-verify cadence, split by current status. A not-yet-archived repo is
+// re-checked every 30 days to catch it *becoming* archived (the signal the
+// rule exists for). An already-archived repo is re-checked far less often
+// (180 days) because un-archiving is rare and the only cost of staleness is a
+// lingering (correct-until-recently) warning.
+const ARCHIVED_RECHECK_ACTIVE_MS = 30 * 24 * 60 * 60 * 1000;
+const ARCHIVED_RECHECK_ARCHIVED_MS = 180 * 24 * 60 * 60 * 1000;
 // Bound the cache so it can't grow without limit; oldest checks are evicted.
 const ARCHIVED_CACHE_MAX = 5000;
 
@@ -273,10 +278,16 @@ async function refreshArchivedList(env) {
   let skipped = 0;
   for (const repo of candidates) {
     // Skip repos we verified recently — this is the dedup across runs.
+    // Already-archived repos use a much longer interval (un-archive is rare).
     const entry = cache[repo];
-    if (entry && now - entry.checked < ARCHIVED_RECHECK_MS) {
-      skipped++;
-      continue;
+    if (entry) {
+      const ttl = entry.archived
+        ? ARCHIVED_RECHECK_ARCHIVED_MS
+        : ARCHIVED_RECHECK_ACTIVE_MS;
+      if (now - entry.checked < ttl) {
+        skipped++;
+        continue;
+      }
     }
     if (checked >= ARCHIVED_CHECK_MAX) break; // out of per-run budget; resume next run
     try {
