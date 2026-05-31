@@ -227,30 +227,39 @@ async function refreshMetaCache(env) {
 
 // Daily refresh of the archived `owner/repo` baseline published to KV. There
 // is no committed seed: candidates are discovered from recent capture traffic
-// (the `uses:` refs people actually lint) unioned with whatever we published
-// last time, so the list self-heals — a repo that gets un-archived is dropped.
-// Each candidate is confirmed against the GitHub API's `archived` flag. Set the
-// optional `GITHUB_TOKEN` Worker secret to lift the unauthenticated
+// (the `uses:` refs people actually lint).
+//
+// To avoid spending the GitHub API budget re-checking the same repos every
+// run, a per-repo cache (`archived:cache`) records each repo's last result and
+// the time it was checked. A repo is only re-queried once its result is older
+// than `ARCHIVED_RECHECK_MS`; everything checked more recently is skipped.
+// `archived:list` (what the request path reads) is derived from the cache.
+// Set the optional `GITHUB_TOKEN` Worker secret to lift the unauthenticated
 // 60-req/hour cap.
-const ARCHIVED_REFRESH_MAX = 300;
+const ARCHIVED_CACHE_KEY = "archived:cache";
+// Cap on *GitHub API calls* per run (only stale/new repos consume one).
+const ARCHIVED_CHECK_MAX = 200;
 // Cap on capture objects read per run so mining stays bounded. Keys are random
 // (sha256), so each run samples a different slice; coverage accumulates in KV.
 const ARCHIVED_MINE_MAX_OBJECTS = 200;
+// Re-verify a repo's archived status at most this often (30 days).
+const ARCHIVED_RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
+// Bound the cache so it can't grow without limit; oldest checks are evicted.
+const ARCHIVED_CACHE_MAX = 5000;
 
 async function refreshArchivedList(env) {
   if (!env?.KV) return;
-  const prev = await loadArchivedList(env).catch(() => []);
-  const result = new Set(prev.map((s) => s.toLowerCase()));
+  const cache = await loadArchivedCache(env);
   const mined = await mineArchivedCandidates(env).catch(() => []);
+  // Candidates worth (re)checking: mined refs plus repos already in the cache
+  // (so known statuses get re-verified once stale). Deduped.
   const candidates = [
     ...new Set(
-      [...prev, ...mined]
+      [...Object.keys(cache), ...mined]
         .filter((s) => typeof s === "string")
         .map((s) => s.trim().toLowerCase()),
     ),
-  ]
-    .filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s))
-    .slice(0, ARCHIVED_REFRESH_MAX);
+  ].filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s));
 
   const headers = {
     "user-agent": "karinto-worker",
@@ -258,39 +267,73 @@ async function refreshArchivedList(env) {
   };
   if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
 
+  const now = Date.now();
   let rateLimited = false;
   let checked = 0;
+  let skipped = 0;
   for (const repo of candidates) {
+    // Skip repos we verified recently — this is the dedup across runs.
+    const entry = cache[repo];
+    if (entry && now - entry.checked < ARCHIVED_RECHECK_MS) {
+      skipped++;
+      continue;
+    }
+    if (checked >= ARCHIVED_CHECK_MAX) break; // out of per-run budget; resume next run
     try {
       const res = await fetch(`https://api.github.com/repos/${repo}`, { headers });
       if (res.status === 403 || res.status === 429) {
-        // Out of API budget — stop and keep prior knowledge for the rest.
-        rateLimited = true;
+        rateLimited = true; // out of API budget — stop, keep prior knowledge
         break;
       }
       checked++;
       if (res.status === 404) {
-        // Repo gone / renamed: it can no longer be "archived under this slug".
-        result.delete(repo);
+        delete cache[repo]; // repo gone / renamed
         continue;
       }
       if (!res.ok) continue;
       const data = await res.json();
-      if (data?.archived === true) result.add(repo);
-      else result.delete(repo);
+      cache[repo] = { archived: data?.archived === true, checked: now };
     } catch {
-      // Transient network error: leave this repo's prior status untouched.
+      // Transient network error: leave this repo's prior cache entry untouched.
     }
   }
 
-  const archived = [...result].sort();
+  pruneArchivedCache(cache);
+  const archived = Object.keys(cache)
+    .filter((repo) => cache[repo].archived)
+    .sort();
+  await env.KV.put(ARCHIVED_CACHE_KEY, JSON.stringify(cache));
   await env.KV.put(ARCHIVED_KV_KEY, JSON.stringify(archived));
   log("cron_archived_refreshed", {
     candidates: candidates.length,
     checked,
+    skipped,
     archived: archived.length,
     rateLimited,
   });
+}
+
+async function loadArchivedCache(env) {
+  const raw = await env.KV.get(ARCHIVED_CACHE_KEY);
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+// Evict the oldest-checked entries once the cache exceeds its cap. Dropped
+// non-archived repos are simply re-checked if seen again; dropped archived
+// repos reappear once re-mined, so the list is self-correcting.
+function pruneArchivedCache(cache) {
+  const keys = Object.keys(cache);
+  if (keys.length <= ARCHIVED_CACHE_MAX) return;
+  keys
+    .sort((a, b) => (cache[a].checked || 0) - (cache[b].checked || 0))
+    .slice(0, keys.length - ARCHIVED_CACHE_MAX)
+    .forEach((k) => delete cache[k]);
 }
 
 // Mine candidate `owner/repo` slugs from a bounded sample of captured lint
