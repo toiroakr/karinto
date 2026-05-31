@@ -73,9 +73,18 @@ async function candidatesFor(content, kind) {
 }
 
 // Split `owner/repo[/subpath]` (the candidate `name`) into the bare repo.
+// `owner/repo` from the candidate `name`, validated before it ever reaches an
+// API URL — a malformed name (e.g. `../..`, spaces) must not be interpolated
+// into github.com paths. Returns null to skip such candidates.
+const REPO_SEGMENT = /^[A-Za-z0-9._-]+$/;
 function bareRepo(name) {
+  if (typeof name !== "string") return null;
   const parts = name.split("/");
-  return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : null;
+  if (parts.length < 2) return null;
+  const [owner, repo] = parts;
+  if (!REPO_SEGMENT.test(owner) || !REPO_SEGMENT.test(repo)) return null;
+  if ([".", ".."].includes(owner) || [".", ".."].includes(repo)) return null;
+  return `${owner}/${repo}`;
 }
 
 // GitHub GET with shared headers. Returns the Response, or null on a network
@@ -235,20 +244,28 @@ async function tagSha(repo, tag) {
     { headers: GH_HEADERS },
   );
   if (!res.ok) return null;
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
   // Annotated tags point at a tag object; dereference to the commit.
   if (data?.object?.type === "tag") {
     const r2 = await fetch(data.object.url, { headers: GH_HEADERS });
     if (!r2.ok) return null;
-    const tagObj = await r2.json();
+    const tagObj = await r2.json().catch(() => null);
     return tagObj?.object?.sha ?? null;
   }
   return data?.object?.sha ?? null;
 }
 
+// Escape per the GitHub workflow-command spec. Without this, values that flow
+// from the linted YAML (`c.ref`, `c.comment`, the file path) could contain
+// newlines or `::` and inject extra workflow commands (forge findings, mask
+// output, etc.) — `c.comment` especially is free-form and unvalidated.
+const escapeData = (s) =>
+  String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+const escapeProp = (s) => escapeData(s).replace(/:/g, "%3A").replace(/,/g, "%2C");
+
 function annotate(level, file, message) {
   // `level` is "error" or "warning"; GitHub renders these as annotations.
-  console.log(`::${level} file=${file}::${message}`);
+  console.log(`::${level} file=${escapeProp(file)}::${escapeData(message)}`);
 }
 
 // Warning text for an inconclusive impostor check — tells access problems

@@ -270,7 +270,9 @@ async function enqueuePending(env, repos) {
   if (!env?.DB || repos.length === 0) return;
   const stmt = env.DB.prepare("INSERT OR IGNORE INTO pending (repo) VALUES (?)");
   const batch = repos
-    .filter((r) => /^[^/\s]+\/[^/\s]+$/.test(r))
+    // Match the CI verifier's accepted shape (lowercased owner/repo) so only
+    // rows refresh-archived.mjs can actually verify land in the worklist.
+    .filter((r) => /^[a-z0-9._-]+\/[a-z0-9._-]+$/.test(r))
     .slice(0, PENDING_ENQUEUE_MAX)
     .map((r) => stmt.bind(r));
   if (batch.length) await env.DB.batch(batch);

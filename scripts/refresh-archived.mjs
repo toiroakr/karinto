@@ -103,7 +103,17 @@ async function classify(repo) {
   } catch {
     return { resolved: false }; // network blip — retry next run
   }
-  if (res.status === 403 || res.status === 429) return { rateLimited: true };
+  // Rate limit: 429, or 403 with an exhausted/​retry-after signal. A plain 403
+  // (e.g. a forbidden repo) is not a budget problem — skip just that repo
+  // instead of aborting the whole run.
+  const remaining = res.headers.get("x-ratelimit-remaining");
+  if (
+    res.status === 429 ||
+    (res.status === 403 && (remaining === "0" || res.headers.get("retry-after")))
+  ) {
+    return { rateLimited: true };
+  }
+  if (res.status === 403) return { resolved: false }; // forbidden — skip, retry next run
   if (res.status === 404) return { resolved: true, archived: false }; // gone/renamed
   if (!res.ok) return { resolved: false };
   const data = await res.json().catch(() => null);
@@ -150,7 +160,7 @@ function writeKv(json) {
 function readPending() {
   const out = wrangler([
     "d1", "execute", DB_NAME, "--config", CONFIG, "--remote", "--json",
-    "--command", `SELECT repo FROM pending LIMIT ${DRAIN_LIMIT}`,
+    "--command", `SELECT repo FROM pending ORDER BY repo LIMIT ${DRAIN_LIMIT}`,
   ]);
   const match = out.match(/\[[\s\S]*\]/);
   if (!match) return [];
@@ -161,8 +171,12 @@ function readPending() {
 
 function deletePending(repos) {
   for (let i = 0; i < repos.length; i += DELETE_CHUNK) {
-    const chunk = repos.slice(i, i + DELETE_CHUNK);
-    const values = chunk.map((r) => `'${r}'`).join(","); // r is REPO_RE-validated
+    // Re-assert REPO_RE at the inlining site so the SQL stays injection-safe
+    // even if a caller ever passes unvalidated input (the values are inlined,
+    // not bound). REPO_RE has no quotes/whitespace, so `'<repo>'` is safe.
+    const chunk = repos.slice(i, i + DELETE_CHUNK).filter((r) => REPO_RE.test(r));
+    if (chunk.length === 0) continue;
+    const values = chunk.map((r) => `'${r}'`).join(",");
     wrangler([
       "d1", "execute", DB_NAME, "--config", CONFIG, "--remote",
       "--command", `DELETE FROM pending WHERE repo IN (${values})`,
