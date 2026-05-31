@@ -964,12 +964,17 @@ function collectUsesRefs(yaml) {
 const USES_WITH_COMMENT_RE =
   /^\s*-?\s*uses:\s*["']?([^"'\s#]+)["']?\s*(?:#\s*(.*?))?\s*$/gm;
 
-// External `uses:` refs that need a live GitHub API lookup to audit. karinto
-// only surfaces the targets here; the companion action performs the checks
-// (`impostor-commit`: SHA repo-membership; `ref-version-mismatch`: tag → SHA
-// vs. the trailing comment) and reports findings directly. `pin` is `"sha"`
-// for a 7–40 hex pin (impostor candidate) or `"tag"` otherwise; `comment`,
-// when present, is the trailing `# vN` text (ref-version-mismatch candidate).
+// Every external `uses:` ref, classified for two consumers:
+//   1. the companion action, which audits the SHA-pinned ones
+//      (`impostor-commit`: SHA repo-membership; `ref-version-mismatch`:
+//      tag → SHA vs. the trailing comment) and reports directly;
+//   2. `candidateRepos`, which feeds the archived-uses worklist.
+// `pin` is `"sha"` for a 7–40 hex pin (the companion's audit candidates) or
+// `"tag"` otherwise; `comment`, when present, is the trailing `# vN` text.
+// Tag-pinned entries are intentionally included: archived actions are usually
+// referenced by tag (e.g. `actions/setup-ruby@v1`), so dropping them would
+// hide the common case from the archived sweep. The companion just skips
+// non-`sha` entries.
 function collectOnlineAuditCandidates(yaml) {
   const out = [];
   const seen = new Set();

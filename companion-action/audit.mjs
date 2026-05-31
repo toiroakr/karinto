@@ -18,7 +18,6 @@ import path from "node:path";
 const KARINTO_URL = process.env.KARINTO_URL || "https://karinto.toiroakr.workers.dev";
 const TOKEN = process.env.GH_TOKEN || "";
 const FAIL_ON = (process.env.FAIL_ON || "error").toLowerCase();
-const REPO = process.env.GITHUB_REPOSITORY || ""; // owner/repo of the caller
 
 const GH_HEADERS = {
   "user-agent": "karinto-companion",
