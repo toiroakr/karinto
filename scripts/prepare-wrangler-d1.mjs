@@ -27,7 +27,7 @@ const OUT = "wrangler.deploy.jsonc";
 const PLACEHOLDER = "REPLACE_WITH_D1_DATABASE_ID";
 
 const id = (process.env.D1_DATABASE_ID || "").trim();
-const config = JSON.parse(stripJsonComments(readFileSync(SRC, "utf8")));
+const config = JSON.parse(jsoncToJson(readFileSync(SRC, "utf8")));
 
 // d1_databases can appear at the top level (PR previews / pinned snapshots)
 // and inside each named env (production, staging).
@@ -55,23 +55,34 @@ if (id) {
 
 writeFileSync(OUT, JSON.stringify(config, null, 2) + "\n");
 
-// Strip `//` and `/* */` comments from JSONC while leaving them intact inside
-// string values. The generated config is plain JSON (valid JSONC), so dropping
-// comments is fine — it's a throwaway artifact, not the tracked source.
-function stripJsonComments(s) {
+// Convert JSONC to JSON: strip `//` and `/* */` comments and drop trailing
+// commas (`,]`/`,}`), both of which `JSON.parse` rejects but wrangler's own
+// parser accepts. Comments and commas inside string values are left intact via
+// the `inStr` state. The output is a throwaway artifact, so losing the original
+// comments/formatting is fine.
+function jsoncToJson(s) {
   let out = "";
   let inStr = false;
   let inLine = false;
   let inBlock = false;
   let esc = false;
+  // A structural comma is held until the next significant char: if that char
+  // closes the container (`}`/`]`) the comma was trailing and is dropped;
+  // otherwise the comma (plus any whitespace seen since) is emitted.
+  let comma = false;
+  let gap = "";
+  const flushComma = (drop) => {
+    if (!comma) return;
+    if (!drop) out += ",";
+    out += gap;
+    comma = false;
+    gap = "";
+  };
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     const n = s[i + 1];
     if (inLine) {
-      if (c === "\n") {
-        inLine = false;
-        out += c;
-      }
+      if (c === "\n") inLine = false;
       continue;
     }
     if (inBlock) {
@@ -88,11 +99,6 @@ function stripJsonComments(s) {
       else if (c === '"') inStr = false;
       continue;
     }
-    if (c === '"') {
-      inStr = true;
-      out += c;
-      continue;
-    }
     if (c === "/" && n === "/") {
       inLine = true;
       i++;
@@ -103,7 +109,25 @@ function stripJsonComments(s) {
       i++;
       continue;
     }
+    if (c === '"') {
+      flushComma(false);
+      inStr = true;
+      out += c;
+      continue;
+    }
+    if (c === ",") {
+      flushComma(false); // a preceding held comma is a real separator
+      comma = true;
+      continue;
+    }
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+      if (comma) gap += c;
+      else out += c;
+      continue;
+    }
+    flushComma(c === "}" || c === "]");
     out += c;
   }
+  flushComma(false);
   return out;
 }

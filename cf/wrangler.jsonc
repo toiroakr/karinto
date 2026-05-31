@@ -45,9 +45,12 @@
 	],
 	// D1 worklist for the archived-uses sweep. The request path enqueues seen
 	// `uses:` repos into the `pending` table; the production cron drains it.
-	// Shared across envs like KV. Provision once and fill `database_id` (see
-	// DEVELOPMENT.md): `wrangler d1 create karinto-archived` then
-	// `wrangler d1 migrations apply karinto-archived --remote`.
+	// Shared across envs like KV. The real `database_id` is NOT committed: this
+	// stays the placeholder and the id is injected from the D1_DATABASE_ID repo
+	// variable at deploy time by scripts/prepare-wrangler-d1.mjs (see
+	// DEVELOPMENT.md). Provision once: `wrangler d1 create karinto-archived`,
+	// stash the id in the variable, then render the config and apply migrations
+	// against it (`--config wrangler.deploy.jsonc`).
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -93,8 +96,11 @@
 				}
 			],
 			"triggers": {
+				// Daily meta allow-list refresh + hourly archived-uses sweep.
+				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
 				"crons": [
-					"0 2 * * *"
+					"0 2 * * *",
+					"0 * * * *"
 				]
 			},
 			"r2_buckets": [
@@ -135,8 +141,11 @@
 				}
 			],
 			"triggers": {
+				// Daily meta allow-list refresh + hourly archived-uses sweep.
+				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
 				"crons": [
-					"0 2 * * *"
+					"0 2 * * *",
+					"0 * * * *"
 				]
 			}
 		}

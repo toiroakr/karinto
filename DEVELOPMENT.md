@@ -44,14 +44,14 @@ Run locally:
 ```sh
 cd cf
 npm install        # installs wrangler
-npm run dev        # `wrangler dev`
+npm run dev        # render-config + `wrangler dev --config wrangler.deploy.jsonc`
 ```
 
 Deploy:
 
 ```sh
 cd cf
-npm run deploy     # `wrangler deploy`
+npm run deploy     # render-config + `wrangler deploy --config wrangler.deploy.jsonc`
 ```
 
 Smoke-check the deployed Worker (3 curl-driven response paths):
@@ -112,29 +112,52 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
 | Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
 
-Both the production and staging Workers also carry a daily cron
-(`0 2 * * *`). It refreshes two KV-cached datasets:
+Both the production and staging Workers carry two crons, routed in
+`index.js` on `event.cron`:
 
-- the `api.github.com/meta` payload (key `meta`), consulted on the request
-  path to exempt GitHub-hosted Actions runner IPs from the per-IP rate limit;
-- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`),
-  the source of truth the request path reads. There is no committed seed:
-  candidates are discovered on the request path, which enqueues each external
-  `uses:` repo it sees into the D1 `pending` worklist (`INSERT OR IGNORE`,
-  off the hot path via `ctx.waitUntil`). The cron then:
-    1. drains `pending` (up to 1000 repos),
-    2. adds a rotating ~1/7 slice of the *current* archived set so the whole
-       set is re-verified roughly weekly (this is what catches un-archives),
-    3. confirms each against the GitHub API `archived` flag, capped at a
-       rate-limit-safe number per run (50 unauthenticated, 500 with a token),
-    4. `DELETE`s all of `pending` — anything still in use is re-enqueued by
-       the next request,
+- **`0 2 * * *` (daily)** refreshes the `api.github.com/meta` payload (key
+  `meta`), consulted on the request path to exempt GitHub-hosted Actions runner
+  IPs from the per-IP rate limit.
+- **`0 * * * *` (hourly)** runs the `archived-uses` sweep, maintaining the
+  archived `owner/repo` baseline (key `archived:list`) the request path reads.
+  There is no committed seed: candidates are discovered on the request path,
+  which enqueues each external `uses:` repo it sees into the D1 `pending`
+  worklist (`INSERT OR IGNORE`, off the hot path via `ctx.waitUntil`). Each
+  hourly run:
+    1. drains up to 1000 rows from `pending`,
+    2. adds a small rotating slice of the *current* archived set, sized so the
+       whole set is re-verified roughly weekly across the hourly runs (this is
+       what catches un-archives),
+    3. confirms up to `ARCHIVED_CHECKS_PER_RUN` (40) of them against the GitHub
+       API `archived` flag, stopping early on a 403/429,
+    4. `DELETE`s **only the repos it actually resolved** — overflow, repos past
+       the per-run cap, and the tail after a rate-limit stop stay queued for the
+       next run (and are also re-enqueued by traffic),
     5. publishes the updated archived set to KV.
 
-  So a freshly-seen repo is checked on the next cron run, and a repo never seen
-  again ages out of the worklist on its own. Set the optional `GITHUB_TOKEN`
-  Worker secret (`wrangler secret put GITHUB_TOKEN`) to raise the per-run cap;
-  without it the unauthenticated 60-req/hour limit applies.
+  **Why hourly, capped at 40?** On the Workers **Free** plan a single
+  invocation may make at most **50 subrequests** (shared with the daily meta
+  fetch), so 40 leaves headroom — the cap is bounded by the subrequest limit,
+  not the GitHub quota. Throughput therefore comes from *frequency* (~40 × 24 ≈
+  960 checks/day) rather than batch size, and each hourly run also gets a fresh
+  GitHub rate-limit window. On **Workers Paid** (1000 subrequests) raise
+  `ARCHIVED_CHECKS_PER_RUN` in `cf/index.js`.
+
+  Setting the optional `GITHUB_TOKEN` Worker secret lifts the GitHub quota from
+  the unauthenticated 60/hour (shared across Cloudflare's egress IPs, so
+  effectively less) to an authenticated 5000/hour, making the hourly runs
+  reliable. It does **not** raise the per-run cap (that's the subrequest limit).
+  To set it:
+
+  ```sh
+  cd cf
+  # Create a GitHub fine-grained or classic PAT with PUBLIC read access only
+  # (no scopes needed for public repos; `public_repo` is enough for a classic
+  # token). The sweep only reads each repo's `archived` flag.
+  D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
+  wrangler secret put GITHUB_TOKEN --config wrangler.deploy.jsonc --env production
+  # paste the token when prompted; repeat with --env staging if desired
+  ```
 
 The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
 provisioned once. Its `database_id` is **not** committed: `cf/wrangler.jsonc`
@@ -216,9 +239,11 @@ action keeps a "chore: release" PR open that previews the next version.
 2. Merge it. On the resulting push to `main`, the `release` workflow runs
    `scripts/release-publish.sh`:
    - `moon update && moon test && moon build --target js --release`
-   - `cd cf && npm ci && npx wrangler deploy`
+   - `cd cf && npm ci`, then `node ../scripts/prepare-wrangler-d1.mjs` to inject
+     the `D1_DATABASE_ID` and `npx wrangler deploy --config wrangler.deploy.jsonc
+     --env production`
    - `bash cf/smoke.sh` against `https://karinto.toiroakr.workers.dev`
-   - `npx wrangler deploy --env="" --name karinto-vX-Y-Z` — an immutable
+   - `npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name karinto-vX-Y-Z` — an immutable
      snapshot Worker for the released version (`.` → `-` in the name),
      smoke-checked at `https://karinto-vX-Y-Z.toiroakr.workers.dev`. Uses the
      top-level config (like PR previews) so it has no CAPTURES binding and no
