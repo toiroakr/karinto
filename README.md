@@ -13,7 +13,7 @@ Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
-61 of 82 catalogued rules are active. They cover syntax, expression typing
+59 of 82 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
@@ -42,17 +42,15 @@ under arbitrary path prefixes.
 | `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 | `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
-| `archived` | string | Caller-supplied `owner/repo` list (GitHub reports `archived: true`) for `archived-uses`. |
-| `impostor` | string | Caller-supplied `owner/repo@sha` list of confirmed impostor commits for `impostor-commit`. |
-| `ref_mismatches` | string | Caller-supplied `owner/repo@sha` list whose pin disagrees with the trailing `# vN` comment, for `ref-version-mismatch`. |
+| `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 
-The last four feed rules whose verdict depends on live GitHub repo / SHA / tag
-state that the Worker cannot resolve itself. The **caller** (typically a CI
-action runner) resolves them via the GitHub API and passes the result in;
-each accepts at most 200 comma-separated entries of 256 characters. An
-empty/omitted value leaves the rule on its offline baseline. See
-[*Action-side context*](docs/action-context.md) for how to populate them.
+`forbidden` / `archived` accept at most 200 comma-separated entries of 256
+characters each. The response also carries `online_audit_candidates` — the
+external `uses:` refs that need a live GitHub API lookup (`impostor-commit`,
+`ref-version-mismatch`). karinto does not resolve those; a companion action
+([`companion-action/`](companion-action/)) checks them and reports directly.
+See [*Action-side context*](docs/action-context.md) for the full flow.
 
 ### Examples
 

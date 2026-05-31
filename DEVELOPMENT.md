@@ -113,12 +113,19 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
 
 Both the production and staging Workers also carry a daily cron
-(`0 2 * * *`) that refreshes the cached `api.github.com/meta` payload in
-KV. The request path consults that cache to exempt GitHub-hosted Actions
-runner IPs from the per-IP rate limit. Preview Workers inherit neither
-the cron nor the R2 binding (the top-level `cf/wrangler.jsonc` omits both
-on purpose), so they read from the shared KV but never refresh it and
-can't write into the captures bucket.
+(`0 2 * * *`). It refreshes two KV-cached datasets:
+
+- the `api.github.com/meta` payload (key `meta`), consulted on the request
+  path to exempt GitHub-hosted Actions runner IPs from the per-IP rate limit;
+- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`),
+  re-verified from `cf/archived-seed.json` against the GitHub API `archived`
+  flag. Set the optional `GITHUB_TOKEN` Worker secret
+  (`wrangler secret put GITHUB_TOKEN`) to lift the unauthenticated 60-req/hour
+  GitHub API cap; without it the small seed still refreshes fine.
+
+Preview Workers inherit neither the cron nor the R2 binding (the top-level
+`cf/wrangler.jsonc` omits both on purpose), so they read from the shared KV
+but never refresh it and can't write into the captures bucket.
 
 GitHub Actions wiring:
 

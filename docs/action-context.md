@@ -1,88 +1,105 @@
 # Action-side context
 
-A handful of karinto rules can only reach a verdict with information that is
-**not in the YAML being linted** — it lives in the live state of the actions a
-workflow references (is the repo archived? does the pinned SHA actually belong
-to that repo? does the SHA match the `# vN` comment next to it?). The Worker
-deliberately does **not** fetch this itself: resolving it means authenticated,
-rate-limited GitHub API calls that belong on the caller's side (a CI action
-runner that already has a `GITHUB_TOKEN`). The caller resolves the facts and
-passes them to karinto as request parameters.
+A few karinto rules need information that is **not in the YAML being linted** —
+it lives in the live state of the actions a workflow references. There are two
+distinct ways karinto handles this, depending on how cacheable the fact is.
 
-This page documents what each rule needs and how to produce it.
+## 1. Facts karinto resolves for you (server-side)
 
-## The contract
+| Rule | How | Notes |
+| --- | --- | --- |
+| [`known-vulnerable-actions`](../rules_catalog.md) | `osv=1` query param | The Worker queries OSV.dev and applies the advisory version ranges. |
+| [`archived-uses`](../rules_catalog.md) | automatic | The Worker merges a KV-cached baseline of archived `owner/repo` (refreshed daily from `cf/archived-seed.json` via the GitHub API) with the engine's hardcoded baseline. No token needed by the caller. |
 
-| Rule | Request parameter | Value format | Resolve from |
-| --- | --- | --- | --- |
-| [`known-vulnerable-actions`](../rules_catalog.md) | `osv=1` | flag — karinto queries OSV.dev for you | OSV.dev (done by the Worker) |
-| [`forbidden-uses`](../rules_catalog.md) | `forbidden` | comma-separated globs (e.g. `evil/*,foo/bar@*`) | your own policy — no API needed |
-| [`archived-uses`](../rules_catalog.md) | `archived` | comma-separated `owner/repo` | GitHub `GET /repos/{owner}/{repo}` → `archived: true` |
-| [`impostor-commit`](../rules_catalog.md) | `impostor` | comma-separated `owner/repo@sha` | GitHub commit/branch/tag membership of the SHA |
-| [`ref-version-mismatch`](../rules_catalog.md) | `ref_mismatches` | comma-separated `owner/repo@sha` | GitHub tag → SHA resolution vs. the `# vN` comment |
+These are **per-repo / per-action** facts that change rarely, so karinto caches
+them centrally — you get them without a `GITHUB_TOKEN`.
 
-Rules of thumb:
+### Extending `archived-uses`
 
-- **Pass only the positives.** Each list contains the refs you have *confirmed*
-  hit the condition (archived / impostor / mismatched). karinto fires on
-  exactly those entries; it does not re-check them. An empty or omitted value
-  leaves the rule on its offline baseline (`archived-uses` still fires on its
-  hardcoded `actions/setup-ruby` entry; the others stay silent, matching
-  zizmor's `--no-online-audits`).
-- **Limits.** At most 200 entries of 256 characters per parameter; over-limit
-  requests get `400`.
-- **`uses:` shape.** `archived` matching is case-insensitive on the bare
-  `owner/repo` (any `/subpath` and `@ref` are ignored). `impostor` /
-  `ref_mismatches` match on `owner/repo@sha`.
-
-## Producing each list
-
-The high-level recipe on the action side:
-
-1. Extract every external `uses:` ref from the target workflow / `action.yml`
-   (skip `./local` and `docker://` forms).
-2. For each ref, query the GitHub API for the fact the rule needs.
-3. Collect the refs that hit the condition into a comma-separated string.
-4. POST the YAML to karinto with those strings as the matching parameters.
-
-### `archived`
-
-For each unique `owner/repo`, call `GET /repos/{owner}/{repo}` and keep the
-ones whose response has `"archived": true`.
-
-```sh
-gh api "repos/$owner/$repo" --jq '.archived'   # → true | false
-```
-
-### `impostor`
-
-For a ref pinned as `owner/repo@<sha>`, confirm the SHA is reachable from a
-branch or tag of `owner/repo`. If GitHub does **not** list the SHA as belonging
-to the claimed repo (e.g. it only exists in a fork), it is an impostor — add
-`owner/repo@<sha>` to the list. zizmor's impostor-commit audit describes the
-exact membership check.
-
-### `ref_mismatches`
-
-For a ref pinned as `owner/repo@<sha> # vN`, resolve the tag `vN` of
-`owner/repo` to its SHA. If it differs from the pinned `<sha>`, the comment lies
-about the version — add `owner/repo@<sha>` to the list.
-
-## Example request
-
-Once the action runner has resolved the lists, the call is a normal POST:
+You can still add your own confirmed-archived repos per request:
 
 ```sh
 curl -G https://karinto.toiroakr.workers.dev \
-     --data-urlencode "content=$(cat .github/workflows/ci.yml)" \
-     --data "type=workflow" \
-     --data "osv=1" \
-     --data "forbidden=evil/*" \
-     --data "archived=actions/setup-ruby" \
-     --data "impostor=foo/bar@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
-     --data "ref_mismatches=baz/qux@0123456789abcdef0123456789abcdef01234567"
+     --data-urlencode "content=$(cat wf.yml)" --data "type=workflow" \
+     --data "archived=my-org/old-action"
 ```
 
-Embedders calling the JS bundle directly pass the same values positionally to
-[`lint_string`](../worker/worker.mbt) (`content, type, disable, vuln,
-forbidden, archived, impostor, ref_mismatches`).
+`archived` is a comma-separated list of bare `owner/repo` (case-insensitive;
+any `@ref` / subpath is ignored). It is merged with the KV baseline.
+
+To grow the central baseline, add slugs to
+[`cf/archived-seed.json`](../cf/archived-seed.json); the daily cron
+re-verifies each against the GitHub API before publishing to KV, so a repo
+that gets un-archived is dropped automatically.
+
+### Caller policy: `forbidden-uses`
+
+`forbidden` is a caller-supplied denylist (no API needed):
+
+```sh
+--data "forbidden=evil-org/*,*/deprecated-action@*"
+```
+
+Comma-separated globs (`*`, `?`) matched against both the bare
+`owner/repo[/subpath]` and the full `…@ref`.
+
+## 2. Facts the companion action resolves (`impostor-commit`, `ref-version-mismatch`)
+
+`impostor-commit` and `ref-version-mismatch` hinge on a **specific `repo@sha`**,
+which is not cacheable (SHAs are effectively unbounded) and needs an
+authenticated GitHub API call. karinto-core does **not** resolve these. Instead
+it returns the candidate refs and a companion action does the checks and
+reports findings directly.
+
+### What karinto returns
+
+Every response carries `online_audit_candidates`: the external `uses:` refs
+that need a live lookup.
+
+```jsonc
+"online_audit_candidates": [
+  { "ref": "actions/checkout@<sha>", "name": "actions/checkout", "pin": "sha" },
+  { "ref": "actions/cache@<sha>",    "name": "actions/cache",    "pin": "sha", "comment": "v4" },
+  { "ref": "foo/bar@v1",             "name": "foo/bar",          "pin": "tag" }
+]
+```
+
+- `pin: "sha"` → an impostor-commit candidate.
+- `pin: "sha"` **with** `comment` → also a ref-version-mismatch candidate (the
+  comment names the version the SHA is supposed to be).
+- `pin: "tag"` → not pinned by SHA; no online audit applies.
+
+### The companion action
+
+A reference implementation lives in
+[`companion-action/`](../companion-action/). It POSTs each file to karinto,
+reads `online_audit_candidates`, resolves them via the GitHub API, and emits
+GitHub annotations:
+
+```yaml
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<sha>
+      - uses: ./companion-action            # or your-org/karinto/companion-action@<sha>
+        with:
+          files: |
+            .github/workflows/ci.yml
+          fail-on: error                     # error | warning | none
+```
+
+What it checks:
+
+- **impostor-commit** — `GET /repos/{owner}/{repo}/commits/{sha}`; a 404/422
+  means the SHA is unknown to the claimed repo (fork-only or typo'd). This is a
+  pragmatic heuristic — [zizmor's audit](https://docs.zizmor.sh/audits/#impostor-commit)
+  is the rigorous reference for exact ref-membership.
+- **ref-version-mismatch** — resolves the tag named in the trailing `# vN`
+  comment to its SHA and compares with the pinned SHA.
+
+Because the companion reports directly, there is no need to feed results back
+into karinto, and karinto-core does not carry these as rules (they are
+`NotPlanned` in [`rules_catalog.md`](../rules_catalog.md)).

@@ -1,0 +1,39 @@
+name: "karinto online audits"
+description: >-
+  Companion to the karinto linter for the audits that need live GitHub API
+  access (impostor-commit, ref-version-mismatch). karinto returns the
+  `online_audit_candidates`; this action resolves them and reports findings.
+author: "karinto"
+
+inputs:
+  karinto-url:
+    description: "karinto endpoint that returns online_audit_candidates."
+    required: false
+    default: "https://karinto.toiroakr.workers.dev"
+  files:
+    description: >-
+      Newline- or comma-separated workflow / action YAML paths to audit. When
+      empty, every `*.yml` / `*.yaml` under `.github/workflows/` is scanned.
+    required: false
+    default: ""
+  github-token:
+    description: "Token used for the GitHub API lookups (repo-membership, tags)."
+    required: false
+    default: ${{ github.token }}
+  fail-on:
+    description: >-
+      Severity that fails the job: `error` (default, impostor-commit only),
+      `warning` (also ref-version-mismatch), or `none`.
+    required: false
+    default: "error"
+
+runs:
+  using: composite
+  steps:
+    - run: node "$GITHUB_ACTION_PATH/audit.mjs"
+      shell: bash
+      env:
+        KARINTO_URL: ${{ inputs.karinto-url }}
+        FILES: ${{ inputs.files }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        FAIL_ON: ${{ inputs.fail-on }}

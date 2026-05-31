@@ -16,6 +16,14 @@
 //               (`/owner/repo/commit/target/...`) must be supplied
 //   - osv       "1" / "true" → query OSV.dev for known-vulnerable actions
 //               (adds ~50-300ms latency depending on action count)
+//   - forbidden comma-separated globs for the `forbidden-uses` denylist
+//   - archived  comma-separated `owner/repo` for `archived-uses` (merged with
+//               the KV-cached baseline refreshed by the daily cron)
+//
+// The response also carries `online_audit_candidates`: the external `uses:`
+// refs that need a live GitHub API lookup (`impostor-commit`,
+// `ref-version-mismatch`). karinto does not resolve these; the companion
+// action (see docs/action-context.md) checks them and reports directly.
 //
 // The handler logs a one-line JSON record per request to stdout.
 //
@@ -31,6 +39,11 @@
 // `karinto-vX-Y-Z.toiroakr.workers.dev` report exactly the version they ship.
 import pkg from "../package.json";
 const ENGINE_VERSION = pkg.version;
+
+// Curated seed of candidate `owner/repo` slugs the daily cron re-verifies
+// against the GitHub API before publishing the archived baseline to KV. Kept
+// small and grown by editing the file (or, in future, mining capture traffic).
+import archivedSeed from "./archived-seed.json";
 
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
@@ -52,12 +65,20 @@ const MAX_BODY_BYTES = 1_048_576;
 const MAX_DISABLE_PATTERNS = 64;
 const MAX_DISABLE_PATTERN_LEN = 128;
 const MAX_TARGETS = 50;
-// Caller-supplied augmentation lists (`forbidden` / `archived` / `impostor` /
-// `ref_mismatches`) feed rules whose verdict depends on data the caller
-// resolved out-of-band (GitHub API). They are comma-separated `uses:` refs or
-// globs, so the entries are short and few in practice.
+// Caller-supplied augmentation lists (`forbidden` / `archived`) feed rules
+// whose verdict depends on data the caller resolved out-of-band (GitHub API).
+// They are comma-separated `uses:` refs or globs, so the entries are short and
+// few in practice.
 const MAX_USES_ENTRIES = 200;
 const MAX_USES_ENTRY_LEN = 256;
+// KV-cached baseline of archived `owner/repo` slugs, refreshed by the cron in
+// `maintenance.js`. Merged into the `archived` augmentation so callers without
+// a GITHUB_TOKEN still get the popular cases. Memoized per-isolate with a TTL
+// so we don't read KV on every request (same pattern as the /meta cache).
+const ARCHIVED_KV_KEY = "archived:list";
+const ARCHIVED_TTL_MS = 6 * 60 * 60 * 1000;
+let _archivedPromise;
+let _archivedExpiresAt = 0;
 
 export default {
   async fetch(request, env, ctx) {
@@ -108,6 +129,7 @@ export default {
   // is empty (e.g. immediately after a fresh deploy).
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(refreshMetaCache(env));
+    ctx.waitUntil(refreshArchivedList(env));
   },
 };
 
@@ -206,6 +228,69 @@ async function refreshMetaCache(env) {
     await env.KV.put(META_KV_KEY, JSON.stringify(meta));
   }
   log("cron_meta_refreshed", { actions: (meta.actions || []).length });
+}
+
+// Daily refresh of the archived `owner/repo` baseline published to KV. The
+// candidate set is the committed seed unioned with whatever we published last
+// time, so the list self-heals: a repo that gets un-archived is dropped, and
+// an entry removed from the seed is still re-verified once. Each candidate is
+// confirmed against the GitHub API's `archived` flag. Set the optional
+// `GITHUB_TOKEN` Worker secret to lift the unauthenticated 60-req/hour cap.
+const ARCHIVED_REFRESH_MAX = 300;
+
+async function refreshArchivedList(env) {
+  if (!env?.KV) return;
+  const prev = await loadArchivedList(env).catch(() => []);
+  const result = new Set(prev.map((s) => s.toLowerCase()));
+  const candidates = [
+    ...new Set(
+      [...archivedSeed, ...prev]
+        .filter((s) => typeof s === "string")
+        .map((s) => s.trim().toLowerCase()),
+    ),
+  ]
+    .filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s))
+    .slice(0, ARCHIVED_REFRESH_MAX);
+
+  const headers = {
+    "user-agent": "karinto-worker",
+    accept: "application/vnd.github+json",
+  };
+  if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+
+  let rateLimited = false;
+  let checked = 0;
+  for (const repo of candidates) {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}`, { headers });
+      if (res.status === 403 || res.status === 429) {
+        // Out of API budget — stop and keep prior knowledge for the rest.
+        rateLimited = true;
+        break;
+      }
+      checked++;
+      if (res.status === 404) {
+        // Repo gone / renamed: it can no longer be "archived under this slug".
+        result.delete(repo);
+        continue;
+      }
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data?.archived === true) result.add(repo);
+      else result.delete(repo);
+    } catch {
+      // Transient network error: leave this repo's prior status untouched.
+    }
+  }
+
+  const archived = [...result].sort();
+  await env.KV.put(ARCHIVED_KV_KEY, JSON.stringify(archived));
+  log("cron_archived_refreshed", {
+    candidates: candidates.length,
+    checked,
+    archived: archived.length,
+    rateLimited,
+  });
 }
 
 async function fetchMeta() {
@@ -406,8 +491,6 @@ const KNOWN_KEYS = new Set([
   "no_capture",
   "forbidden",
   "archived",
-  "impostor",
-  "ref_mismatches",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -443,17 +526,26 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture|forbidden|archived|impostor|ref_mismatches)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture|forbidden|archived)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
-  const ctx = sanitizeCallerContext(params);
+  const forbidden = sanitizeUsesList(params.forbidden, "forbidden");
+  const callerArchived = sanitizeUsesList(params.archived, "archived");
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
+  // Merge the caller's `archived` list with the KV-cached baseline. The engine
+  // also carries its own hardcoded baseline, so all three are additive.
+  const kvArchived = await getArchivedList(env);
+  const archived = [callerArchived, kvArchived.join(",")]
+    .filter(Boolean)
+    .join(",");
 
   if (params.repo) {
-    return await handleRepo(params, pathTarget, disable, type, useOsv, worker, ctx);
+    return await handleRepo(
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived,
+    );
   }
   if (!params.content) {
     throw new Error("missing `content` (or `repo`) parameter");
@@ -462,18 +554,35 @@ async function handle(params, env, pathTarget) {
     throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
   }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
-  return JSON.parse(
-    worker.lint_string(
-      params.content,
-      type,
-      disable,
-      vuln,
-      ctx.forbidden,
-      ctx.archived,
-      ctx.impostor,
-      ctx.refMismatches,
+  return {
+    ...JSON.parse(
+      worker.lint_string(params.content, type, disable, vuln, forbidden, archived),
     ),
-  );
+    online_audit_candidates: collectOnlineAuditCandidates(params.content),
+  };
+}
+
+// Read the KV-cached archived baseline, memoized per-isolate with a TTL.
+// Fails open (empty list) so a KV outage never blocks linting.
+function getArchivedList(env) {
+  const now = Date.now();
+  if (!_archivedPromise || now >= _archivedExpiresAt) {
+    _archivedPromise = loadArchivedList(env).catch(() => []);
+    _archivedExpiresAt = now + ARCHIVED_TTL_MS;
+  }
+  return _archivedPromise;
+}
+
+async function loadArchivedList(env) {
+  if (!env?.KV) return [];
+  const raw = await env.KV.get(ARCHIVED_KV_KEY);
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 // Reject overly long / numerous / multi-star `disable=` patterns. The matcher
@@ -512,20 +621,10 @@ function sanitizeDisable(raw) {
   return pieces.join(",");
 }
 
-// Caller-supplied augmentation for rules whose verdict depends on data only
-// the caller can resolve (GitHub repo/SHA/tag state). The Worker does not
-// fetch these itself — an action runner resolves them via the GitHub API and
-// passes them in. Each is a comma-separated list; an empty/absent value leaves
-// the corresponding rule on its offline baseline (see `worker/worker.mbt`).
-function sanitizeCallerContext(params) {
-  return {
-    forbidden: sanitizeUsesList(params.forbidden, "forbidden"),
-    archived: sanitizeUsesList(params.archived, "archived"),
-    impostor: sanitizeUsesList(params.impostor, "impostor"),
-    refMismatches: sanitizeUsesList(params.ref_mismatches, "ref_mismatches"),
-  };
-}
-
+// Caller-supplied augmentation for `forbidden-uses` / `archived-uses`. The
+// Worker does not fetch these itself — a caller (or the KV baseline) supplies
+// them. Each is a comma-separated list; an empty/absent value leaves the rule
+// on its offline baseline (see `worker/worker.mbt`).
 function sanitizeUsesList(raw, label) {
   if (raw == null || raw === "") return "";
   if (typeof raw !== "string") {
@@ -590,7 +689,9 @@ function validateTargetPath(path) {
   }
 }
 
-async function handleRepo(params, pathTarget, disable, type, useOsv, worker, ctx) {
+async function handleRepo(
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived,
+) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
@@ -665,17 +766,9 @@ async function handleRepo(params, pathTarget, disable, type, useOsv, worker, ctx
     files.push({
       path,
       ...JSON.parse(
-        worker.lint_string(
-          raw,
-          guessKind,
-          disable,
-          vuln,
-          ctx.forbidden,
-          ctx.archived,
-          ctx.impostor,
-          ctx.refMismatches,
-        ),
+        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived),
       ),
+      online_audit_candidates: collectOnlineAuditCandidates(raw),
     });
   }
   return {
@@ -779,6 +872,43 @@ function collectUsesRefs(yaml) {
   return out;
 }
 
+// Like USES_RE but also captures any trailing `# comment`, which the companion
+// action needs for `ref-version-mismatch` (the comment names the version the
+// pinned SHA is supposed to be).
+const USES_WITH_COMMENT_RE =
+  /^\s*-?\s*uses:\s*["']?([^"'\s#]+)["']?\s*(?:#\s*(.*?))?\s*$/gm;
+
+// External `uses:` refs that need a live GitHub API lookup to audit. karinto
+// only surfaces the targets here; the companion action performs the checks
+// (`impostor-commit`: SHA repo-membership; `ref-version-mismatch`: tag → SHA
+// vs. the trailing comment) and reports findings directly. `pin` is `"sha"`
+// for a 7–40 hex pin (impostor candidate) or `"tag"` otherwise; `comment`,
+// when present, is the trailing `# vN` text (ref-version-mismatch candidate).
+function collectOnlineAuditCandidates(yaml) {
+  const out = [];
+  const seen = new Set();
+  for (const match of yaml.matchAll(USES_WITH_COMMENT_RE)) {
+    const ref = match[1];
+    if (!ref || ref.startsWith("./") || ref.startsWith("docker://")) continue;
+    const at = ref.lastIndexOf("@");
+    if (at < 0) continue;
+    const name = ref.slice(0, at);
+    const rev = ref.slice(at + 1);
+    if (!name || !rev) continue;
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    const entry = {
+      ref,
+      name,
+      pin: /^[0-9a-f]{7,40}$/i.test(rev) ? "sha" : "tag",
+    };
+    const comment = (match[2] || "").trim();
+    if (comment) entry.comment = comment;
+    out.push(entry);
+  }
+  return out;
+}
+
 function guessKindFromPath(path) {
   if (path.endsWith("action.yml") || path.endsWith("action.yaml")) return "action";
   if (path.startsWith(".github/workflows/")) return "workflow";
@@ -857,13 +987,11 @@ function normalizeRequest(params) {
   if (params.type) out.type = params.type;
   if (params.disable) out.disable = normalizeCsvField(params.disable);
   // Caller-supplied augmentation changes the verdict, so capture it too or a
-  // replay would diverge from the original response.
+  // replay would diverge from the original response. (The KV-cached archived
+  // baseline is intentionally NOT captured — it is a moving server-side input,
+  // not part of the request.)
   if (params.forbidden) out.forbidden = normalizeCsvField(params.forbidden);
   if (params.archived) out.archived = normalizeCsvField(params.archived);
-  if (params.impostor) out.impostor = normalizeCsvField(params.impostor);
-  if (params.ref_mismatches) {
-    out.ref_mismatches = normalizeCsvField(params.ref_mismatches);
-  }
   return out;
 }
 
