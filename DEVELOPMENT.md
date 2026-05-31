@@ -137,14 +137,28 @@ Both the production and staging Workers also carry a daily cron
   without it the unauthenticated 60-req/hour limit applies.
 
 The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
-provisioned once and its `database_id` filled into `cf/wrangler.jsonc`
-(currently `REPLACE_WITH_D1_DATABASE_ID`):
+provisioned once. Its `database_id` is **not** committed: `cf/wrangler.jsonc`
+keeps the placeholder `REPLACE_WITH_D1_DATABASE_ID`, and the real id lives in
+the `D1_DATABASE_ID` repo variable (same self-host stance as
+`CLOUDFLARE_ACCOUNT_ID` and the R2 bucket name). At deploy time
+`scripts/prepare-wrangler-d1.mjs` renders a throwaway `cf/wrangler.deploy.jsonc`
+with the id substituted in; deploys pass `--config wrangler.deploy.jsonc`. If
+`D1_DATABASE_ID` is unset (e.g. a fork that hasn't provisioned D1) the script
+drops the binding and the Worker no-ops its archived sweep (`cf/index.js`
+guards every `env.DB` use).
 
 ```sh
 cd cf
-wrangler d1 create karinto-archived          # copy the id into wrangler.jsonc
-wrangler d1 migrations apply karinto-archived --remote
+wrangler d1 create karinto-archived          # note the printed database id
+gh variable set D1_DATABASE_ID --body "<database id>"   # NOT into wrangler.jsonc
+# Apply the migration. wrangler reads the id from config, so render it first:
+D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
+wrangler d1 migrations apply karinto-archived --config wrangler.deploy.jsonc --remote
 ```
+
+A fork wires up its own D1 the same way: create the database on its own
+Cloudflare account and set that account's id in its `D1_DATABASE_ID` repo
+variable. Nothing in the tracked config changes.
 
 Preview Workers inherit neither the cron nor the R2 binding (the top-level
 `cf/wrangler.jsonc` omits both on purpose), so they read from the shared KV
@@ -234,13 +248,15 @@ action keeps a "chore: release" PR open that previews the next version.
 
 ### Optional GitHub variables
 
-Tuning knobs for the dark-launch flow. All are repo-level **variables** (not
-secrets — non-sensitive integers), set under Settings → Secrets and
-variables → Actions → Variables. Unset values fall back to the defaults
-hardcoded in the Worker / workflow.
+Repo-level **variables** (not secrets — non-sensitive values), set under
+Settings → Secrets and variables → Actions → Variables. The dark-launch knobs
+are integers that fall back to the defaults hardcoded in the Worker / workflow
+when unset; `D1_DATABASE_ID` is the one deployment identifier (unset → the D1
+binding is dropped, see below).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
+| `D1_DATABASE_ID` | _(none)_ | D1 database id for the archived-uses worklist, injected into the deploy config by `scripts/prepare-wrangler-d1.mjs`. Unset → the `DB` binding is dropped from every deploy and the archived sweep stays dormant (`cf/index.js` no-ops when `env.DB` is absent). |
 | `REPLAY_LIMIT` | 200 | Captures replayed per CI run (both auto-on-open and label-triggered). |
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
 | `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
@@ -378,10 +394,19 @@ npx wrangler r2 bucket create karinto-captures
 gh secret set R2_ACCESS_KEY_ID     -b "<access key id>"
 gh secret set R2_SECRET_ACCESS_KEY -b "<secret access key>"
 
-# 5. Deploy the prod linter (with binding) + captures Worker. Normally this
+# 5. Provision the D1 worklist and stash its id in the D1_DATABASE_ID repo
+#    variable (NOT in wrangler.jsonc — see "Environments and release flow"):
+npx wrangler d1 create karinto-archived          # note the printed database id
+gh variable set D1_DATABASE_ID --body "<database id>"
+D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
+npx wrangler d1 migrations apply karinto-archived --config wrangler.deploy.jsonc --remote
+
+# 6. Deploy the prod linter (with binding) + captures Worker. Normally this
 #    happens via the release workflow, but the first time you can run:
 npm ci
-npx wrangler deploy --env production
+export D1_DATABASE_ID="<database id>"            # injected into the deploy config
+node ../scripts/prepare-wrangler-d1.mjs
+npx wrangler deploy --config wrangler.deploy.jsonc --env production
 npx wrangler deploy --config wrangler.maintenance.jsonc
 ```
 

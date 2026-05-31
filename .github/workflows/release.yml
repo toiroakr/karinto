@@ -45,6 +45,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # D1 database id for the archived-uses worklist, injected into the
+          # deploy config by scripts/prepare-wrangler-d1.mjs. Unset → the
+          # binding is dropped and the Worker no-ops its sweep (cf/index.js).
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
           # Dark-launch tuning. Unset → Worker defaults apply (see cf/index.js
           # and cf/maintenance.js for the fallback values).
           CAPTURE_CONTENT_LIMIT_KIB: ${{ vars.CAPTURE_CONTENT_LIMIT_KIB }}
