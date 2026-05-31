@@ -40,11 +40,6 @@
 import pkg from "../package.json";
 const ENGINE_VERSION = pkg.version;
 
-// Curated seed of candidate `owner/repo` slugs the daily cron re-verifies
-// against the GitHub API before publishing the archived baseline to KV. Kept
-// small and grown by editing the file (or, in future, mining capture traffic).
-import archivedSeed from "./archived-seed.json";
-
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
 // the import until the first request so it runs inside a handler.
@@ -230,21 +225,26 @@ async function refreshMetaCache(env) {
   log("cron_meta_refreshed", { actions: (meta.actions || []).length });
 }
 
-// Daily refresh of the archived `owner/repo` baseline published to KV. The
-// candidate set is the committed seed unioned with whatever we published last
-// time, so the list self-heals: a repo that gets un-archived is dropped, and
-// an entry removed from the seed is still re-verified once. Each candidate is
-// confirmed against the GitHub API's `archived` flag. Set the optional
-// `GITHUB_TOKEN` Worker secret to lift the unauthenticated 60-req/hour cap.
+// Daily refresh of the archived `owner/repo` baseline published to KV. There
+// is no committed seed: candidates are discovered from recent capture traffic
+// (the `uses:` refs people actually lint) unioned with whatever we published
+// last time, so the list self-heals — a repo that gets un-archived is dropped.
+// Each candidate is confirmed against the GitHub API's `archived` flag. Set the
+// optional `GITHUB_TOKEN` Worker secret to lift the unauthenticated
+// 60-req/hour cap.
 const ARCHIVED_REFRESH_MAX = 300;
+// Cap on capture objects read per run so mining stays bounded. Keys are random
+// (sha256), so each run samples a different slice; coverage accumulates in KV.
+const ARCHIVED_MINE_MAX_OBJECTS = 200;
 
 async function refreshArchivedList(env) {
   if (!env?.KV) return;
   const prev = await loadArchivedList(env).catch(() => []);
   const result = new Set(prev.map((s) => s.toLowerCase()));
+  const mined = await mineArchivedCandidates(env).catch(() => []);
   const candidates = [
     ...new Set(
-      [...archivedSeed, ...prev]
+      [...prev, ...mined]
         .filter((s) => typeof s === "string")
         .map((s) => s.trim().toLowerCase()),
     ),
@@ -291,6 +291,38 @@ async function refreshArchivedList(env) {
     archived: archived.length,
     rateLimited,
   });
+}
+
+// Mine candidate `owner/repo` slugs from a bounded sample of captured lint
+// requests. Returns the bare repos referenced by `uses:` in those bodies.
+// No-op (empty) when the captures bucket isn't bound (e.g. preview/staging).
+async function mineArchivedCandidates(env) {
+  if (!env?.CAPTURES) return [];
+  const repos = new Set();
+  let cursor;
+  let read = 0;
+  while (read < ARCHIVED_MINE_MAX_OBJECTS) {
+    const page = await env.CAPTURES.list({ prefix: "captures/", cursor });
+    for (const obj of page.objects) {
+      if (read >= ARCHIVED_MINE_MAX_OBJECTS) break;
+      read++;
+      const body = await env.CAPTURES.get(obj.key);
+      if (!body) continue;
+      let data;
+      try {
+        data = JSON.parse(await body.text());
+      } catch {
+        continue;
+      }
+      const content = data?.request?.content;
+      if (typeof content !== "string") continue;
+      // `collectUsesRefs` already strips subpaths to the bare `owner/repo`.
+      for (const ref of collectUsesRefs(content)) repos.add(ref.name);
+    }
+    if (!page.truncated) break;
+    cursor = page.cursor;
+  }
+  return [...repos];
 }
 
 async function fetchMeta() {

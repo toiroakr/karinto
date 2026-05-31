@@ -117,9 +117,11 @@ Both the production and staging Workers also carry a daily cron
 
 - the `api.github.com/meta` payload (key `meta`), consulted on the request
   path to exempt GitHub-hosted Actions runner IPs from the per-IP rate limit;
-- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`),
-  re-verified from `cf/archived-seed.json` against the GitHub API `archived`
-  flag. Set the optional `GITHUB_TOKEN` Worker secret
+- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`).
+  Candidates are mined from a bounded sample of recent capture traffic (no
+  committed seed) and confirmed against the GitHub API `archived` flag; the
+  list self-heals as repos are un-archived. Set the optional `GITHUB_TOKEN`
+  Worker secret
   (`wrangler secret put GITHUB_TOKEN`) to lift the unauthenticated 60-req/hour
   GitHub API cap; without it the small seed still refreshes fine.
 
