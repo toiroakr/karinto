@@ -9,7 +9,7 @@ distinct ways karinto handles this, depending on how cacheable the fact is.
 | Rule | How | Notes |
 | --- | --- | --- |
 | [`known-vulnerable-actions`](../rules_catalog.md) | `osv=1` query param | The Worker queries OSV.dev and applies the advisory version ranges. |
-| [`archived-uses`](../rules_catalog.md) | automatic | The Worker merges a KV-cached baseline of archived `owner/repo` (a daily cron mines candidates from recent capture traffic and confirms them via the GitHub API) with the engine's hardcoded baseline. No token needed by the caller. |
+| [`archived-uses`](../rules_catalog.md) | automatic | The Worker merges a KV-published baseline of archived `owner/repo` (the request path enqueues seen `uses:` repos into a D1 worklist; a daily cron confirms each via the GitHub API) with the engine's hardcoded baseline. No token needed by the caller. |
 
 These are **per-repo / per-action** facts that change rarely, so karinto caches
 them centrally — you get them without a `GITHUB_TOKEN`.
@@ -27,10 +27,11 @@ curl -G https://karinto.toiroakr.workers.dev \
 `archived` is a comma-separated list of bare `owner/repo` (case-insensitive;
 any `@ref` / subpath is ignored). It is merged with the KV baseline.
 
-The central baseline grows on its own: the daily cron mines a bounded sample
-of recent capture traffic for `uses:` refs, confirms each against the GitHub
-API, and publishes the archived ones to KV — re-verifying known entries so a
-repo that gets un-archived is dropped automatically. There is no committed
+The central baseline grows on its own: every lint request enqueues the
+external `uses:` repos it references into a D1 worklist, and a daily cron
+confirms each against the GitHub API and publishes the archived ones to KV. It
+also re-verifies a rotating slice of the known set each run (≈ weekly coverage)
+so a repo that gets un-archived is dropped automatically. There is no committed
 seed list to maintain.
 
 ### Caller policy: `forbidden-uses`

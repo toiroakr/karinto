@@ -117,18 +117,34 @@ Both the production and staging Workers also carry a daily cron
 
 - the `api.github.com/meta` payload (key `meta`), consulted on the request
   path to exempt GitHub-hosted Actions runner IPs from the per-IP rate limit;
-- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`).
-  Candidates are mined from a bounded sample of recent capture traffic (no
-  committed seed) and confirmed against the GitHub API `archived` flag; the
-  list self-heals as repos are un-archived. A per-repo result cache (key
-  `archived:cache`, with last-checked timestamps) means each repo is queried at
-  most once per day while it's not archived (≈ every cron run, to catch
-  newly-archived repos promptly), and far less often (~180 days) once it is —
-  un-archiving is rare — no matter how often it shows up in traffic. Each run
-  makes at most 200 API calls. Set the optional `GITHUB_TOKEN`
-  Worker secret
-  (`wrangler secret put GITHUB_TOKEN`) to lift the unauthenticated 60-req/hour
-  GitHub API cap; without it the small seed still refreshes fine.
+- the archived `owner/repo` baseline for `archived-uses` (key `archived:list`),
+  the source of truth the request path reads. There is no committed seed:
+  candidates are discovered on the request path, which enqueues each external
+  `uses:` repo it sees into the D1 `pending` worklist (`INSERT OR IGNORE`,
+  off the hot path via `ctx.waitUntil`). The cron then:
+    1. drains `pending` (up to 1000 repos),
+    2. adds a rotating ~1/7 slice of the *current* archived set so the whole
+       set is re-verified roughly weekly (this is what catches un-archives),
+    3. confirms each against the GitHub API `archived` flag, capped at a
+       rate-limit-safe number per run (50 unauthenticated, 500 with a token),
+    4. `DELETE`s all of `pending` — anything still in use is re-enqueued by
+       the next request,
+    5. publishes the updated archived set to KV.
+
+  So a freshly-seen repo is checked on the next cron run, and a repo never seen
+  again ages out of the worklist on its own. Set the optional `GITHUB_TOKEN`
+  Worker secret (`wrangler secret put GITHUB_TOKEN`) to raise the per-run cap;
+  without it the unauthenticated 60-req/hour limit applies.
+
+The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
+provisioned once and its `database_id` filled into `cf/wrangler.jsonc`
+(currently `REPLACE_WITH_D1_DATABASE_ID`):
+
+```sh
+cd cf
+wrangler d1 create karinto-archived          # copy the id into wrangler.jsonc
+wrangler d1 migrations apply karinto-archived --remote
+```
 
 Preview Workers inherit neither the cron nor the R2 binding (the top-level
 `cf/wrangler.jsonc` omits both on purpose), so they read from the shared KV

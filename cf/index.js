@@ -66,14 +66,26 @@ const MAX_TARGETS = 50;
 // few in practice.
 const MAX_USES_ENTRIES = 200;
 const MAX_USES_ENTRY_LEN = 256;
-// KV-cached baseline of archived `owner/repo` slugs, refreshed by the cron in
-// `maintenance.js`. Merged into the `archived` augmentation so callers without
-// a GITHUB_TOKEN still get the popular cases. Memoized per-isolate with a TTL
-// so we don't read KV on every request (same pattern as the /meta cache).
+// KV-published baseline of archived `owner/repo` slugs (the `archived-uses`
+// rule reads this on the request path). The daily cron maintains it from a D1
+// `pending` worklist; see `refreshArchivedList`. Merged into the `archived`
+// augmentation so callers without a GITHUB_TOKEN still get the popular cases.
+// Memoized per-isolate with a TTL so we don't read KV on every request (same
+// pattern as the /meta cache).
 const ARCHIVED_KV_KEY = "archived:list";
 const ARCHIVED_TTL_MS = 6 * 60 * 60 * 1000;
 let _archivedPromise;
 let _archivedExpiresAt = 0;
+// At most this many `uses:` repos enqueued into D1 per request (non-blocking).
+const PENDING_ENQUEUE_MAX = 100;
+// Drain at most this many pending rows per cron run before checking.
+const PENDING_DRAIN_MAX = 1000;
+// Re-verify the whole archived set roughly every N days (rotation per run).
+const ARCHIVED_ROTATION_DAYS = 7;
+// Per-run GitHub API budget, kept under the rate limit (unauth: 60/hour).
+function archivedCheckMax(env) {
+  return env?.GITHUB_TOKEN ? 500 : 50;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -104,6 +116,15 @@ export default {
         ctx.waitUntil(
           captureRequest(env, params, result, request.headers).catch((err) => {
             log("capture_error", { message: String(err?.message ?? err) });
+          }),
+        );
+      }
+      // Enqueue the external `uses:` repos for the daily archived-status sweep.
+      // Non-blocking and best-effort; INSERT OR IGNORE dedups in D1.
+      if (env?.DB) {
+        ctx.waitUntil(
+          enqueuePending(env, candidateRepos(result)).catch((err) => {
+            log("enqueue_error", { message: String(err?.message ?? err) });
           }),
         );
       }
@@ -225,46 +246,79 @@ async function refreshMetaCache(env) {
   log("cron_meta_refreshed", { actions: (meta.actions || []).length });
 }
 
-// Daily refresh of the archived `owner/repo` baseline published to KV. There
-// is no committed seed: candidates are discovered from recent capture traffic
-// (the `uses:` refs people actually lint).
-//
-// To avoid spending the GitHub API budget re-checking the same repos every
-// run, a per-repo cache (`archived:cache`) records each repo's last result and
-// the time it was checked. A repo is only re-queried once its result is older
-// than `ARCHIVED_RECHECK_MS`; everything checked more recently is skipped.
-// `archived:list` (what the request path reads) is derived from the cache.
-// Set the optional `GITHUB_TOKEN` Worker secret to lift the unauthenticated
-// 60-req/hour cap.
-const ARCHIVED_CACHE_KEY = "archived:cache";
-// Cap on *GitHub API calls* per run (only stale/new repos consume one).
-const ARCHIVED_CHECK_MAX = 200;
-// Cap on capture objects read per run so mining stays bounded. Keys are random
-// (sha256), so each run samples a different slice; coverage accumulates in KV.
-const ARCHIVED_MINE_MAX_OBJECTS = 200;
-// Re-verify cadence, split by current status. A not-yet-archived repo is
-// re-checked daily (≈ once per cron run) to catch it *becoming* archived
-// promptly (the signal the rule exists for). An already-archived repo is
-// re-checked far less often (180 days) because un-archiving is rare and the
-// only cost of staleness is a lingering (correct-until-recently) warning.
-const ARCHIVED_RECHECK_ACTIVE_MS = 24 * 60 * 60 * 1000;
-const ARCHIVED_RECHECK_ARCHIVED_MS = 180 * 24 * 60 * 60 * 1000;
-// Bound the cache so it can't grow without limit; oldest checks are evicted.
-const ARCHIVED_CACHE_MAX = 5000;
+// Bare `owner/repo` slugs of the external `uses:` refs in a lint result — the
+// candidates for the archived-status sweep. Subpaths (reusable-workflow paths)
+// are collapsed to `owner/repo`.
+function candidateRepos(result) {
+  const out = new Set();
+  const add = (cands) => {
+    for (const c of cands || []) {
+      const repo = bareOwnerRepo(c.name);
+      if (repo) out.add(repo);
+    }
+  };
+  add(result.online_audit_candidates);
+  for (const f of result.files || []) add(f.online_audit_candidates);
+  return [...out];
+}
 
+function bareOwnerRepo(name) {
+  if (typeof name !== "string") return null;
+  const parts = name.split("/");
+  return parts.length >= 2 ? `${parts[0]}/${parts[1]}`.toLowerCase() : null;
+}
+
+// Enqueue repos into the D1 `pending` worklist (INSERT OR IGNORE dedups). Runs
+// best-effort off the request hot path via `ctx.waitUntil`.
+async function enqueuePending(env, repos) {
+  if (!env?.DB || repos.length === 0) return;
+  const stmt = env.DB.prepare("INSERT OR IGNORE INTO pending (repo) VALUES (?)");
+  const batch = repos
+    .filter((r) => /^[^/\s]+\/[^/\s]+$/.test(r))
+    .slice(0, PENDING_ENQUEUE_MAX)
+    .map((r) => stmt.bind(r));
+  if (batch.length) await env.DB.batch(batch);
+}
+
+// Daily archived-status sweep. The D1 `pending` worklist (filled from request
+// traffic) supplies freshly-seen repos; a rotating ~1/7 slice of the current
+// archived set is re-verified each run so the whole set cycles roughly weekly
+// (catching un-archives) without bursting past the API rate limit. The pending
+// rows are deleted afterwards — traffic re-enqueues anything still in use. The
+// archived set is published to KV (`archived:list`) for the request path. Set
+// the optional `GITHUB_TOKEN` Worker secret to lift the unauthenticated
+// 60-req/hour cap (and `archivedCheckMax`).
 async function refreshArchivedList(env) {
   if (!env?.KV) return;
-  const cache = await loadArchivedCache(env);
-  const mined = await mineArchivedCandidates(env).catch(() => []);
-  // Candidates worth (re)checking: mined refs plus repos already in the cache
-  // (so known statuses get re-verified once stale). Deduped.
-  const candidates = [
+  const archivedSet = new Set(await loadArchivedList(env).catch(() => []));
+
+  let pending = [];
+  if (env.DB) {
+    try {
+      const res = await env.DB.prepare("SELECT repo FROM pending LIMIT ?")
+        .bind(PENDING_DRAIN_MAX)
+        .all();
+      pending = (res.results || []).map((r) => r.repo).filter(Boolean);
+    } catch (e) {
+      log("archived_pending_read_error", { message: String(e?.message ?? e) });
+    }
+  }
+
+  const archivedArr = [...archivedSet];
+  const rotation = sampleRandom(
+    archivedArr,
+    Math.ceil(archivedArr.length / ARCHIVED_ROTATION_DAYS),
+  );
+
+  const worklist = [
     ...new Set(
-      [...Object.keys(cache), ...mined]
+      [...pending, ...rotation]
         .filter((s) => typeof s === "string")
         .map((s) => s.trim().toLowerCase()),
     ),
-  ].filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s));
+  ]
+    .filter((s) => /^[^/\s]+\/[^/\s]+$/.test(s))
+    .slice(0, archivedCheckMax(env));
 
   const headers = {
     "user-agent": "karinto-worker",
@@ -272,24 +326,9 @@ async function refreshArchivedList(env) {
   };
   if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
 
-  const now = Date.now();
   let rateLimited = false;
   let checked = 0;
-  let skipped = 0;
-  for (const repo of candidates) {
-    // Skip repos we verified recently — this is the dedup across runs.
-    // Already-archived repos use a much longer interval (un-archive is rare).
-    const entry = cache[repo];
-    if (entry) {
-      const ttl = entry.archived
-        ? ARCHIVED_RECHECK_ARCHIVED_MS
-        : ARCHIVED_RECHECK_ACTIVE_MS;
-      if (now - entry.checked < ttl) {
-        skipped++;
-        continue;
-      }
-    }
-    if (checked >= ARCHIVED_CHECK_MAX) break; // out of per-run budget; resume next run
+  for (const repo of worklist) {
     try {
       const res = await fetch(`https://api.github.com/repos/${repo}`, { headers });
       if (res.status === 403 || res.status === 429) {
@@ -298,85 +337,46 @@ async function refreshArchivedList(env) {
       }
       checked++;
       if (res.status === 404) {
-        delete cache[repo]; // repo gone / renamed
+        archivedSet.delete(repo); // repo gone / renamed
         continue;
       }
       if (!res.ok) continue;
       const data = await res.json();
-      cache[repo] = { archived: data?.archived === true, checked: now };
+      if (data?.archived === true) archivedSet.add(repo);
+      else archivedSet.delete(repo);
     } catch {
-      // Transient network error: leave this repo's prior cache entry untouched.
+      // Transient network error: leave this repo's prior status untouched.
     }
   }
 
-  pruneArchivedCache(cache);
-  const archived = Object.keys(cache)
-    .filter((repo) => cache[repo].archived)
-    .sort();
-  await env.KV.put(ARCHIVED_CACHE_KEY, JSON.stringify(cache));
-  await env.KV.put(ARCHIVED_KV_KEY, JSON.stringify(archived));
+  // Drain the worklist — anything still in use is re-enqueued by traffic.
+  if (env.DB) {
+    try {
+      await env.DB.prepare("DELETE FROM pending").run();
+    } catch (e) {
+      log("archived_pending_delete_error", { message: String(e?.message ?? e) });
+    }
+  }
+
+  await env.KV.put(ARCHIVED_KV_KEY, JSON.stringify([...archivedSet].sort()));
   log("cron_archived_refreshed", {
-    candidates: candidates.length,
+    pending: pending.length,
+    rotation: rotation.length,
     checked,
-    skipped,
-    archived: archived.length,
+    archived: archivedSet.size,
     rateLimited,
   });
 }
 
-async function loadArchivedCache(env) {
-  const raw = await env.KV.get(ARCHIVED_CACHE_KEY);
-  if (!raw) return {};
-  try {
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
-  } catch {
-    return {};
+// Fisher–Yates sample of up to `n` distinct items (non-mutating).
+function sampleRandom(arr, n) {
+  if (n >= arr.length) return [...arr];
+  const copy = [...arr];
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(Math.random() * (copy.length - i));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-}
-
-// Evict the oldest-checked entries once the cache exceeds its cap. Dropped
-// non-archived repos are simply re-checked if seen again; dropped archived
-// repos reappear once re-mined, so the list is self-correcting.
-function pruneArchivedCache(cache) {
-  const keys = Object.keys(cache);
-  if (keys.length <= ARCHIVED_CACHE_MAX) return;
-  keys
-    .sort((a, b) => (cache[a].checked || 0) - (cache[b].checked || 0))
-    .slice(0, keys.length - ARCHIVED_CACHE_MAX)
-    .forEach((k) => delete cache[k]);
-}
-
-// Mine candidate `owner/repo` slugs from a bounded sample of captured lint
-// requests. Returns the bare repos referenced by `uses:` in those bodies.
-// No-op (empty) when the captures bucket isn't bound (e.g. preview/staging).
-async function mineArchivedCandidates(env) {
-  if (!env?.CAPTURES) return [];
-  const repos = new Set();
-  let cursor;
-  let read = 0;
-  while (read < ARCHIVED_MINE_MAX_OBJECTS) {
-    const page = await env.CAPTURES.list({ prefix: "captures/", cursor });
-    for (const obj of page.objects) {
-      if (read >= ARCHIVED_MINE_MAX_OBJECTS) break;
-      read++;
-      const body = await env.CAPTURES.get(obj.key);
-      if (!body) continue;
-      let data;
-      try {
-        data = JSON.parse(await body.text());
-      } catch {
-        continue;
-      }
-      const content = data?.request?.content;
-      if (typeof content !== "string") continue;
-      // `collectUsesRefs` already strips subpaths to the bare `owner/repo`.
-      for (const ref of collectUsesRefs(content)) repos.add(ref.name);
-    }
-    if (!page.truncated) break;
-    cursor = page.cursor;
-  }
-  return [...repos];
+  return copy.slice(0, n);
 }
 
 async function fetchMeta() {

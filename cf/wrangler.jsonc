@@ -43,6 +43,19 @@
 			"remote": true
 		}
 	],
+	// D1 worklist for the archived-uses sweep. The request path enqueues seen
+	// `uses:` repos into the `pending` table; the production cron drains it.
+	// Shared across envs like KV. Provision once and fill `database_id` (see
+	// DEVELOPMENT.md): `wrangler d1 create karinto-archived` then
+	// `wrangler d1 migrations apply karinto-archived --remote`.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "karinto-archived",
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"remote": true
+		}
+	],
 	// Named envs do NOT inherit `kv_namespaces`, `unsafe`, `triggers`, or
 	// `r2_buckets` from the top-level config, so we duplicate them here.
 	// KV id is shared because the /meta payload is GitHub-published and
@@ -68,6 +81,14 @@
 				{
 					"binding": "KV",
 					"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+					"remote": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "karinto-archived",
+					"database_id": "REPLACE_WITH_D1_DATABASE_ID",
 					"remote": true
 				}
 			],
@@ -102,6 +123,14 @@
 				{
 					"binding": "KV",
 					"id": "3220fa5aa95f45c4a4816a8f5b0a382e",
+					"remote": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "karinto-archived",
+					"database_id": "REPLACE_WITH_D1_DATABASE_ID",
 					"remote": true
 				}
 			],
