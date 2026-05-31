@@ -95,12 +95,24 @@ jobs:
 
 What it checks:
 
-- **impostor-commit** — `GET /repos/{owner}/{repo}/commits/{sha}`; a 404/422
-  means the SHA is unknown to the claimed repo (fork-only or typo'd). This is a
-  pragmatic heuristic — [zizmor's audit](https://docs.zizmor.sh/audits/#impostor-commit)
-  is the rigorous reference for exact ref-membership.
+- **impostor-commit** — whether the pinned SHA is **reachable from one of
+  `owner/repo`'s own branches or tags** (a `GET /commits/{sha}` 200 is *not*
+  sufficient: GitHub serves fork-network commits, so a fork-only impostor
+  returns 200). It uses GitHub's `branch_commits` data (the web UI's
+  "containing branches/tags") for public repos, falling back to walking every
+  ref via the compare API for private repos. Reachable from none ⇒ impostor.
+  Mirrors [zizmor's audit](https://docs.zizmor.sh/audits/#impostor-commit).
 - **ref-version-mismatch** — resolves the tag named in the trailing `# vN`
   comment to its SHA and compares with the pinned SHA.
+
+**Token / private actions.** The default `GITHUB_TOKEN` (passed automatically
+as the `github-token` input) can only read the workflow's own repo, and the
+`branch_commits` fast path is public-only. To audit a `uses:` that points at a
+**private** action in another repo, pass a token with read access to that repo
+via the `github-token` input (a PAT with `repo` / fine-grained Contents:read,
+or a GitHub App token). Without it the action can't verify the private repo and
+emits a non-failing "could not verify — no access" warning instead of a false
+finding. Public actions need no extra token.
 
 Because the companion reports directly, there is no need to feed results back
 into karinto, and karinto-core does not carry these as rules (they are

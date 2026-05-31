@@ -17,7 +17,11 @@ inputs:
     required: false
     default: ""
   github-token:
-    description: "Token used for the GitHub API lookups (repo-membership, tags)."
+    description: >-
+      Token for the GitHub API lookups (commit reachability, tags). The default
+      reads public repos and this workflow's own repo; to audit a `uses:` that
+      points at a private action in another repo, pass a token (PAT / GitHub App)
+      with read access to it.
     required: false
     default: ${{ github.token }}
   fail-on:

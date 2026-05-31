@@ -80,81 +80,141 @@ async function gh(apiPath) {
 }
 const isRateLimited = (res) => res && (res.status === 403 || res.status === 429);
 
-// Default branch of a repo, cached. null = could not determine (missing repo,
-// rate limit, error).
-const defaultBranchCache = new Map();
-async function defaultBranch(repo) {
-  if (defaultBranchCache.has(repo)) return defaultBranchCache.get(repo);
+// Repo metadata (default branch), cached. On failure the `error` field
+// classifies *why* so the caller can give actionable guidance — crucially,
+// telling apart "private repo the token can't read" (404) from a rate limit or
+// a bad token. GitHub returns 404 (not 403) for private repos you can't see, so
+// "no-access" also covers a genuinely missing/renamed repo.
+const repoMetaCache = new Map();
+async function repoMeta(repo) {
+  if (repoMetaCache.has(repo)) return repoMetaCache.get(repo);
   const res = await gh(`/repos/${repo}`);
-  let branch = null;
-  if (res && res.ok) {
+  let out;
+  if (!res) out = { error: "unverified" };
+  else if (res.ok) {
     const data = await res.json().catch(() => null);
-    branch = data?.default_branch ?? null;
-  }
-  defaultBranchCache.set(repo, branch);
-  return branch;
+    out = data?.default_branch ? { branch: data.default_branch } : { error: "unverified" };
+  } else if (res.status === 401) out = { error: "bad-token" };
+  else if (res.status === 404) out = { error: "no-access" };
+  else if (isRateLimited(res)) out = { error: "rate-limited" };
+  else out = { error: "unverified" };
+  repoMetaCache.set(repo, out);
+  return out;
 }
 
 // impostor-commit: is the pinned SHA reachable from one of `owner/repo`'s own
-// refs, or does it only live in a fork (or not at all)?
+// refs (a real branch/tag or their history), or does it only live in a fork
+// (or not at all)? This mirrors zizmor's audit.
 //
 // `GET /repos/{repo}/commits/{sha}` is NOT a membership test: GitHub serves
-// commits across the whole fork *network*, so a SHA that exists only in a fork
-// — the canonical impostor — returns 200. Instead we test reachability:
-//   1. compare `sha...defaultBranch`: "ahead"/"identical" ⇒ sha is in the
-//      default branch's history (the common, legitimate case); 404 ⇒ the SHA
-//      isn't in the network at all (typo / deleted) ⇒ impostor.
-//   2. otherwise it may still be a non-default branch head, or a tagged release
-//      off the default branch — check `branches-where-head` and the tag list.
-//   3. reachable from none of those ⇒ impostor (fork-only or unreachable).
-// Returns "ok" | "impostor" | "unknown" (unknown = rate-limited / API error, so
-// the caller warns instead of asserting either way).
+// commits across the whole fork *network*, so a fork-only SHA — the canonical
+// impostor — returns 200. We instead ask which of the repo's own refs contain
+// the commit, two ways:
+//   1. Fast path (public repos): GitHub's own `branch_commits` endpoint — the
+//      data behind the web UI's "N branches / M tags containing this commit".
+//      It returns `{branches, tags}`; empty ⇒ impostor, non-empty ⇒ reachable.
+//      One request, authoritative. It needs a web session, so private repos
+//      (and any format change) fall through.
+//   2. Fallback (private repos / endpoint unavailable): the documented API —
+//      classify access first (token can read it?), then walk every branch and
+//      tag and `compare` it against the SHA; "behind"/"identical" means that
+//      ref contains the commit. Reachable from none ⇒ impostor.
+//
+// Returns: "ok" | "impostor" | "no-access" | "bad-token" | "rate-limited" |
+// "unverified". Everything but ok/impostor is inconclusive — the caller
+// surfaces it as a (non-failing) warning rather than passing or false-flagging.
 async function classifyCommit(repo, sha) {
-  const branch = await defaultBranch(repo);
-  if (!branch) return "unknown";
+  const fast = await branchCommitsContains(repo, sha);
+  if (fast === "yes") return "ok";
+  if (fast === "no") return "impostor";
 
-  // `sha` is hex and `branch` a ref name; the `...` separator must stay literal.
-  const cmp = await gh(`/repos/${repo}/compare/${sha}...${branch}`);
-  if (!cmp) return "unknown";
-  if (cmp.status === 404 || cmp.status === 422) return "impostor"; // unknown to the network
-  if (isRateLimited(cmp) || !cmp.ok) return "unknown";
-  const status = (await cmp.json().catch(() => null))?.status;
-  if (status === "ahead" || status === "identical") return "ok"; // in default history
+  // Endpoint unavailable (private repo, or shape changed) → documented API.
+  const meta = await repoMeta(repo);
+  if (meta.error) return meta.error; // no-access / bad-token / rate-limited / unverified
+  return reachableByApi(repo, sha);
+}
 
-  // Not on the default branch — accept a branch head or a tagged-release commit.
-  const head = await isBranchHead(repo, sha);
-  if (head !== "no") return head === "ok" ? "ok" : "unknown";
-  const tagged = await isTaggedCommit(repo, sha);
-  if (tagged !== "no") return tagged === "ok" ? "ok" : "unknown";
+// GitHub's undocumented `branch_commits` endpoint (the web UI's containing-refs
+// data). With `Accept: application/json` it returns `{branches:[…], tags:[…]}`.
+// Unauthenticated github.com web route — works for public repos only; anything
+// else (private/login, non-JSON, error) returns "unavailable" to fall back.
+// "yes" | "no" | "unavailable".
+async function branchCommitsContains(repo, sha) {
+  let res;
+  try {
+    res = await fetch(`https://github.com/${repo}/branch_commits/${sha}`, {
+      headers: { "user-agent": "karinto-companion", accept: "application/json" },
+    });
+  } catch {
+    return "unavailable";
+  }
+  if (!res.ok) return "unavailable";
+  if (!(res.headers.get("content-type") || "").includes("json")) return "unavailable";
+  const data = await res.json().catch(() => null);
+  if (!data || !Array.isArray(data.branches) || !Array.isArray(data.tags)) return "unavailable";
+  return data.branches.length > 0 || data.tags.length > 0 ? "yes" : "no";
+}
+
+// Documented-API reachability: every branch/tag tip, then `compare` each tip
+// against the SHA ("behind"/"identical" ⇒ that ref contains it). Used for
+// private repos (the token authenticates these calls). "ok" | "impostor" |
+// "rate-limited" | "unverified".
+async function reachableByApi(repo, sha) {
+  const refs = await listRefTips(repo);
+  if (refs.error) return refs.error;
+  const want = sha.toLowerCase();
+  if (refs.tips.has(want)) return "ok"; // pinned to a ref tip
+
+  let sawError = false;
+  for (const tip of refs.tips) {
+    const c = await refContains(repo, tip, sha);
+    if (c === "yes") return "ok";
+    if (c === "rate") return "rate-limited";
+    if (c === "error") sawError = true;
+  }
+  // Reachable from no listed ref. If the listing was truncated or some compare
+  // errored, we can't be certain — don't over-claim impostor.
+  if (refs.capped || sawError) return "unverified";
   return "impostor";
 }
 
-// Is `sha` the HEAD of some branch of `repo`? "ok" | "no" | "unknown".
-async function isBranchHead(repo, sha) {
-  const res = await gh(`/repos/${repo}/commits/${sha}/branches-where-head`);
-  if (!res || isRateLimited(res)) return "unknown";
-  if (!res.ok) return "no";
-  const arr = await res.json().catch(() => null);
-  return Array.isArray(arr) && arr.length > 0 ? "ok" : "no";
+// Collect the tip SHAs of every branch and tag (lowercased). `capped` = there
+// were more than we paged through. { tips:Set, capped:bool } | { error }.
+async function listRefTips(repo) {
+  const PAGES = 10; // up to 1000 of each — effectively all for normal repos
+  const PER = 100;
+  const tips = new Set();
+  let capped = false;
+  for (const kind of ["branches", "tags"]) {
+    for (let page = 1; page <= PAGES; page++) {
+      const res = await gh(`/repos/${repo}/${kind}?per_page=${PER}&page=${page}`);
+      if (!res) return { error: "unverified" };
+      if (isRateLimited(res)) return { error: "rate-limited" };
+      if (!res.ok) return { error: "unverified" };
+      const arr = await res.json().catch(() => null);
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      for (const r of arr) {
+        const tip = r?.commit?.sha?.toLowerCase();
+        if (tip) tips.add(tip);
+      }
+      if (arr.length < PER) break;
+      if (page === PAGES) capped = true; // more pages remain
+    }
+  }
+  return { tips, capped };
 }
 
-// Is `sha` the commit of one of `repo`'s tags? Paginates a bounded number of
-// pages; if the cap is hit without a match we return "unknown" (not "no") so a
-// repo with thousands of tags can't produce a false impostor. "ok"|"no"|"unknown".
-async function isTaggedCommit(repo, sha) {
-  const PAGES = 3;
-  const PER = 100;
-  const want = sha.toLowerCase();
-  for (let page = 1; page <= PAGES; page++) {
-    const res = await gh(`/repos/${repo}/tags?per_page=${PER}&page=${page}`);
-    if (!res || isRateLimited(res)) return "unknown";
-    if (!res.ok) return "no";
-    const arr = await res.json().catch(() => null);
-    if (!Array.isArray(arr) || arr.length === 0) return "no";
-    if (arr.some((t) => t?.commit?.sha?.toLowerCase() === want)) return "ok";
-    if (arr.length < PER) return "no"; // last page reached
-  }
-  return "unknown"; // more tags exist beyond the cap — don't over-claim impostor
+// Does the ref at `baseTip` contain `sha`? compare base=tip, head=sha: the SHA
+// is reachable from the tip when the comparison is "behind" or "identical".
+// "yes" | "no" | "rate" | "error".
+async function refContains(repo, baseTip, sha) {
+  const res = await gh(`/repos/${repo}/compare/${baseTip}...${sha}`);
+  if (!res) return "error";
+  if (res.status === 404 || res.status === 422) return "no"; // divergent / unknown
+  if (isRateLimited(res)) return "rate";
+  if (!res.ok) return "error";
+  const status = (await res.json().catch(() => null))?.status;
+  return status === "behind" || status === "identical" ? "yes" : "no";
 }
 
 // ref-version-mismatch: resolve the tag named in the trailing comment to its
@@ -180,6 +240,30 @@ async function tagSha(repo, tag) {
 function annotate(level, file, message) {
   // `level` is "error" or "warning"; GitHub renders these as annotations.
   console.log(`::${level} file=${file}::${message}`);
+}
+
+// Warning text for an inconclusive impostor check — tells access problems
+// (actionable: pass a token) apart from transient ones (actionable: re-run).
+function unverifiedMessage(verdict, repo, ref) {
+  const prefix = `impostor-commit: could not verify \`${ref}\` against ${repo}`;
+  switch (verdict) {
+    case "no-access":
+      return (
+        `${prefix} — it may be private (the token lacks read access) or no ` +
+        `longer exist. The default GITHUB_TOKEN only reads this workflow's own ` +
+        `repo; pass a token with read access via the \`github-token\` input to ` +
+        `audit private actions.`
+      );
+    case "bad-token":
+      return `${prefix} — the GitHub token is invalid or expired (set \`github-token\`).`;
+    case "rate-limited":
+      return (
+        `${prefix} — hit the GitHub API rate limit; re-run later, or provide a ` +
+        `higher-quota token via \`github-token\`.`
+      );
+    default:
+      return `${prefix} (GitHub API error) — re-run to confirm.`;
+  }
 }
 
 function guessKind(file) {
@@ -228,14 +312,9 @@ async function main() {
         );
         continue; // an impostor SHA can't meaningfully be version-checked
       }
-      if (verdict === "unknown") {
-        skipped++;
-        annotate(
-          "warning",
-          file,
-          `impostor-commit: could not verify \`${c.ref}\` against ${repo} ` +
-            `(GitHub API rate limit or error) — re-run to confirm`,
-        );
+      if (verdict !== "ok") {
+        skipped++; // inconclusive — annotate but never fail the job
+        annotate("warning", file, unverifiedMessage(verdict, repo, c.ref));
         continue; // can't reliably version-check either
       }
 
