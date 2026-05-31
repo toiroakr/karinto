@@ -17,7 +17,16 @@ import path from "node:path";
 
 const KARINTO_URL = process.env.KARINTO_URL || "https://karinto.toiroakr.workers.dev";
 const TOKEN = process.env.GH_TOKEN || "";
-const FAIL_ON = (process.env.FAIL_ON || "error").toLowerCase();
+// Validate fail-on so a typo (e.g. "errors") can't silently mean "never fail".
+const FAIL_ON_VALUES = ["error", "warning", "none"];
+const FAIL_ON_RAW = (process.env.FAIL_ON || "error").toLowerCase();
+const FAIL_ON = FAIL_ON_VALUES.includes(FAIL_ON_RAW) ? FAIL_ON_RAW : "error";
+if (FAIL_ON !== FAIL_ON_RAW) {
+  console.log(
+    `::warning::karinto-companion: unknown fail-on "${FAIL_ON_RAW}" — ` +
+      `expected one of ${FAIL_ON_VALUES.join(", ")}; defaulting to "error"`,
+  );
+}
 
 const GH_HEADERS = {
   "user-agent": "karinto-companion",
@@ -295,41 +304,58 @@ async function main() {
     }
 
     for (const c of candidates) {
-      if (c.pin !== "sha") continue;
-      const repo = bareRepo(c.name);
-      if (!repo) continue;
-      const sha = c.ref.slice(c.ref.lastIndexOf("@") + 1);
+      // Isolate each candidate: a malformed entry or a one-off API throw must
+      // not abort the rest of the audit.
+      try {
+        if (c?.pin !== "sha") continue;
+        const repo = bareRepo(c.name);
+        if (!repo) continue;
+        // Guard the SHA: candidate `ref` must be `owner/repo@<7–40 hex>`.
+        const sha =
+          typeof c.ref === "string" && c.ref.includes("@")
+            ? c.ref.slice(c.ref.lastIndexOf("@") + 1)
+            : "";
+        if (!/^[0-9a-f]{7,40}$/i.test(sha)) continue; // not a usable SHA pin
 
-      // impostor-commit
-      const verdict = await classifyCommit(repo, sha);
-      if (verdict === "impostor") {
-        errors++;
-        annotate(
-          "error",
-          file,
-          `impostor-commit: uses \`${c.ref}\` — SHA is not reachable from any ` +
-            `branch or tag of ${repo} (it only exists in a fork, or was never pushed)`,
-        );
-        continue; // an impostor SHA can't meaningfully be version-checked
-      }
-      if (verdict !== "ok") {
-        skipped++; // inconclusive — annotate but never fail the job
-        annotate("warning", file, unverifiedMessage(verdict, repo, c.ref));
-        continue; // can't reliably version-check either
-      }
-
-      // ref-version-mismatch (only when a trailing version comment is present)
-      if (c.comment) {
-        const want = await tagSha(repo, c.comment);
-        if (want && want.toLowerCase() !== sha.toLowerCase()) {
-          warnings++;
+        // impostor-commit
+        const verdict = await classifyCommit(repo, sha);
+        if (verdict === "impostor") {
+          errors++;
           annotate(
-            "warning",
+            "error",
             file,
-            `ref-version-mismatch: uses \`${c.ref}\` # ${c.comment} — ` +
-              `tag ${c.comment} of ${repo} is ${want.slice(0, 12)}`,
+            `impostor-commit: uses \`${c.ref}\` — SHA is not reachable from any ` +
+              `branch or tag of ${repo} (it only exists in a fork, or was never pushed)`,
           );
+          continue; // an impostor SHA can't meaningfully be version-checked
         }
+        if (verdict !== "ok") {
+          skipped++; // inconclusive — annotate but never fail the job
+          annotate("warning", file, unverifiedMessage(verdict, repo, c.ref));
+          continue; // can't reliably version-check either
+        }
+
+        // ref-version-mismatch (only when a trailing version comment is present)
+        if (c.comment) {
+          const want = await tagSha(repo, c.comment);
+          if (want && want.toLowerCase() !== sha.toLowerCase()) {
+            warnings++;
+            annotate(
+              "warning",
+              file,
+              `ref-version-mismatch: uses \`${c.ref}\` # ${c.comment} — ` +
+                `tag ${c.comment} of ${repo} is ${want.slice(0, 12)}`,
+            );
+          }
+        }
+      } catch (e) {
+        skipped++;
+        annotate(
+          "warning",
+          file,
+          `karinto-companion: error auditing \`${c?.ref ?? "candidate"}\`: ` +
+            `${String(e?.message || e)} — re-run to confirm`,
+        );
       }
     }
   }
