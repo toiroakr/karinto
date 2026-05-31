@@ -118,36 +118,41 @@ Both the production and staging Workers carry two crons, routed in
 - **`0 2 * * *` (daily)** refreshes the `api.github.com/meta` payload (key
   `meta`), consulted on the request path to exempt GitHub-hosted Actions runner
   IPs from the per-IP rate limit.
-- **`0 * * * *` (hourly)** runs the `archived-uses` sweep, maintaining the
-  archived `owner/repo` baseline (key `archived:list`) the request path reads.
-  There is no committed seed: candidates are discovered on the request path,
-  which enqueues each external `uses:` repo it sees into the D1 `pending`
-  worklist (`INSERT OR IGNORE`, off the hot path via `ctx.waitUntil`). Each
-  hourly run:
+- **`*/10 * * * *` (every 10 minutes)** runs the `archived-uses` sweep,
+  maintaining the archived `owner/repo` baseline (key `archived:list`) the
+  request path reads. There is no committed seed: candidates are discovered on
+  the request path, which enqueues each external `uses:` repo it sees into the
+  D1 `pending` worklist (`INSERT OR IGNORE`, off the hot path via
+  `ctx.waitUntil`). Each run:
     1. drains up to 1000 rows from `pending`,
     2. adds a small rotating slice of the *current* archived set, sized so the
-       whole set is re-verified roughly weekly across the hourly runs (this is
-       what catches un-archives),
+       whole set is re-verified roughly weekly across the runs (this is what
+       catches un-archives),
     3. confirms up to `ARCHIVED_CHECKS_PER_RUN` (40) of them against the GitHub
        API `archived` flag, stopping early on a 403/429,
     4. `DELETE`s **only the repos it actually resolved** — overflow, repos past
        the per-run cap, and the tail after a rate-limit stop stay queued for the
        next run (and are also re-enqueued by traffic),
-    5. publishes the updated archived set to KV.
+    5. publishes the archived set to KV **only when it changed** (an `archived`
+       flag flips rarely, so most runs are no-ops — this keeps KV writes far
+       under the Free-plan 1000/day even at 144 runs/day).
 
-  **Why hourly, capped at 40?** On the Workers **Free** plan a single
+  **Why every 10 min, capped at 40?** On the Workers **Free** plan a single
   invocation may make at most **50 subrequests** (shared with the daily meta
   fetch), so 40 leaves headroom — the cap is bounded by the subrequest limit,
-  not the GitHub quota. Throughput therefore comes from *frequency* (~40 × 24 ≈
-  960 checks/day) rather than batch size, and each hourly run also gets a fresh
-  GitHub rate-limit window. On **Workers Paid** (1000 subrequests) raise
-  `ARCHIVED_CHECKS_PER_RUN` in `cf/index.js`.
+  not the GitHub quota. Throughput therefore comes from *frequency*
+  (~40 × 144 ≈ 5760 checks/day) rather than batch size, and each run also gets a
+  fresh GitHub rate-limit window. On **Workers Paid** (1000 subrequests) raise
+  `ARCHIVED_CHECKS_PER_RUN` in `cf/index.js`; to change the cadence, edit both
+  `ARCHIVED_CRON` there and `triggers.crons` in `cf/wrangler.jsonc` (and keep
+  `CRON_RUNS_PER_DAY` in sync so the weekly rotation stays sized correctly).
 
   Setting the optional `GITHUB_TOKEN` Worker secret lifts the GitHub quota from
   the unauthenticated 60/hour (shared across Cloudflare's egress IPs, so
-  effectively less) to an authenticated 5000/hour, making the hourly runs
-  reliable. It does **not** raise the per-run cap (that's the subrequest limit).
-  To set it:
+  effectively less — at 40 checks/run the 10-minute cadence would otherwise
+  exhaust it) to an authenticated 5000/hour, making the frequent runs reliable.
+  It does **not** raise the per-run cap (that's the subrequest limit). To set
+  it:
 
   ```sh
   cd cf

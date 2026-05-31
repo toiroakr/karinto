@@ -82,22 +82,22 @@ const PENDING_ENQUEUE_MAX = 100;
 const PENDING_DRAIN_MAX = 1000;
 // Repos deleted per DELETE statement — kept under D1's bound-parameter cap.
 const PENDING_DELETE_CHUNK = 50;
-// Re-verify the whole archived set roughly every N days. The sweep runs once
-// per hour (see ARCHIVED_CRON), so the per-run rotation slice is sized over
+// Re-verify the whole archived set roughly every N days. The sweep runs every
+// 10 minutes (see ARCHIVED_CRON), so the per-run rotation slice is sized over
 // `ARCHIVED_ROTATION_DAYS * CRON_RUNS_PER_DAY` runs.
 const ARCHIVED_ROTATION_DAYS = 7;
-const CRON_RUNS_PER_DAY = 24;
+const CRON_RUNS_PER_DAY = 144; // every 10 minutes
 // Repos checked per cron run. The binding ceiling is the Workers Free-plan
-// subrequest limit — 50 per invocation, shared with the meta fetch on the
-// daily run — so this stays at 40 for headroom regardless of GITHUB_TOKEN: a
-// token lifts GitHub's hourly quota (60 → 5000) but not the subrequest limit.
-// Daily throughput comes from the hourly cadence (~40 × 24), not batch size.
-// On Workers Paid (1000 subrequests) this can be raised.
+// subrequest limit — 50 per invocation — so this stays at 40 for headroom
+// regardless of GITHUB_TOKEN: a token lifts GitHub's hourly quota (60 → 5000)
+// but not the subrequest limit. Daily throughput comes from the cadence
+// (~40 × 144 ≈ 5760), not batch size. On Workers Paid (1000 subrequests) this
+// can be raised.
 const ARCHIVED_CHECKS_PER_RUN = 40;
 // Cron schedules (must match cf/wrangler.jsonc `triggers.crons`). The meta
-// allow-list only needs a daily refresh; the archived sweep runs hourly.
+// allow-list only needs a daily refresh; the archived sweep runs every 10 min.
 const META_CRON = "0 2 * * *";
-const ARCHIVED_CRON = "0 * * * *";
+const ARCHIVED_CRON = "*/10 * * * *";
 
 export default {
   async fetch(request, env, ctx) {
@@ -154,11 +154,11 @@ export default {
   // Two crons (see cf/wrangler.jsonc). The daily META_CRON refreshes the
   // GitHub Actions IP allow-list so per-IP rate limiting can exempt CI
   // traffic; on fetch failure we leave whatever is already in KV (the request
-  // path falls back to a direct fetch if KV is empty). The hourly ARCHIVED_CRON
-  // drains the archived-uses worklist — running it every hour keeps each run
-  // under the Free-plan subrequest cap while still draining quickly, and gives
-  // each run a fresh GitHub rate-limit window. `event.cron` selects which runs;
-  // an unknown/absent cron (e.g. a manual trigger) runs both.
+  // path falls back to a direct fetch if KV is empty). The 10-minute
+  // ARCHIVED_CRON drains the archived-uses worklist — frequent small runs keep
+  // each one under the Free-plan subrequest cap while draining the backlog
+  // quickly. `event.cron` selects which runs; an unknown/absent cron (e.g. a
+  // manual trigger) runs both.
   async scheduled(event, env, ctx) {
     const cron = event?.cron;
     if (cron !== ARCHIVED_CRON) ctx.waitUntil(refreshMetaCache(env));
@@ -297,19 +297,25 @@ async function enqueuePending(env, repos) {
   if (batch.length) await env.DB.batch(batch);
 }
 
-// Hourly archived-status sweep. The D1 `pending` worklist (filled from request
-// traffic) supplies freshly-seen repos; a small rotating slice of the current
-// archived set is re-verified each run so the whole set cycles roughly weekly
-// (catching un-archives) without bursting past the API rate limit. Only the
-// repos actually resolved this run are deleted from `pending`; anything not
-// reached stays queued (and is also re-enqueued by traffic). The archived set
-// is published to KV (`archived:list`) for the request path. Set the optional
-// `GITHUB_TOKEN` Worker secret to lift the unauthenticated 60-req/hour GitHub
-// quota to 5000/hour (the per-run cap is bounded by the Worker subrequest
-// limit, not the token).
+// Archived-status sweep, run every 10 minutes. The D1 `pending` worklist
+// (filled from request traffic) supplies freshly-seen repos; a small rotating
+// slice of the current archived set is re-verified each run so the whole set
+// cycles roughly weekly (catching un-archives) without bursting past the API
+// rate limit. Only the repos actually resolved this run are deleted from
+// `pending`; anything not reached stays queued (and is also re-enqueued by
+// traffic). The archived set is published to KV (`archived:list`) for the
+// request path, but only when it changed. Set the optional `GITHUB_TOKEN`
+// Worker secret to lift the unauthenticated 60-req/hour GitHub quota to
+// 5000/hour (the per-run cap is bounded by the Worker subrequest limit, not
+// the token).
 async function refreshArchivedList(env) {
   if (!env?.KV) return;
   const archivedSet = new Set(await loadArchivedList(env).catch(() => []));
+  // Snapshot the current KV payload so we can skip the write when nothing
+  // changed. The sweep runs every 10 minutes but an `archived` flag flips
+  // rarely, so most runs are no-ops — and Workers Free caps KV at 1000
+  // writes/day, which a blind write-per-run would otherwise approach.
+  const before = JSON.stringify([...archivedSet].sort());
 
   let pending = [];
   if (env.DB) {
@@ -394,13 +400,16 @@ async function refreshArchivedList(env) {
     }
   }
 
-  await env.KV.put(ARCHIVED_KV_KEY, JSON.stringify([...archivedSet].sort()));
+  const after = JSON.stringify([...archivedSet].sort());
+  const written = after !== before;
+  if (written) await env.KV.put(ARCHIVED_KV_KEY, after);
   log("cron_archived_refreshed", {
     pending: pending.length,
     rotation: rotation.length,
     checked,
     archived: archivedSet.size,
     rateLimited,
+    written,
   });
 }
 

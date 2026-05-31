@@ -96,11 +96,11 @@
 				}
 			],
 			"triggers": {
-				// Daily meta allow-list refresh + hourly archived-uses sweep.
+				// Daily meta allow-list refresh + 10-minute archived-uses sweep.
 				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
 				"crons": [
 					"0 2 * * *",
-					"0 * * * *"
+					"*/10 * * * *"
 				]
 			},
 			"r2_buckets": [
@@ -141,11 +141,11 @@
 				}
 			],
 			"triggers": {
-				// Daily meta allow-list refresh + hourly archived-uses sweep.
+				// Daily meta allow-list refresh + 10-minute archived-uses sweep.
 				// index.js routes each on event.cron (see META_CRON/ARCHIVED_CRON).
 				"crons": [
 					"0 2 * * *",
-					"0 * * * *"
+					"*/10 * * * *"
 				]
 			}
 		}
