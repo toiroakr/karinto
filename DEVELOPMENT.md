@@ -122,10 +122,10 @@ Both the production and staging Workers also carry a daily cron
   committed seed) and confirmed against the GitHub API `archived` flag; the
   list self-heals as repos are un-archived. A per-repo result cache (key
   `archived:cache`, with last-checked timestamps) means each repo is queried at
-  most once per ~7 days while it's not archived (to catch newly-archived repos
-  reasonably promptly), and far less often (~180 days) once it is — un-archiving
-  is rare — no matter how often it shows up in traffic. Each run makes at most
-  200 API calls. Set the optional `GITHUB_TOKEN`
+  most once per day while it's not archived (≈ every cron run, to catch
+  newly-archived repos promptly), and far less often (~180 days) once it is —
+  un-archiving is rare — no matter how often it shows up in traffic. Each run
+  makes at most 200 API calls. Set the optional `GITHUB_TOKEN`
   Worker secret
   (`wrangler secret put GITHUB_TOKEN`) to lift the unauthenticated 60-req/hour
   GitHub API cap; without it the small seed still refreshes fine.
