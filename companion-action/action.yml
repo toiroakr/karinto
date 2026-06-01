@@ -31,13 +31,9 @@ inputs:
     required: false
     default: "error"
 
+# A `node20` action pins the runtime (Node 20) instead of depending on whatever
+# `node` happens to be on the runner's PATH, and reads inputs from the
+# `INPUT_*` env vars GitHub sets automatically (no shell step to inject into).
 runs:
-  using: composite
-  steps:
-    - run: node "$GITHUB_ACTION_PATH/audit.mjs"
-      shell: bash
-      env:
-        KARINTO_URL: ${{ inputs.karinto-url }}
-        FILES: ${{ inputs.files }}
-        GH_TOKEN: ${{ inputs.github-token }}
-        FAIL_ON: ${{ inputs.fail-on }}
+  using: node20
+  main: audit.mjs

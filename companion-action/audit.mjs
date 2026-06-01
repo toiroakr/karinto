@@ -15,11 +15,18 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-const KARINTO_URL = process.env.KARINTO_URL || "https://karinto.toiroakr.workers.dev";
-const TOKEN = process.env.GH_TOKEN || "";
+// Read an action input. As a `node20` action GitHub exposes inputs as
+// `INPUT_<NAME>` (name uppercased, spaces → `_`); fall back to a plain env var
+// so the script is still runnable standalone (and in tests).
+const input = (name, envFallback) =>
+  process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] ??
+  (envFallback ? process.env[envFallback] : undefined);
+
+const KARINTO_URL = input("karinto-url", "KARINTO_URL") || "https://karinto.toiroakr.workers.dev";
+const TOKEN = input("github-token", "GH_TOKEN") || "";
 // Validate fail-on so a typo (e.g. "errors") can't silently mean "never fail".
 const FAIL_ON_VALUES = ["error", "warning", "none"];
-const FAIL_ON_RAW = (process.env.FAIL_ON || "error").toLowerCase();
+const FAIL_ON_RAW = (input("fail-on", "FAIL_ON") || "error").toLowerCase();
 const FAIL_ON = FAIL_ON_VALUES.includes(FAIL_ON_RAW) ? FAIL_ON_RAW : "error";
 if (FAIL_ON !== FAIL_ON_RAW) {
   console.log(
@@ -47,7 +54,7 @@ async function listWorkflowFiles() {
 }
 
 function resolveFiles() {
-  const raw = (process.env.FILES || "").trim();
+  const raw = (input("files", "FILES") || "").trim();
   if (!raw) return listWorkflowFiles();
   return Promise.resolve(
     raw
