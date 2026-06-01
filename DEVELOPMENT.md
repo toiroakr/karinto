@@ -211,7 +211,9 @@ GitHub Actions wiring:
   vendored upstream fixtures and the matching upstream linter binary, and
   compares the diagnostics they emit (per-rule for zizmor / ghalint, source-
   level aggregate for actionlint). Fails PRs on divergence; on `main` runs
-  in soft mode (informational only).
+  in soft mode (informational only). Also triggers when the maintainer adds
+  the `run-parity` label, the manual hook for token-created refresh PRs that
+  don't auto-run `pull_request` workflows.
 - `.github/workflows/upstream-refresh.yml` — weekly cron (Monday 00:00 UTC)
   that checks GitHub for newer actionlint / zizmor / ghalint releases. When
   found, bumps `mise.toml` and re-vendors `fixtures/upstream/<tool>/` from
@@ -555,6 +557,11 @@ by file alone, so the allowlist degrades gracefully as fixtures change.
 The PR body carries, per bump: a `compare/v<from>...<to>` link, a
 release-notes excerpt, and an incorporation checklist (added by
 `refresh.mjs` → the workflow's PR-body step).
+
+Because the PR is opened with `GITHUB_TOKEN`, GitHub does not start the
+`pull_request`-triggered `upstream-parity.yml` for it. Add the `run-parity`
+label (maintainer only) to run the behavioural diff; the label is removed
+after the run so re-adding it re-triggers.
 
 ### Incorporating a new upstream check
 

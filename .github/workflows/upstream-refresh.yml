@@ -2,8 +2,10 @@ name: upstream-refresh
 
 # Weekly check (Monday 00:00 UTC) for new actionlint / zizmor / ghalint
 # releases. When found, bumps mise.toml and re-vendors fixtures from the
-# matching tag, then opens a PR. The PR auto-triggers upstream-parity.yml
-# so a real behavioural diff fails before the bump can merge.
+# matching tag, then opens a PR. The PR is opened with GITHUB_TOKEN, so it
+# does NOT auto-trigger upstream-parity.yml (GitHub suppresses workflows for
+# token-created events); add the `run-parity` label to run the behavioural
+# diff before merging the bump.
 on:
   schedule:
     - cron: '0 0 * * 1'
@@ -48,7 +50,7 @@ jobs:
               }
             '
             echo
-            echo 'Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. The `upstream-parity` workflow runs on this PR — its step summary lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.'
+            echo 'Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.'
             echo
             echo '## Upstream release notes'
             node -e '
@@ -65,7 +67,7 @@ jobs:
             echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), follow the incorporation flow in [`DEVELOPMENT.md`](../../DEVELOPMENT.md#incorporating-a-new-upstream-check):'
             echo
             echo '- [ ] Reviewed the `compare` diff + release notes above for new / changed checks.'
-            echo '- [ ] Checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
+            echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
             echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
             echo '- [ ] `moon test` + local parity pass.'
           } > pr-body.md

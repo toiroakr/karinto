@@ -5,8 +5,15 @@ name: upstream-parity
 # aggregate (actionlint). See scripts/upstream-parity/compare.mjs for the
 # diff classification. Tool versions and fixtures are kept in lockstep via
 # mise.toml + the weekly upstream-refresh workflow.
+#
+# Trigger note: the weekly upstream-refresh PR is opened with GITHUB_TOKEN,
+# and GitHub does not start `pull_request` workflows for token-created
+# events. So that PR won't auto-run parity. Adding the `run-parity` label
+# (maintainer only — see the job `if`) is the manual escape hatch; the label
+# is removed after the run so re-adding it re-triggers.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - .github/workflows/upstream-parity.yml
       - mise.toml
@@ -30,9 +37,21 @@ on:
 
 jobs:
   parity:
+    # Every event runs as before, except a `labeled` event runs only for the
+    # `run-parity` trigger label added by the maintainer. This keeps the
+    # manual escape hatch (for token-created refresh PRs) restricted while
+    # leaving the normal opened/synchronize/push checks untouched.
+    if: >-
+      github.event.action != 'labeled'
+      || (github.event.label.name == 'run-parity'
+          && github.event.sender.login == 'toiroakr')
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # `gh pr edit --remove-label` (below) goes through the Issues API, so it
+      # needs pull-requests + issues write on top of the read-only checkout.
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v6
 
@@ -75,3 +94,14 @@ jobs:
             --zizmor     "${{ steps.bins.outputs.zizmor }}" \
             --ghalint    "${{ steps.bins.outputs.ghalint }}" \
             ${{ github.event_name == 'push' && '--soft' || '' }}
+
+      - name: Remove trigger label
+        # Drop the label even if the comparison failed, so re-adding it always
+        # re-runs the check. Only relevant when the run was label-triggered.
+        if: always() && github.event.action == 'labeled'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --remove-label run-parity
