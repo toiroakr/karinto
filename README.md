@@ -13,7 +13,7 @@ Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
-61 of 82 catalogued rules are active. They cover syntax, expression typing
+68 of 83 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
@@ -41,7 +41,16 @@ under arbitrary path prefixes.
 | `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected. Hex-shaped refs are accepted at face value — a short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
 | `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
+| `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
+| `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
+
+`forbidden` / `archived` accept at most 200 comma-separated entries of 256
+characters each. The response also carries `online_audit_candidates` — the
+external `uses:` refs that need a live GitHub API lookup (`impostor-commit`,
+`ref-version-mismatch`). karinto does not resolve those; a companion action
+([`companion-action/`](companion-action/)) checks them and reports directly.
+See [*Action-side context*](docs/action-context.md) for the full flow.
 
 ### Examples
 

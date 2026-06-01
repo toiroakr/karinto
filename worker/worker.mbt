@@ -2,11 +2,11 @@
 /// JS entry point for the Cloudflare Worker.
 ///
 /// Takes the YAML content, file kind hint (`"workflow"` | `"action"` | `""`),
-/// a comma-separated `disable` glob list, plus several CSV inputs that feed
+/// a comma-separated `disable` glob list, plus a few CSV inputs that feed
 /// rules whose verdict depends on data the caller must resolve out-of-band
 /// (typically via the GitHub / OSV.dev APIs). `vuln_uses_str` is a required
 /// positional parameter (callers pass `""` when they have nothing to feed
-/// `known-vulnerable-actions`); the remaining four CSVs default to `""`.
+/// `known-vulnerable-actions`); the remaining CSVs default to `""`.
 /// When a CSV is empty the *caller-supplied augmentation* goes dormant —
 /// rules with an offline baseline (e.g. `archived-uses` ships a hardcoded
 /// `actions/setup-ruby` entry) still fire on their built-in entries.
@@ -15,18 +15,14 @@
 ///                            (`known-vulnerable-actions`)
 ///   * `forbidden_uses_str` — denylist globs for `forbidden-uses`
 ///   * `archived_uses_str`  — refs whose repo is archived (`archived-uses`)
-///   * `impostor_uses_str`  — `owner/repo@sha` confirmed impostor commits
-///                            (`impostor-commit`)
-///   * `ref_mismatches_str` — `owner/repo@sha` whose pinned SHA does not
-///                            match the version named in the trailing
-///                            comment (`ref-version-mismatch`)
 ///
-/// The Cloudflare Worker HTTP handler (`cf/index.js`) currently only wires
-/// `vuln_uses_str` (populated from OSV.dev when the request sets `osv=1`).
-/// The remaining inputs are part of `lint_string`'s contract so callers
-/// embedding the Worker directly — tests, the dark-launch replayer,
-/// downstream integrations — can supply them; HTTP routing for them is a
-/// future change.
+/// The Cloudflare Worker HTTP handler (`cf/index.js`) wires every input.
+/// `vuln_uses_str` is populated from OSV.dev when the request sets `osv=1`;
+/// `archived_uses_str` is merged from a KV-cached baseline plus the request's
+/// `archived` parameter; `forbidden_uses_str` comes from the `forbidden`
+/// parameter. The online `impostor-commit` / `ref-version-mismatch` audits
+/// are NOT handled here — they are delegated to the companion action, which
+/// resolves them via the GitHub API and reports findings directly.
 ///
 /// Returns a JSON string with the lint diagnostics and metadata.
 
@@ -38,8 +34,6 @@ pub fn lint_string(
   vuln_uses_str : String,
   forbidden_uses_str? : String = "",
   archived_uses_str? : String = "",
-  impostor_uses_str? : String = "",
-  ref_mismatches_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -50,8 +44,6 @@ pub fn lint_string(
   let vuln_uses = split_csv(vuln_uses_str)
   let forbidden_uses = split_csv(forbidden_uses_str)
   let archived_uses = split_csv(archived_uses_str)
-  let impostor_uses = split_csv(impostor_uses_str)
-  let ref_mismatches = split_csv(ref_mismatches_str)
   let result = @karinto.lint(
     content,
     kind~,
@@ -59,8 +51,6 @@ pub fn lint_string(
     vuln_uses~,
     forbidden_uses~,
     archived_uses~,
-    impostor_uses~,
-    ref_mismatches~,
   )
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),

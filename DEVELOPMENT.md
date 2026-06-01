@@ -6,7 +6,7 @@
 .                             # MoonBit library package — the lint engine
 ├── karinto.mbt               # public API: types, lint(), helpers
 ├── rules.mbt                 # rule registry + implemented rules
-├── rules_catalog.mbt         # full catalogue (82 rules, metadata + origins)
+├── rules_catalog.mbt         # full catalogue (83 rules, metadata + origins)
 ├── karinto_test.mbt          # blackbox tests for implemented rules + engine
 ├── actionlint_rules_test.mbt # fixtures for actionlint-derived rules
 ├── zizmor_rules_test.mbt     # fixtures for zizmor audits
@@ -44,14 +44,14 @@ Run locally:
 ```sh
 cd cf
 npm install        # installs wrangler
-npm run dev        # `wrangler dev`
+npm run dev        # render-config + `wrangler dev --config wrangler.deploy.jsonc`
 ```
 
 Deploy:
 
 ```sh
 cd cf
-npm run deploy     # `wrangler deploy`
+npm run deploy     # render-config + `wrangler deploy --config wrangler.deploy.jsonc`
 ```
 
 Smoke-check the deployed Worker (3 curl-driven response paths):
@@ -80,10 +80,10 @@ entry carries an ID, human-readable title, source family (actionlint /
 zizmor / ghalint), upstream origins, category, severity, priority,
 implementation status, and which file kinds it applies to.
 
-Of 82 catalogued rules, 61 are implemented; 17 are scaffolded as
+Of 83 catalogued rules, 68 are implemented; 8 are `Planned` — scaffolded as
 `#skip(...)`-attributed test cases in the per-source `*_rules_test.mbt`
 files (each ships fixture YAML and expected JSON so the behavioural spec
-is in place, ready to be filled in); 4 are marked `NotPlanned` —
+is in place, ready to be filled in); 7 are marked `NotPlanned` —
 deliberately out of scope and carry no fixture. The full per-rule
 rationale lives in [`rules_catalog.md`](rules_catalog.md).
 
@@ -112,13 +112,76 @@ Three application Workers, one per environment, plus a maintenance Worker:
 | Preview | `karinto-pr-<N>` | `https://karinto-pr-<N>.toiroakr.workers.dev` | `pull_request` (cleaned up on close) |
 | Captures (dark-launch) | `karinto-captures` | _(no public URL — `workers_dev: false`)_ | deployed with each release; cron-only Worker, runs every 6 hours. **Primary retention:** the R2 dashboard lifecycle rule (30 days). **Secondary safety net:** when the first 200k listed objects already total ≥ 7000 MiB (≈ 6.84 GiB), the Worker prunes oldest-first back to ≈ 4.79 GiB. Buckets with many small objects whose listed subset stays under that limit are left to the lifecycle rule. |
 
-Both the production and staging Workers also carry a daily cron
-(`0 2 * * *`) that refreshes the cached `api.github.com/meta` payload in
-KV. The request path consults that cache to exempt GitHub-hosted Actions
-runner IPs from the per-IP rate limit. Preview Workers inherit neither
-the cron nor the R2 binding (the top-level `cf/wrangler.jsonc` omits both
-on purpose), so they read from the shared KV but never refresh it and
-can't write into the captures bucket.
+The production and staging Workers carry a single daily cron (`0 2 * * *`) that
+refreshes the `api.github.com/meta` payload (key `meta`), consulted on the
+request path to exempt GitHub-hosted Actions runner IPs from the per-IP rate
+limit.
+
+The archived `owner/repo` baseline for `archived-uses` is **not** verified by
+the Worker — doing GitHub API lookups from the Worker would fight the Workers
+**Free** plan's ~50-subrequest-per-invocation limit and the unauthenticated
+60-req/hour quota (shared across Cloudflare's egress IPs). Instead it is kept in
+two synced places and the work is split:
+
+- The baseline lives in committed **`cf/archived.json`** (source of truth,
+  reviewable in git, **bundled into the Worker** as a seed) and mirrored to KV
+  **`archived:list`** (read live on the request path for immediacy).
+- **Worker (request path)** discovers candidates and reads the baseline: it
+  enqueues each external `uses:` repo it serves into the D1 `pending` worklist
+  (`INSERT OR IGNORE`, off the hot path via `ctx.waitUntil`), and feeds the rule
+  the union of the bundled `cf/archived.json` seed, the live KV value (memoized
+  per-isolate, fail-open), the engine's hardcoded baseline, and the caller's
+  `archived` parameter.
+- **CI (`.github/workflows/refresh-archived.yml`, daily)** does the verifying:
+  `scripts/refresh-archived.mjs` reads the current baseline from
+  `cf/archived.json` + drains `pending`, confirms each repo's `archived` flag
+  against the GitHub API (re-checking the existing baseline too, so un-archives
+  are caught), and when it changed writes the result to **both** KV (immediately,
+  so prod reflects it now) and `cf/archived.json` (the workflow opens a PR with
+  it via `create-pull-request`; merging updates the bundled seed on the next
+  deploy). It then `DELETE`s the repos it resolved from `pending`; anything it
+  couldn't reach (rate-limit tail, transient error) stays queued and is
+  re-enqueued by traffic.
+
+  GitHub Actions has a full 5000-req/hour budget (with a token) and no
+  subrequest ceiling, so a single daily run comfortably re-verifies the whole
+  set. The job runs with the workflow's `github.token` (1000 req/hour, enough to
+  read public repos' `archived` flag); set the optional `ARCHIVED_REFRESH_TOKEN`
+  repo secret to a public-read PAT to get the full 5000/hour. The job is skipped
+  on deployments without D1 (`if: vars.D1_DATABASE_ID != ''`).
+
+  > Because the baseline lives in KV out-of-band, `archived-uses` findings are
+  > excluded from the dark-launch replay diff (see
+  > `scripts/diff-rules/2026-05-archived-uses-baseline.mjs`): the KV set can
+  > differ between capture and replay independently of any code change.
+
+The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
+provisioned once. Its `database_id` is **not** committed: `cf/wrangler.jsonc`
+keeps the placeholder `REPLACE_WITH_D1_DATABASE_ID`, and the real id lives in
+the `D1_DATABASE_ID` repo variable (same self-host stance as
+`CLOUDFLARE_ACCOUNT_ID` and the R2 bucket name). At deploy time
+`scripts/prepare-wrangler-d1.mjs` renders a throwaway `cf/wrangler.deploy.jsonc`
+with the id substituted in; deploys pass `--config wrangler.deploy.jsonc`. If
+`D1_DATABASE_ID` is unset (e.g. a fork that hasn't provisioned D1) the script
+drops the binding and the Worker no-ops its archived sweep (`cf/index.js`
+guards every `env.DB` use).
+
+```sh
+cd cf
+wrangler d1 create karinto-archived          # note the printed database id
+gh variable set D1_DATABASE_ID --body "<database id>"   # NOT into wrangler.jsonc
+# Apply the migration. wrangler reads the id from config, so render it first:
+D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
+wrangler d1 migrations apply karinto-archived --config wrangler.deploy.jsonc --remote
+```
+
+A fork wires up its own D1 the same way: create the database on its own
+Cloudflare account and set that account's id in its `D1_DATABASE_ID` repo
+variable. Nothing in the tracked config changes.
+
+Preview Workers inherit neither the cron nor the R2 binding (the top-level
+`cf/wrangler.jsonc` omits both on purpose), so they read from the shared KV
+but never refresh it and can't write into the captures bucket.
 
 GitHub Actions wiring:
 
@@ -130,6 +193,11 @@ GitHub Actions wiring:
   the PR closes.
 - `.github/workflows/deploy-staging.yml` — deploys to staging on every push
   to `main`.
+- `.github/workflows/refresh-archived.yml` — daily cron that runs
+  `scripts/refresh-archived.mjs` to maintain the `archived-uses` baseline
+  (drains the D1 worklist, verifies repos against the GitHub API, writes the
+  live KV key and opens a PR updating committed `cf/archived.json`). Skipped
+  when `vars.D1_DATABASE_ID` is unset.
 - `.github/workflows/release.yml` — runs on every push to `main` via
   `changesets/action`. When pending changesets are present it opens (or
   updates) a "chore: release" PR that consumes them, bumps versions, and
@@ -172,9 +240,11 @@ action keeps a "chore: release" PR open that previews the next version.
 2. Merge it. On the resulting push to `main`, the `release` workflow runs
    `scripts/release-publish.sh`:
    - `moon update && moon test && moon build --target js --release`
-   - `cd cf && npm ci && npx wrangler deploy`
+   - `cd cf && npm ci`, then `node ../scripts/prepare-wrangler-d1.mjs` to inject
+     the `D1_DATABASE_ID` and `npx wrangler deploy --config wrangler.deploy.jsonc
+     --env production`
    - `bash cf/smoke.sh` against `https://karinto.toiroakr.workers.dev`
-   - `npx wrangler deploy --env="" --name karinto-vX-Y-Z` — an immutable
+   - `npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name karinto-vX-Y-Z` — an immutable
      snapshot Worker for the released version (`.` → `-` in the name),
      smoke-checked at `https://karinto-vX-Y-Z.toiroakr.workers.dev`. Uses the
      top-level config (like PR previews) so it has no CAPTURES binding and no
@@ -201,16 +271,19 @@ action keeps a "chore: release" PR open that previews the next version.
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
 | `R2_ACCESS_KEY_ID` (optional) | Created in CF Dashboard → R2 → Manage R2 API Tokens. Scoped to **read-only** on the `karinto-captures` bucket. Enables the PR dark-launch replay step. |
 | `R2_SECRET_ACCESS_KEY` (optional) | The matching secret from the same R2 API token. |
+| `ARCHIVED_REFRESH_TOKEN` (optional) | A GitHub PAT with public read access (classic `public_repo`, or a fine-grained token with no extra scopes). Lets `refresh-archived.yml` use the 5000-req/hour quota instead of the job token's 1000/hour. Only needed if the worklist outgrows 1000 checks/day. |
 
 ### Optional GitHub variables
 
-Tuning knobs for the dark-launch flow. All are repo-level **variables** (not
-secrets — non-sensitive integers), set under Settings → Secrets and
-variables → Actions → Variables. Unset values fall back to the defaults
-hardcoded in the Worker / workflow.
+Repo-level **variables** (not secrets — non-sensitive values), set under
+Settings → Secrets and variables → Actions → Variables. The dark-launch knobs
+are integers that fall back to the defaults hardcoded in the Worker / workflow
+when unset; `D1_DATABASE_ID` is the one deployment identifier (unset → the D1
+binding is dropped, see below).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
+| `D1_DATABASE_ID` | _(none)_ | D1 database id for the archived-uses worklist, injected into the deploy config by `scripts/prepare-wrangler-d1.mjs`. Unset → the `DB` binding is dropped from every deploy and the archived sweep stays dormant (`cf/index.js` no-ops when `env.DB` is absent). |
 | `REPLAY_LIMIT` | 200 | Captures replayed per CI run (both auto-on-open and label-triggered). |
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |
 | `CAPTURES_SIZE_LIMIT_MIB` | 7000 (≈ 6.84 GiB) | Bucket size that triggers prune in the `karinto-captures` cron Worker. |
@@ -348,10 +421,19 @@ npx wrangler r2 bucket create karinto-captures
 gh secret set R2_ACCESS_KEY_ID     -b "<access key id>"
 gh secret set R2_SECRET_ACCESS_KEY -b "<secret access key>"
 
-# 5. Deploy the prod linter (with binding) + captures Worker. Normally this
+# 5. Provision the D1 worklist and stash its id in the D1_DATABASE_ID repo
+#    variable (NOT in wrangler.jsonc — see "Environments and release flow"):
+npx wrangler d1 create karinto-archived          # note the printed database id
+gh variable set D1_DATABASE_ID --body "<database id>"
+D1_DATABASE_ID="<database id>" node ../scripts/prepare-wrangler-d1.mjs
+npx wrangler d1 migrations apply karinto-archived --config wrangler.deploy.jsonc --remote
+
+# 6. Deploy the prod linter (with binding) + captures Worker. Normally this
 #    happens via the release workflow, but the first time you can run:
 npm ci
-npx wrangler deploy --env production
+export D1_DATABASE_ID="<database id>"            # injected into the deploy config
+node ../scripts/prepare-wrangler-d1.mjs
+npx wrangler deploy --config wrangler.deploy.jsonc --env production
 npx wrangler deploy --config wrangler.maintenance.jsonc
 ```
 

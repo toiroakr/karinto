@@ -36,13 +36,21 @@ jobs:
         working-directory: cf
         run: npm ci
 
+      # Inject the D1 database_id into a throwaway wrangler.deploy.jsonc; the
+      # tracked wrangler.jsonc keeps the placeholder. Unset var → no D1 binding.
+      - name: Render deploy config
+        working-directory: cf
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+        run: node ../scripts/prepare-wrangler-d1.mjs
+
       - name: Deploy staging Worker
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cf
-          command: deploy --env staging
+          command: deploy --config wrangler.deploy.jsonc --env staging
 
       - name: Smoke check
         working-directory: cf

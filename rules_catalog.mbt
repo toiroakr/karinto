@@ -67,8 +67,9 @@ pub(all) struct RuleSpec {
 /// The full catalogue: 83 rules spanning actionlint (37), zizmor (36) and
 /// ghalint (10). 4 deliberate consolidations are recorded in `origins`
 /// (zizmor entries that also absorb the matching actionlint or ghalint
-/// check), and 5 rules are marked `NotPlanned` (out of scope, see status
-/// comments below).
+/// check), and 7 rules are marked `NotPlanned` (out of scope, see status
+/// comments below — including impostor-commit and ref-version-mismatch, whose
+/// online resolution is delegated to the companion action).
 pub fn all_rule_specs() -> Array[RuleSpec] {
   [
     // -----------------------------------------------------------------------
@@ -708,6 +709,10 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       false,
     ),
+    // impostor-commit: NotPlanned in karinto-core. Confirming a pinned SHA's
+    // repo membership needs live GitHub API calls per `repo@sha`, which the
+    // edge linter does not do. Detection is delegated to the companion action
+    // (see docs/action-context.md), which reports findings directly.
     spec(
       "impostor-commit",
       "SHA not in claimed repo (network)",
@@ -716,7 +721,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       SupplyChain,
       Error,
       High,
-      Implemented,
+      NotPlanned,
       true,
       false,
     ),
@@ -795,6 +800,10 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       true,
     ),
+    // ref-version-mismatch: NotPlanned in karinto-core. Resolving a tag to its
+    // SHA to compare against the trailing `# vN` comment needs live GitHub API
+    // calls, which the edge linter does not do. Detection is delegated to the
+    // companion action (see docs/action-context.md), which reports directly.
     spec(
       "ref-version-mismatch",
       "Pinned-SHA comment vs actual tag",
@@ -803,7 +812,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       BestPractice,
       Warning,
       Low,
-      Implemented,
+      NotPlanned,
       true,
       false,
     ),

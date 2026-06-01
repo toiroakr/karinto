@@ -1,0 +1,73 @@
+name: refresh-archived
+
+# Maintain the `archived-uses` baseline. The Worker enqueues every external
+# `uses:` repo it serves into the D1 `pending` worklist; this job verifies them
+# against the GitHub API (no Worker subrequest/rate-limit ceilings here), writes
+# the live KV key `archived:list` directly, and opens a PR with the updated
+# committed `cf/archived.json` (source of truth, bundled into the Worker as a
+# seed). See scripts/refresh-archived.mjs.
+
+on:
+  schedule:
+    # Daily, offset from the Worker's 02:00 meta cron.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-archived
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # No D1 provisioned (e.g. a fork) → no worklist to drain; skip cleanly.
+    if: vars.D1_DATABASE_ID != ''
+    permissions:
+      contents: write # create-pull-request commits cf/archived.json to a branch
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cf/package-lock.json
+
+      - name: Install cf deps
+        working-directory: cf
+        run: npm ci
+
+      - name: Render deploy config
+        working-directory: cf
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+        run: node ../scripts/prepare-wrangler-d1.mjs
+
+      - name: Refresh archived baseline
+        working-directory: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # A PAT (5000 req/hr) if provided, else the job token (1000/hr) —
+          # both can read a public repo's `archived` flag.
+          GH_TOKEN: ${{ secrets.ARCHIVED_REFRESH_TOKEN || github.token }}
+        run: node ../scripts/refresh-archived.mjs
+
+      # KV is already updated above (prod sees it immediately). Open/refresh a PR
+      # with the committed cf/archived.json so the change is reviewable and the
+      # Worker's bundled seed picks it up on the next deploy. No diff → no PR.
+      - name: Open PR for baseline change
+        uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: cf/archived.json
+          branch: chore/refresh-archived
+          base: main
+          title: 'chore: refresh archived-uses baseline'
+          commit-message: 'chore: refresh archived-uses baseline'
+          labels: skip-changeset
+          body: |
+            Automated update of the `archived-uses` baseline by
+            `refresh-archived.yml`. KV (`archived:list`) is already updated, so
+            production reflects this now; merging commits the reviewable
+            `cf/archived.json` seed that the Worker bundles on the next deploy.

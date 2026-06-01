@@ -132,11 +132,27 @@ Cloudflare account.
      dark-launch capture store and isn't useful for self-hosters.
    - Remove `env.production.triggers` unless you want the daily
      `api.github.com/meta` refresh cron.
+   - Remove the `d1_databases` blocks unless you want the `archived-uses`
+     worklist. To keep them, leave the `REPLACE_WITH_D1_DATABASE_ID`
+     placeholder in place and let the deploy step below inject your id (see
+     below); the Worker no-ops the sweep when the `DB` binding is absent.
 
 5. **Deploy:**
 
+   If you removed the `d1_databases` blocks:
+
    ```sh
    npx wrangler deploy --env=""
+   ```
+
+   If you kept them, create the database and inject your id into a throwaway
+   deploy config first (`prepare-wrangler-d1.mjs` substitutes the placeholder):
+
+   ```sh
+   npx wrangler d1 create karinto-archived          # note the printed id
+   export D1_DATABASE_ID="<your database id>"
+   node ../scripts/prepare-wrangler-d1.mjs
+   npx wrangler deploy --env="" --config wrangler.deploy.jsonc
    ```
 
 6. **Point CI at your URL:**

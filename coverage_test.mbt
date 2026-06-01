@@ -28,10 +28,13 @@ fn tested_rule_ids() -> Array[String] {
      "anonymous-definition", "archived-uses", "artipacked", "bot-conditions", "cache-poisoning",
     "concurrency-limits", "dangerous-triggers", "dependabot-cooldown", "dependabot-execution",
     "excessive-permissions", "forbidden-uses", "github-app", "github-env", "hardcoded-container-credentials",
-    "impostor-commit", "insecure-commands", "known-vulnerable-actions", "misfeature",
+    "insecure-commands", "known-vulnerable-actions", "misfeature",
     "obfuscation", "overprovisioned-secrets",
-    // ref-confusion: NotPlanned (SHA pins already mandated by `unpinned-uses`).
-     "ref-version-mismatch", "secrets-inherit", "secrets-outside-env", "self-hosted-runner",
+    // impostor-commit & ref-confusion & ref-version-mismatch: NotPlanned.
+    // impostor-commit / ref-version-mismatch are delegated to the companion
+    // action (online GitHub API resolution); ref-confusion is mooted by the
+    // SHA pins already mandated by `unpinned-uses`.
+     "secrets-inherit", "secrets-outside-env", "self-hosted-runner",
     // stale-action-refs: NotPlanned (GitHub API cost not worth informational signal).
      "superfluous-actions", "template-injection", "undocumented-permissions", "unpinned-images",
     "unpinned-tools", "unpinned-uses", "unredacted-secrets", "unsound-condition",

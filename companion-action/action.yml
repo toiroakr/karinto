@@ -1,0 +1,40 @@
+name: "karinto online audits"
+description: >-
+  Companion to the karinto linter for the audits that need live GitHub API
+  access (impostor-commit, ref-version-mismatch). karinto returns the
+  `online_audit_candidates`; this action resolves them and reports findings.
+author: "karinto"
+
+inputs:
+  karinto-url:
+    description: "karinto endpoint that returns online_audit_candidates."
+    required: false
+    default: "https://karinto.toiroakr.workers.dev"
+  files:
+    description: >-
+      Newline- or comma-separated workflow / action YAML paths to audit. When
+      empty, every `*.yml` / `*.yaml` under `.github/workflows/` is scanned.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token for the GitHub API lookups (commit reachability, tags). The default
+      reads public repos and this workflow's own repo; to audit a `uses:` that
+      points at a private action in another repo, pass a token (PAT / GitHub App)
+      with read access to it.
+    required: false
+    default: ${{ github.token }}
+  fail-on:
+    description: >-
+      Severity that fails the job: `error` (default, impostor-commit only),
+      `warning` (also ref-version-mismatch), or `none`.
+    required: false
+    default: "error"
+
+# A `node24` action pins the runtime (Node 24, the newest GitHub Actions
+# offers — node26 is not a valid runner runtime) instead of depending on
+# whatever `node` happens to be on the runner's PATH, and reads inputs from the
+# `INPUT_*` env vars GitHub sets automatically (no shell step to inject into).
+runs:
+  using: node24
+  main: audit.mjs

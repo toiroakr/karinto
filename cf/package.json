@@ -5,8 +5,9 @@
   "private": true,
   "scripts": {
     "build": "cd .. && moon build --target js --release",
-    "dev": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
+    "render-config": "node ../scripts/prepare-wrangler-d1.mjs",
+    "dev": "npm run build && npm run render-config && wrangler dev --config wrangler.deploy.jsonc",
+    "deploy": "npm run build && npm run render-config && wrangler deploy --config wrangler.deploy.jsonc",
     "smoke": "bash smoke.sh"
   },
   "devDependencies": {
