@@ -1,5 +1,23 @@
 # karinto
 
+## 0.6.0
+
+### Minor Changes
+
+- [#26](https://github.com/toiroakr/karinto/pull/26) [`ce5b640`](https://github.com/toiroakr/karinto/commit/ce5b64034f42d4f692bf4880f100b5aad572a897) Thanks [@toiroakr](https://github.com/toiroakr)! - Action-side online audits, split by how cacheable the underlying fact is.
+
+  - `archived-uses`: the request path enqueues seen external `uses:` repos into
+    a D1 worklist; a daily CI job (`refresh-archived.yml`) drains it, confirms
+    each against the GitHub API `archived` flag, re-verifies the existing set on
+    every run, and writes the baseline to both KV (live) and committed
+    `cf/archived.json` (bundled into the Worker as a seed, updated via PR). Add
+    `forbidden` and `archived` request parameters.
+  - New `online_audit_candidates` field on every response: the SHA-pinned refs
+    (with any trailing `# vN` comment) that need a live GitHub API lookup.
+  - `impostor-commit` / `ref-version-mismatch` move out of karinto-core
+    (`Not planned`) to the new `companion-action/`, which resolves them via the
+    GitHub API and reports findings directly.
+
 ## 0.5.0
 
 ### Minor Changes
