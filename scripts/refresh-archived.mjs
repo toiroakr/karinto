@@ -1,33 +1,38 @@
 #!/usr/bin/env node
-// Maintain the `archived-uses` baseline (KV key `archived:list`) from CI.
+// Maintain the `archived-uses` baseline from CI. The baseline lives in two
+// places kept in sync: the committed `cf/archived.json` (source of truth,
+// reviewable, bundled into the Worker as a seed) and KV `archived:list` (read
+// live on the request path for prod immediacy).
 //
-// The Worker can't do this itself: on the Workers Free plan a single
-// invocation is capped at ~50 subrequests and unauthenticated GitHub calls
-// share Cloudflare's egress IP (60 req/hour, effectively less). So instead the
+// The Worker can't verify archived status itself: on the Workers Free plan a
+// single invocation is capped at ~50 subrequests and unauthenticated GitHub
+// calls share Cloudflare's egress IP (60 req/hour, effectively less). So the
 // Worker just enqueues every external `uses:` repo it serves into the D1
 // `pending` worklist, and this job — run from GitHub Actions, where the API
-// budget is a full 5000 req/hour and there is no subrequest ceiling — does the
-// actual verification:
+// budget is a full 5000 req/hour and there is no subrequest ceiling — verifies:
 //
-//   1. read the current KV baseline + drain the D1 `pending` worklist,
+//   1. read the current baseline from cf/archived.json + drain the D1 worklist,
 //   2. confirm each repo's `archived` flag against the GitHub API
 //      (re-checking the existing baseline too, so un-archives are caught),
-//   3. write the updated baseline back to KV (only when it changed),
+//   3. when it changed, write the updated baseline to BOTH cf/archived.json
+//      (the workflow opens a PR with it) and KV (live, prod-immediate),
 //   4. DELETE the resolved repos from `pending` — anything we couldn't reach
 //      (rate-limit tail, transient error) stays queued for the next run and is
 //      re-enqueued by traffic regardless.
 //
 // Run from `cf/` so the `wrangler --config wrangler.deploy.jsonc` calls pick up
-// the rendered config (D1 id injected, KV binding). Required env:
+// the rendered config (D1 id injected, KV binding) and cf/archived.json is in
+// cwd. Required env:
 //   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID — D1 + KV write scope.
 //   GH_TOKEN — GitHub token for the API (Actions `github.token` or a PAT).
 import { execFileSync } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const CONFIG = "wrangler.deploy.jsonc";
 const KV_KEY = "archived:list";
+const ARCHIVED_FILE = "archived.json"; // committed baseline (cwd is cf/)
 const DB_NAME = "karinto-archived";
 const DRAIN_LIMIT = 1000; // pending rows verified per run
 const DELETE_CHUNK = 50; // repos per DELETE statement (command-length safe)
@@ -41,7 +46,7 @@ if (!token) {
   console.warn("refresh-archived: GH_TOKEN unset — using unauthenticated API");
 }
 
-const existing = new Set(readKv());
+const existing = new Set(readBaseline());
 const pending = readPending().filter((r) => REPO_RE.test(r));
 
 // Re-verify the existing baseline (to catch un-archives) plus the freshly-seen
@@ -68,14 +73,16 @@ await runPool(verifyList, CONCURRENCY, async (repo) => {
   else archived.delete(repo);
 });
 
-// Write KV only when the set changed.
+// Write the file + KV only when the set changed.
+const sorted = [...archived].sort();
 const before = JSON.stringify([...existing].sort());
-const after = JSON.stringify([...archived].sort());
+const after = JSON.stringify(sorted);
 if (after !== before) {
-  writeKv(after);
-  console.log(`refresh-archived: KV updated (${archived.size} archived repos)`);
+  writeBaseline(sorted); // committed via the workflow's PR
+  writeKv(after); // live KV for the request path
+  console.log(`refresh-archived: updated ${ARCHIVED_FILE} + KV (${sorted.length} archived repos)`);
 } else {
-  console.log(`refresh-archived: no change (${archived.size} archived repos)`);
+  console.log(`refresh-archived: no change (${sorted.length} archived repos)`);
 }
 
 // Drop only the repos we actually resolved from the worklist.
@@ -137,14 +144,18 @@ function wrangler(args) {
   });
 }
 
-function readKv() {
+function readBaseline() {
   try {
-    const out = wrangler(["kv", "key", "get", KV_KEY, "--binding", "KV", "--config", CONFIG, "--remote"]);
-    const arr = JSON.parse(out.trim());
+    const arr = JSON.parse(readFileSync(ARCHIVED_FILE, "utf8"));
     return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
   } catch {
-    return []; // key missing or unreadable — start from empty
+    return []; // missing/unreadable — start from empty
   }
+}
+
+// Pretty-printed, one entry per line, so committed diffs are reviewable.
+function writeBaseline(list) {
+  writeFileSync(ARCHIVED_FILE, JSON.stringify(list, null, 2) + "\n");
 }
 
 function writeKv(json) {

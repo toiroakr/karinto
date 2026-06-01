@@ -39,6 +39,11 @@
 // `karinto-vX-Y-Z.toiroakr.workers.dev` report exactly the version they ship.
 import pkg from "../package.json";
 const ENGINE_VERSION = pkg.version;
+// Committed archived-uses baseline (maintained by refresh-archived.yml). Bundled
+// as a seed so a fresh deploy / fork has a baseline before KV is populated; the
+// live KV value (also written by the CI job) is merged on top on the request
+// path. Kept in sync with KV by the CI job — see ARCHIVED_KV_KEY below.
+import ARCHIVED_SEED from "./archived.json";
 
 // MoonBit's compiled JS seeds a hashmap RNG at module load via
 // `crypto.getRandomValues`, which CF Workers forbids in global scope. Defer
@@ -520,10 +525,11 @@ async function handle(params, env, pathTarget) {
   const type = params.type || "";
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
-  // Merge the caller's `archived` list with the KV-cached baseline. The engine
-  // also carries its own hardcoded baseline, so all three are additive.
+  // Merge the caller's `archived` list with the live KV baseline and the
+  // bundled seed (cold-start fallback before KV is populated). The engine also
+  // carries its own hardcoded baseline, so all are additive.
   const kvArchived = await getArchivedList(env);
-  const archived = [callerArchived, kvArchived.join(",")]
+  const archived = [callerArchived, kvArchived.join(","), ARCHIVED_SEED.join(",")]
     .filter(Boolean)
     .join(",");
 

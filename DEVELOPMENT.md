@@ -117,23 +117,31 @@ refreshes the `api.github.com/meta` payload (key `meta`), consulted on the
 request path to exempt GitHub-hosted Actions runner IPs from the per-IP rate
 limit.
 
-The archived `owner/repo` baseline for `archived-uses` (key `archived:list`) is
-**not** maintained by the Worker — verifying repos against the GitHub API from
-the Worker would fight the Workers **Free** plan's ~50-subrequest-per-invocation
-limit and the unauthenticated 60-req/hour quota (shared across Cloudflare's
-egress IPs). Instead the work is split:
+The archived `owner/repo` baseline for `archived-uses` is **not** verified by
+the Worker — doing GitHub API lookups from the Worker would fight the Workers
+**Free** plan's ~50-subrequest-per-invocation limit and the unauthenticated
+60-req/hour quota (shared across Cloudflare's egress IPs). Instead it is kept in
+two synced places and the work is split:
 
-- **Worker (request path)** discovers candidates: it enqueues each external
-  `uses:` repo it serves into the D1 `pending` worklist (`INSERT OR IGNORE`, off
-  the hot path via `ctx.waitUntil`), and reads `archived:list` from KV (memoized
-  per-isolate, fail-open) to feed the rule. There is no committed seed.
+- The baseline lives in committed **`cf/archived.json`** (source of truth,
+  reviewable in git, **bundled into the Worker** as a seed) and mirrored to KV
+  **`archived:list`** (read live on the request path for immediacy).
+- **Worker (request path)** discovers candidates and reads the baseline: it
+  enqueues each external `uses:` repo it serves into the D1 `pending` worklist
+  (`INSERT OR IGNORE`, off the hot path via `ctx.waitUntil`), and feeds the rule
+  the union of the bundled `cf/archived.json` seed, the live KV value (memoized
+  per-isolate, fail-open), the engine's hardcoded baseline, and the caller's
+  `archived` parameter.
 - **CI (`.github/workflows/refresh-archived.yml`, daily)** does the verifying:
-  `scripts/refresh-archived.mjs` reads the current KV baseline + drains
-  `pending`, confirms each repo's `archived` flag against the GitHub API
-  (re-checking the existing baseline too, so un-archives are caught), writes the
-  updated baseline back to KV when it changed, and `DELETE`s the repos it
-  resolved from `pending`. Anything it couldn't reach (rate-limit tail, transient
-  error) stays queued for the next run and is re-enqueued by traffic regardless.
+  `scripts/refresh-archived.mjs` reads the current baseline from
+  `cf/archived.json` + drains `pending`, confirms each repo's `archived` flag
+  against the GitHub API (re-checking the existing baseline too, so un-archives
+  are caught), and when it changed writes the result to **both** KV (immediately,
+  so prod reflects it now) and `cf/archived.json` (the workflow opens a PR with
+  it via `create-pull-request`; merging updates the bundled seed on the next
+  deploy). It then `DELETE`s the repos it resolved from `pending`; anything it
+  couldn't reach (rate-limit tail, transient error) stays queued and is
+  re-enqueued by traffic.
 
   GitHub Actions has a full 5000-req/hour budget (with a token) and no
   subrequest ceiling, so a single daily run comfortably re-verifies the whole
@@ -186,9 +194,10 @@ GitHub Actions wiring:
 - `.github/workflows/deploy-staging.yml` — deploys to staging on every push
   to `main`.
 - `.github/workflows/refresh-archived.yml` — daily cron that runs
-  `scripts/refresh-archived.mjs` to maintain the `archived-uses` KV baseline
-  (drains the D1 worklist, verifies repos against the GitHub API, writes KV).
-  Skipped when `vars.D1_DATABASE_ID` is unset.
+  `scripts/refresh-archived.mjs` to maintain the `archived-uses` baseline
+  (drains the D1 worklist, verifies repos against the GitHub API, writes the
+  live KV key and opens a PR updating committed `cf/archived.json`). Skipped
+  when `vars.D1_DATABASE_ID` is unset.
 - `.github/workflows/release.yml` — runs on every push to `main` via
   `changesets/action`. When pending changesets are present it opens (or
   updates) a "chore: release" PR that consumes them, bumps versions, and

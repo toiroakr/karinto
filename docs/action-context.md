@@ -9,7 +9,7 @@ distinct ways karinto handles this, depending on how cacheable the fact is.
 | Rule | How | Notes |
 | --- | --- | --- |
 | [`known-vulnerable-actions`](../rules_catalog.md) | `osv=1` query param | The Worker queries OSV.dev and applies the advisory version ranges. |
-| [`archived-uses`](../rules_catalog.md) | automatic | The Worker merges a KV-published baseline of archived `owner/repo` (the request path enqueues seen `uses:` repos into a D1 worklist; a daily CI job confirms each via the GitHub API and writes KV) with the engine's hardcoded baseline. No token needed by the caller. |
+| [`archived-uses`](../rules_catalog.md) | automatic | The Worker merges a maintained baseline of archived `owner/repo` — committed `cf/archived.json` (bundled) + its live KV mirror, kept current by a daily CI job that drains a D1 worklist of seen `uses:` repos and confirms each via the GitHub API — with the engine's hardcoded baseline. No token needed by the caller. |
 
 These are **per-repo / per-action** facts that change rarely, so karinto caches
 them centrally — you get them without a `GITHUB_TOKEN`.
@@ -29,10 +29,10 @@ any `@ref` / subpath is ignored). It is merged with the KV baseline.
 
 The central baseline grows on its own: every lint request enqueues the
 external `uses:` repos it references into a D1 worklist, and a daily CI job
-(`refresh-archived.yml`) confirms each against the GitHub API and publishes the
-archived ones to KV. It re-verifies the known set each run too, so a repo that
-gets un-archived is dropped automatically. There is no committed seed list to
-maintain.
+(`refresh-archived.yml`) confirms each against the GitHub API, then writes the
+result to KV (live) and opens a PR updating the committed `cf/archived.json`
+(bundled into the Worker as a seed). It re-verifies the known set each run too,
+so a repo that gets un-archived is dropped automatically.
 
 ### Caller policy: `forbidden-uses`
 
