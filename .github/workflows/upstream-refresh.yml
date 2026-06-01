@@ -2,8 +2,10 @@ name: upstream-refresh
 
 # Weekly check (Monday 00:00 UTC) for new actionlint / zizmor / ghalint
 # releases. When found, bumps mise.toml and re-vendors fixtures from the
-# matching tag, then opens a PR. The PR auto-triggers upstream-parity.yml
-# so a real behavioural diff fails before the bump can merge.
+# matching tag, then opens a PR. The PR is opened with GITHUB_TOKEN, so it
+# does NOT auto-trigger upstream-parity.yml (GitHub suppresses workflows for
+# token-created events); add the `run-parity` label to run the behavioural
+# diff before merging the bump.
 on:
   schedule:
     - cron: '0 0 * * 1'
@@ -42,24 +44,41 @@ jobs:
           {
             echo 'Refresh upstream linter pins (auto-generated).'
             echo
-            echo '| tool | from | to | release |'
-            echo '| --- | --- | --- | --- |'
+            echo '| tool | from | to | release | compare |'
+            echo '| --- | --- | --- | --- | --- |'
             node -e '
               const s = JSON.parse(require("fs").readFileSync("refresh-summary.json","utf8"));
               for (const u of s.updates) {
-                console.log(`| ${u.name} | ${u.from} | ${u.to} | [${u.tag}](${u.url}) |`);
+                const cmp = u.compareUrl ? `[\`v${u.from}...${u.tag}\`](${u.compareUrl})` : "—";
+                console.log(`| ${u.name} | ${u.from} | ${u.to} | [${u.tag}](${u.url}) | ${cmp} |`);
               }
             '
             echo
-            echo 'Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. The `upstream-parity` workflow will run on this PR — review any divergences it surfaces before merging.'
+            echo 'Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.'
+            echo
+            echo '## Upstream release notes'
+            node -e '
+              const s = JSON.parse(require("fs").readFileSync("refresh-summary.json","utf8"));
+              for (const u of s.updates) {
+                console.log(`\n<details><summary><b>${u.name}</b> ${u.tag}</summary>\n`);
+                console.log(u.notes && u.notes.length ? u.notes : "_(no release notes published)_");
+                console.log("\n</details>");
+              }
+            '
+            echo
+            echo '## Incorporation checklist'
+            echo
+            echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), follow the incorporation flow in [`DEVELOPMENT.md`](${{ github.server_url }}/${{ github.repository }}/blob/main/DEVELOPMENT.md#incorporating-a-new-upstream-check):'
+            echo
+            echo '- [ ] Reviewed the `compare` diff + release notes above for new / changed checks.'
+            echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
+            echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
+            echo '- [ ] `moon test` + local parity pass.'
           } > pr-body.md
-          # peter-evans/create-pull-request reads `body` as a literal string, so
-          # pass via env to avoid quoting headaches.
-          {
-            echo 'PR_BODY<<EOF'
-            cat pr-body.md
-            echo EOF
-          } >> "$GITHUB_ENV"
+          # Pass the body to create-pull-request via `body-path` (below) rather
+          # than round-tripping through $GITHUB_ENV: upstream release notes are
+          # arbitrary text, and a line that is exactly `EOF` would terminate a
+          # heredoc-delimited env write early.
 
       - name: Compose PR title
         if: steps.refresh.outputs.changed == 'true'
@@ -79,7 +98,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: ${{ steps.title.outputs.title }}
           title: ${{ steps.title.outputs.title }}
-          body: ${{ env.PR_BODY }}
+          body-path: pr-body.md
           branch: chore/upstream-refresh
           delete-branch: true
           labels: |

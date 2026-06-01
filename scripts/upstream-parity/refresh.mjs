@@ -110,6 +110,14 @@ for (const tool of TOOLS) {
     to: latestVer,
     tag: latest.tag_name,
     url: latest.html_url ?? `https://github.com/${tool.repo}/releases/tag/${latest.tag_name}`,
+    // `compare/v<from>...<newtag>` lets a reviewer eyeball exactly which
+    // commits (and thus which new checks / message changes) landed between
+    // the two pins — the signal that decides whether a karinto rule needs
+    // authoring. See DEVELOPMENT.md "Incorporating a new upstream check".
+    compareUrl: `https://github.com/${tool.repo}/compare/v${cur}...${latest.tag_name}`,
+    // Release-notes excerpt, surfaced verbatim in the PR body so the new
+    // upstream checks are visible without leaving the review.
+    notes: excerptNotes(latest.body),
   });
 }
 
@@ -121,6 +129,16 @@ const summary = { changed: updates.length > 0, updates };
 process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
 
 // ---------------------------------------------------------------------------
+
+function excerptNotes(body) {
+  // GitHub release bodies can be long; keep the PR body readable by capping
+  // the excerpt. Reviewers follow `compareUrl` / `url` for the full text.
+  if (!body || typeof body !== "string") return "";
+  const trimmed = body.trim();
+  const MAX = 1500;
+  if (trimmed.length <= MAX) return trimmed;
+  return trimmed.slice(0, MAX).trimEnd() + "\n\n…(truncated — see release link)";
+}
 
 function parseMiseVersions(src) {
   // Match lines like:  "aqua:rhysd/actionlint" = "1.7.12"
