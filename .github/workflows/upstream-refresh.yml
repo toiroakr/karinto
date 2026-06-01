@@ -64,7 +64,7 @@ jobs:
             echo
             echo '## Incorporation checklist'
             echo
-            echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), follow the incorporation flow in [`DEVELOPMENT.md`](../../DEVELOPMENT.md#incorporating-a-new-upstream-check):'
+            echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), follow the incorporation flow in [`DEVELOPMENT.md`](${{ github.server_url }}/${{ github.repository }}/blob/main/DEVELOPMENT.md#incorporating-a-new-upstream-check):'
             echo
             echo '- [ ] Reviewed the `compare` diff + release notes above for new / changed checks.'
             echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
