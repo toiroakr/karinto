@@ -31,9 +31,10 @@ inputs:
     required: false
     default: "error"
 
-# A `node20` action pins the runtime (Node 20) instead of depending on whatever
-# `node` happens to be on the runner's PATH, and reads inputs from the
+# A `node24` action pins the runtime (Node 24, the newest GitHub Actions
+# offers — node26 is not a valid runner runtime) instead of depending on
+# whatever `node` happens to be on the runner's PATH, and reads inputs from the
 # `INPUT_*` env vars GitHub sets automatically (no shell step to inject into).
 runs:
-  using: node20
+  using: node24
   main: audit.mjs

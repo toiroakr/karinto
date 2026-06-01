@@ -15,7 +15,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-// Read an action input. As a `node20` action GitHub exposes inputs as
+// Read an action input. As a `node24` action GitHub exposes inputs as
 // `INPUT_<NAME>` (name uppercased, spaces → `_`); fall back to a plain env var
 // so the script is still runnable standalone (and in tests).
 const input = (name, envFallback) =>
