@@ -31,10 +31,13 @@ on:
 jobs:
   parity:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Install moon
         run: |
@@ -46,12 +49,12 @@ jobs:
       - name: Build JS bundle
         run: moon build --target js --release
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
 
       - name: Install upstream linters
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
         with:
           install: true
           # Don't activate the shims globally; we invoke binaries explicitly
@@ -61,17 +64,26 @@ jobs:
       - name: Resolve linter binary paths
         id: bins
         run: |
-          echo "actionlint=$(mise which actionlint)" >> "$GITHUB_OUTPUT"
-          echo "zizmor=$(mise which zizmor)" >> "$GITHUB_OUTPUT"
-          echo "ghalint=$(mise which ghalint)" >> "$GITHUB_OUTPUT"
+          {
+            echo "actionlint=$(mise which actionlint)"
+            echo "zizmor=$(mise which zizmor)"
+            echo "ghalint=$(mise which ghalint)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Compare karinto vs upstream
         # `--soft` on main keeps the job green even on divergence (the report
         # still posts to the step summary). PRs hard-fail on divergence so
         # newly introduced regressions get caught at review time.
+        # The resolved binary paths come from a trusted step (mise which), but
+        # pass them through the environment rather than interpolating into the
+        # shell so the run block stays free of template expansion.
+        env:
+          ACTIONLINT_BIN: ${{ steps.bins.outputs.actionlint }}
+          ZIZMOR_BIN: ${{ steps.bins.outputs.zizmor }}
+          GHALINT_BIN: ${{ steps.bins.outputs.ghalint }}
         run: |
           node scripts/upstream-parity/compare.mjs \
-            --actionlint "${{ steps.bins.outputs.actionlint }}" \
-            --zizmor     "${{ steps.bins.outputs.zizmor }}" \
-            --ghalint    "${{ steps.bins.outputs.ghalint }}" \
+            --actionlint "$ACTIONLINT_BIN" \
+            --zizmor     "$ZIZMOR_BIN" \
+            --ghalint    "$GHALINT_BIN" \
             ${{ github.event_name == 'push' && '--soft' || '' }}

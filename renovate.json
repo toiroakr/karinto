@@ -25,7 +25,7 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "github-actions",
-      "pinDigests": false
+      "pinDigests": true
     },
     {
       "matchManagers": ["npm"],
