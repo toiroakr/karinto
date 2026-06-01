@@ -62,20 +62,17 @@ jobs:
             echo
             echo '## Incorporation checklist'
             echo
-            echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), drive it through the **`upstream-rule-sync`** skill:'
+            echo 'If the parity step summary surfaces an `unmapped` / soft divergence (an upstream check karinto does not yet cover), follow the incorporation flow in [`DEVELOPMENT.md`](../../DEVELOPMENT.md#incorporating-a-new-upstream-check):'
             echo
             echo '- [ ] Reviewed the `compare` diff + release notes above for new / changed checks.'
             echo '- [ ] Checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
             echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
             echo '- [ ] `moon test` + local parity pass.'
           } > pr-body.md
-          # peter-evans/create-pull-request reads `body` as a literal string, so
-          # pass via env to avoid quoting headaches.
-          {
-            echo 'PR_BODY<<EOF'
-            cat pr-body.md
-            echo EOF
-          } >> "$GITHUB_ENV"
+          # Pass the body to create-pull-request via `body-path` (below) rather
+          # than round-tripping through $GITHUB_ENV: upstream release notes are
+          # arbitrary text, and a line that is exactly `EOF` would terminate a
+          # heredoc-delimited env write early.
 
       - name: Compose PR title
         if: steps.refresh.outputs.changed == 'true'
@@ -94,7 +91,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: ${{ steps.title.outputs.title }}
           title: ${{ steps.title.outputs.title }}
-          body: ${{ env.PR_BODY }}
+          body-path: pr-body.md
           branch: chore/upstream-refresh
           delete-branch: true
           labels: |

@@ -113,7 +113,7 @@ for (const tool of TOOLS) {
     // `compare/v<from>...<newtag>` lets a reviewer eyeball exactly which
     // commits (and thus which new checks / message changes) landed between
     // the two pins — the signal that decides whether a karinto rule needs
-    // authoring. See .claude/skills/upstream-rule-sync.
+    // authoring. See DEVELOPMENT.md "Incorporating a new upstream check".
     compareUrl: `https://github.com/${tool.repo}/compare/v${cur}...${latest.tag_name}`,
     // Release-notes excerpt, surfaced verbatim in the PR body so the new
     // upstream checks are visible without leaving the review.
