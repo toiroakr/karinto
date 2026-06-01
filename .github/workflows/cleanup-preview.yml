@@ -8,14 +8,17 @@ jobs:
   cleanup:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pull-requests: write
     env:
       WORKER_NAME: karinto-pr-${{ github.event.pull_request.number }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
           cache: npm
@@ -50,7 +53,7 @@ jobs:
 
       - name: Mark preview comment as cleaned up
         if: steps.delete.outputs.deleted == 'true'
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
         with:
           header: preview-worker
           message: |

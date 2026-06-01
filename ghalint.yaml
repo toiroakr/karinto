@@ -1,0 +1,10 @@
+# ghalint configuration.
+# https://github.com/suzuki-shunsuke/ghalint
+excludes:
+  # release.yml's checkout must keep persisted credentials: changesets/action
+  # pushes the release commit and tags using the git auth that actions/checkout
+  # configures (it doesn't embed the token in the remote itself). Every other
+  # workflow sets persist-credentials: false. Scoped exception only.
+  - policy_name: checkout_persist_credentials_should_be_false
+    workflow_file_path: .github/workflows/release.yml
+    job_name: release

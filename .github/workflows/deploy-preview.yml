@@ -14,6 +14,7 @@ jobs:
     # would also fail without `pull-requests: write`.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -25,9 +26,10 @@ jobs:
       # Pin to the PR head SHA so the Worker we deploy and the replay
       # script / diff rules running against it stay in lockstep with
       # replay-on-label.yml (which also checks out head.sha).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Install moon
         run: |
@@ -39,7 +41,10 @@ jobs:
       - name: Build JS bundle
         run: moon build --target js --release
 
-      - uses: actions/setup-node@v6
+      # Preview deploys publish a namespaced, throwaway Worker (karinto-pr-<n>);
+      # the npm cache is keyed on cf/package-lock.json and not consumed by any
+      # release/prod job, so cache poisoning has no trusted blast radius.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: '22'
           cache: npm
@@ -57,7 +62,7 @@ jobs:
         run: node ../scripts/prepare-wrangler-d1.mjs
 
       - name: Deploy preview Worker
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -73,7 +78,7 @@ jobs:
         run: bash smoke.sh "$WORKER_URL"
 
       - name: Comment preview URL
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
         with:
           header: preview-worker
           message: |
@@ -113,7 +118,7 @@ jobs:
 
       - name: Comment replay summary
         if: ${{ always() && hashFiles('replay-summary.md') != '' }}
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
         with:
           header: dark-launch-replay
           path: ${{ github.workspace }}/replay-summary.md
