@@ -46,14 +46,18 @@ jobs:
       || (github.event.label.name == 'run-parity'
           && github.event.sender.login == 'toiroakr')
     runs-on: ubuntu-latest
+    # Read-only: this job builds and runs PR-controlled code (moon build,
+    # compare.mjs). The write-scoped label removal lives in a separate job
+    # below so no write token is ever exposed to attacker-editable code.
     permissions:
       contents: read
-      # `gh pr edit --remove-label` (below) goes through the Issues API, so it
-      # needs pull-requests + issues write on top of the read-only checkout.
-      pull-requests: write
-      issues: write
     steps:
       - uses: actions/checkout@v6
+        # Don't leave the job token in .git/config — nothing here needs git
+        # auth, and persisting it would hand a credential to the PR-controlled
+        # build/compare steps that run next.
+        with:
+          persist-credentials: false
 
       - name: Install moon
         run: |
@@ -95,10 +99,24 @@ jobs:
             --ghalint    "${{ steps.bins.outputs.ghalint }}" \
             ${{ github.event_name == 'push' && '--soft' || '' }}
 
+  remove-label:
+    # Isolated write-scoped job: it neither checks out nor runs any
+    # PR-controlled code, so the pull-requests/issues write token can't be
+    # exfiltrated by a PR that edits compare.mjs (the reason parity above is
+    # read-only). `needs: parity` + `always()` drops the label after the
+    # comparison finishes — pass or fail — so re-adding it re-triggers.
+    needs: parity
+    if: >-
+      always()
+      && github.event.action == 'labeled'
+      && github.event.label.name == 'run-parity'
+      && github.event.sender.login == 'toiroakr'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
       - name: Remove trigger label
-        # Drop the label even if the comparison failed, so re-adding it always
-        # re-runs the check. Only relevant when the run was label-triggered.
-        if: always() && github.event.action == 'labeled'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
