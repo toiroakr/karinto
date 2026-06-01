@@ -551,3 +551,29 @@ by file alone, so the allowlist degrades gracefully as fixtures change.
    `dependencies` + `skip-changeset`. Auto-merge is intentionally not
    enabled — a refresh is exactly when `upstream-parity.yml` is most
    likely to surface real regressions, so a human should look.
+
+The PR body carries, per bump: a `compare/v<from>...<to>` link, a
+release-notes excerpt, and an incorporation checklist (added by
+`refresh.mjs` → the workflow's PR-body step).
+
+### Incorporating a new upstream check
+
+The refresh PR + parity step summary tell you *that* an upstream check
+changed; turning it into a karinto rule is manual:
+
+1. Run parity locally (see [above](#upstream-parity-check)) and read the
+   `unmapped` IDs / Kinds and soft divergences — these name the upstream
+   checks karinto doesn't yet cover. Cross-check against the `compare`
+   link + release-notes excerpt in the refresh PR for intended semantics.
+2. Decide a status: `Implemented` (ship parity now), `Planned` (in scope,
+   not yet built), or `NotPlanned` (deliberately out of scope). If it's the
+   same ground as an existing rule, consolidate by adding the origin to that
+   rule's `origins` array rather than minting a new ID.
+3. Register it in `rules_catalog.mbt` and mirror the entry into
+   `rules_catalog.md` **in the same commit** (see AGENTS.md "Rule catalog
+   discipline").
+4. If `Implemented`, wire the rule into `all_rules()` in `rules.mbt` and add
+   a fixture/expected-JSON test in the matching `<tool>_rules_test.mbt`.
+5. If we're intentionally *not* matching it, record the divergence in
+   `scripts/upstream-parity/allowlist.json` (keyed by rule ID + file).
+6. Verify with `moon test` and a green local parity run.
