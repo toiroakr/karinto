@@ -50,7 +50,7 @@ pub(all) struct Diagnostic {
 } derive(Eq, Debug)
 
 ///|
-pub impl ToJson for Severity with to_json(self) {
+pub impl ToJson for Severity with fn to_json(self) {
   match self {
     Error => "error"
     Warning => "warning"
@@ -59,7 +59,7 @@ pub impl ToJson for Severity with to_json(self) {
 }
 
 ///|
-pub impl ToJson for StepRef with to_json(self) {
+pub impl ToJson for StepRef with fn to_json(self) {
   let m : Map[String, Json] = { "index": self.index.to_json() }
   match self.id {
     Some(id) => m["id"] = id.to_json()
@@ -69,7 +69,7 @@ pub impl ToJson for StepRef with to_json(self) {
 }
 
 ///|
-pub impl ToJson for Diagnostic with to_json(self) {
+pub impl ToJson for Diagnostic with fn to_json(self) {
   let m : Map[String, Json] = {
     "rule": self.rule.to_json(),
     "severity": self.severity.to_json(),
@@ -106,7 +106,7 @@ pub(all) struct LintResult {
 }
 
 ///|
-pub impl ToJson for FileKind with to_json(self) {
+pub impl ToJson for FileKind with fn to_json(self) {
   match self {
     Workflow => "workflow"
     Action => "action"
@@ -115,7 +115,7 @@ pub impl ToJson for FileKind with to_json(self) {
 }
 
 ///|
-pub impl ToJson for LintResult with to_json(self) {
+pub impl ToJson for LintResult with fn to_json(self) {
   let m : Map[String, Json] = {
     "kind": self.kind.to_json(),
     "stats": self.stats.to_json(),
@@ -188,17 +188,17 @@ fn merge_inline_ignores(
   let extra : Array[String] = []
   let tools = ["karinto", "zizmor", "ghalint", "actionlint"]
   for line in content.split("\n") {
-    let s = line.to_string()
+    let s = line.to_owned()
     for tool in tools {
       let needle = tool + ": ignore["
       match index_of(s, needle) {
         Some(i) => {
-          let after = s.substring(start=i + needle.length())
+          let after = s[i + needle.length():].to_owned()
           match index_of(after, "]") {
             Some(j) => {
-              let inner = after.substring(start=0, end=j)
+              let inner = after[0:j].to_owned()
               for part in inner.split(",") {
-                let trimmed = trim_ws(part.to_string())
+                let trimmed = trim_ws(part.to_owned())
                 if trimmed.length() > 0 {
                   extra.push(trimmed)
                 }
@@ -226,24 +226,20 @@ fn merge_inline_ignores(
 
 ///|
 fn index_of(s : String, needle : String) -> Int? {
-  let n = s.length()
-  let m = needle.length()
-  if m == 0 || m > n {
+  // Delegate to the stdlib substring search. The previous hand-rolled scan
+  // sliced `s[i:i + m]` at every code-unit position, which panics when a
+  // boundary splits a surrogate pair (e.g. content containing emoji); `find`
+  // returns a code-unit offset on a char boundary, matching how callers slice
+  // the result. Empty needle keeps the old "no match" contract.
+  if needle.length() == 0 {
     return None
   }
-  let mut i = 0
-  while i + m <= n {
-    if s.substring(start=i, end=i + m) == needle {
-      return Some(i)
-    }
-    i = i + 1
-  }
-  None
+  s.find(needle)
 }
 
 ///|
 fn trim_ws(s : String) -> String {
-  s.trim(chars=" \t\r").to_string()
+  s.trim(chars=" \t\r").to_owned()
 }
 
 ///|

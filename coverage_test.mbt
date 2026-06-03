@@ -28,8 +28,8 @@ fn tested_rule_ids() -> Array[String] {
      "anonymous-definition", "archived-uses", "artipacked", "bot-conditions", "cache-poisoning",
     "concurrency-limits", "dangerous-triggers", "dependabot-cooldown", "dependabot-execution",
     "excessive-permissions", "forbidden-uses", "github-app", "github-env", "hardcoded-container-credentials",
-    "insecure-commands", "known-vulnerable-actions", "misfeature",
-    "obfuscation", "overprovisioned-secrets",
+    "insecure-commands", "known-vulnerable-actions", "misfeature", "obfuscation",
+    "overprovisioned-secrets",
     // impostor-commit & ref-confusion & ref-version-mismatch: NotPlanned.
     // impostor-commit / ref-version-mismatch are delegated to the companion
     // action (online GitHub API resolution); ref-confusion is mooted by the

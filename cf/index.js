@@ -33,7 +33,7 @@
 
 // Stamped onto every response as `engine_version` so callers can detect when
 // the deployed engine has moved underneath them. Sourced from the
-// changesets-managed root manifest (kept in lockstep with `moon.mod.json` by
+// changesets-managed root manifest (kept in lockstep with `moon.mod` by
 // `scripts/sync-moon-version.mjs`), inlined by wrangler/esbuild at deploy
 // time, so the always-latest endpoint and each pinned
 // `karinto-vX-Y-Z.toiroakr.workers.dev` report exactly the version they ship.

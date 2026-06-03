@@ -12,7 +12,7 @@ You can browse and install extra skills here:
   blackbox test files (ending in `_test.mbt`) and whitebox test files (ending in
   `_wbtest.mbt`).
 
-- In the toplevel directory, there is a `moon.mod.json` file listing module
+- In the toplevel directory, there is a `moon.mod` file listing module
   metadata.
 
 ## Coding convention
@@ -72,7 +72,7 @@ dependency into the distributed JS bundle, so each runtime dep must have its
 license text reproduced in `THIRD_PARTY_LICENSES.md`. When adding a dependency,
 the maintenance burden is to keep that file in sync:
 
-- **New MoonBit dep in `moon.mod.json` `deps`** — copy
+- **New MoonBit dep in `moon.mod` `import`** — copy
   `.mooncakes/<owner>/<name>/LICENSE` into a new `## <name>` section of
   `THIRD_PARTY_LICENSES.md`. If the LICENSE file embeds transitive
   attributions (e.g. the way `moonbit-community/yaml` ships the yaml-rust2

@@ -1407,7 +1407,7 @@ fn trusted_publishing_action_finding(step : StepInfo) -> String? {
     Some(u) => {
       // Strip ref before pattern matching.
       let bare = if step.at_idx >= 0 {
-        u[:step.at_idx].to_string()
+        u[:step.at_idx].to_owned()
       } else {
         u.to_string()
       }
@@ -1672,7 +1672,7 @@ fn shell_line_is_publish(tokens : Array[String]) -> Bool {
 fn run_has_publish_cmd(run : String) -> Bool {
   let normalized = collapse_continuations(run)
   for line in normalized.split("\n") {
-    let trimmed = line.trim(chars=" \t\r").to_string()
+    let trimmed = line.trim(chars=" \t\r").to_owned()
     if trimmed.length() == 0 {
       continue
     }
@@ -1877,19 +1877,16 @@ fn is_pinned_image(image : String) -> Bool {
 /// container image expression, or None if the image is not such a pure
 /// reference.
 fn matrix_key_of_image(image : String) -> String? {
-  let s = image.trim(chars=" \t").to_string()
+  let s = image.trim(chars=" \t").to_owned()
   if !s.has_prefix("${{") || !s.has_suffix("}}") {
     return None
   }
-  let inner = s
-    .substring(start=3, end=s.length() - 2)
-    .trim(chars=" \t")
-    .to_string()
+  let inner = s[3:s.length() - 2].trim(chars=" \t").to_owned()
   let needle = "matrix."
   if !inner.has_prefix(needle) {
     return None
   }
-  let rest = inner.substring(start=needle.length()).to_string()
+  let rest = inner[needle.length():].to_owned()
   // Reject anything beyond a simple identifier (functions, dotted paths).
   let chars = rest.to_array()
   for ch in chars {
@@ -2663,7 +2660,7 @@ fn uses_path_obfuscation(head : String) -> String? {
   let mut idx = 0
   let parts = head.split("/")
   for raw in parts {
-    let part = raw.to_string()
+    let part = raw.to_owned()
     if idx >= 2 {
       // 3rd+ component is a subpath piece.
       if part.length() == 0 {
@@ -2793,8 +2790,8 @@ fn text_has_reducible_expression(text : String) -> Bool {
         j = j + 1
       }
       if found {
-        let inner = bytes[i + 3:j].to_string()
-        let trimmed = inner.trim(chars=" \t\r\n").to_string()
+        let inner = bytes[i + 3:j].to_owned()
+        let trimmed = inner.trim(chars=" \t\r\n").to_owned()
         if trimmed.length() > 0 && expression_is_constant_only(trimmed) {
           return true
         }
@@ -2821,9 +2818,9 @@ fn index_expr_is_computed(idx_text : String) -> Bool {
   while i < n {
     let ch = chars[i]
     if !in_double && ch == '\'' {
-      in_single = not(in_single)
+      in_single = !in_single
     } else if !in_single && ch == '"' {
-      in_double = not(in_double)
+      in_double = !in_double
     } else if !in_single && !in_double && ch == '.' {
       return true
     }
@@ -2861,7 +2858,7 @@ fn text_has_computed_index(text : String) -> Bool {
             k = k + 1
           }
           if k < text.length() {
-            let idx_text = text[j + 1:k].to_string()
+            let idx_text = text[j + 1:k].to_owned()
             if index_expr_is_computed(idx_text) {
               return true
             }
@@ -2887,7 +2884,7 @@ fn check_obfuscation(
   match step.uses {
     Some(u) =>
       if step.at_idx >= 0 {
-        let head = u[:step.at_idx].to_string()
+        let head = u[:step.at_idx].to_owned()
         let ref_str = u[step.at_idx + 1:].to_owned()
         if ref_has_percent_encoding(ref_str) {
           add_diag(
@@ -2908,7 +2905,7 @@ fn check_obfuscation(
   // `with:` block that is an expression — prevents static analysis.
   match step.raw.get("with") {
     Some(String(s)) => {
-      let t = s.trim(chars=" \t\r\n").to_string()
+      let t = s.trim(chars=" \t\r\n").to_owned()
       if t.has_prefix("${{") && t.has_suffix("}}") {
         add_diag(
           out,
@@ -3305,13 +3302,13 @@ fn step_template_sink_inputs(step : StepInfo) -> Array[String] {
       // `uses:` form is `owner/repo[/subpath][@ref]`. Strip ref and
       // subpath before comparing — sinks key on the bare repo prefix.
       let bare = match u.find("@") {
-        Some(i) => u.substring(start=0, end=i)
+        Some(i) => u[0:i].to_owned()
         None => u
       }
       let canonical = (match bare.find("/") {
         Some(i) =>
-          match bare.substring(start=i + 1).find("/") {
-            Some(j) => bare.substring(start=0, end=i + 1 + j)
+          match bare[i + 1:].find("/") {
+            Some(j) => bare[0:i + 1 + j].to_owned()
             None => bare
           }
         None => bare
@@ -3649,20 +3646,17 @@ fn expr_to_string(value : @yaml.Yaml) -> String {
 /// is true). Returns Some(b) for definitive results, None for anything
 /// the recogniser doesn't understand.
 fn eval_tag_push_expr(raw : String) -> Bool? {
-  let trimmed = raw.trim(chars=" \t\n\r").to_string()
+  let trimmed = raw.trim(chars=" \t\n\r").to_owned()
   if !trimmed.has_prefix("${{") || !trimmed.has_suffix("}}") {
     return None
   }
-  let inner = trimmed
-    .substring(start=3, end=trimmed.length() - 2)
-    .trim(chars=" \t\n\r")
-    .to_string()
+  let inner = trimmed[3:trimmed.length() - 2].trim(chars=" \t\n\r").to_owned()
   eval_tag_push_inner(inner)
 }
 
 ///|
 fn eval_tag_push_inner(s : String) -> Bool? {
-  let t = s.trim(chars=" \t\n\r").to_string()
+  let t = s.trim(chars=" \t\n\r").to_owned()
   if t == "true" {
     return Some(true)
   }
@@ -3670,7 +3664,7 @@ fn eval_tag_push_inner(s : String) -> Bool? {
     return Some(false)
   }
   if t.has_prefix("!") {
-    match eval_tag_push_inner(t.substring(start=1).to_string()) {
+    match eval_tag_push_inner(t[1:].to_owned()) {
       Some(b) => return Some(!b)
       None => return None
     }
@@ -3966,11 +3960,7 @@ fn classify_cache_aware_step(s : StepInfo) -> CacheStep {
     None => return CacheNotSatisfied
   }
   // Strip ref before matching.
-  let bare = if s.at_idx >= 0 {
-    u.substring(start=0, end=s.at_idx).to_lower()
-  } else {
-    u.to_lower()
-  }
+  let bare = if s.at_idx >= 0 { u[0:s.at_idx].to_lower() } else { u.to_lower() }
   if bare == "actions/cache" || bare == "actions/cache/restore" {
     return classify_boolean_optout(s.with_, "lookup-only", true)
   }
@@ -4729,12 +4719,12 @@ fn lhs_has_dynamic_token(lhs : String) -> Bool {
   while i < n {
     let ch = chars[i]
     if !in_double && ch == '\'' {
-      in_single = not(in_single)
+      in_single = !in_single
       i = i + 1
       continue
     }
     if !in_single && ch == '"' {
-      in_double = not(in_double)
+      in_double = !in_double
       i = i + 1
       continue
     }
@@ -4812,7 +4802,7 @@ fn check_github_env(
   // the LHS contains any non-literal token (variable/cmd-sub/template).
   let lines = run.split("\n")
   for ln in lines {
-    let line = ln.to_string()
+    let line = ln.to_owned()
     // Only care about lines that include `>>`.
     if !line.contains(">>") {
       continue
@@ -4823,7 +4813,7 @@ fn check_github_env(
     }
     match line.find(">>") {
       Some(idx) => {
-        let lhs = line[:idx].to_string()
+        let lhs = line[:idx].to_owned()
         if lhs_has_dynamic_token(lhs) {
           add_diag(
             out,
@@ -5001,7 +4991,7 @@ fn flag_empty_map(
 ) -> Unit {
   match parent.get(key) {
     Some(Map(m)) =>
-      if m.size() == 0 && key != "permissions" {
+      if m.length() == 0 && key != "permissions" {
         add_diag(
           out,
           "empty-mappings",
@@ -5065,15 +5055,12 @@ fn check_empty_mappings_step(
 /// `${{ true }}` / `${{ false }}` / `${{ 'x' }}` after trimming. These
 /// always evaluate to the same value, so the condition is dead code.
 fn is_constant_if(s : String) -> String? {
-  let trimmed = s.trim(chars=" \t").to_string()
+  let trimmed = s.trim(chars=" \t").to_owned()
   if trimmed == "true" || trimmed == "false" {
     return Some(trimmed)
   }
   if trimmed.has_prefix("${{") && trimmed.has_suffix("}}") {
-    let inner = trimmed
-      .substring(start=3, end=trimmed.length() - 2)
-      .trim(chars=" \t")
-      .to_string()
+    let inner = trimmed[3:trimmed.length() - 2].trim(chars=" \t").to_owned()
     if inner == "true" || inner == "false" {
       return Some(inner)
     }
@@ -5170,7 +5157,7 @@ fn validate_permissions_map(
     }
     match v {
       String(s) => {
-        let sv = s.trim(chars=" \t").to_string()
+        let sv = s.trim(chars=" \t").to_owned()
         if sv != "read" && sv != "write" && sv != "none" {
           add_diag(
             out,
@@ -5329,7 +5316,7 @@ fn check_unexpected_keys_step(
 /// the conventional bounds (m 0-59, h 0-23, dom 1-31, month 1-12, dow 0-7).
 /// Returns `None` on success or `Some(reason)` on failure.
 fn validate_cron(s : String) -> String? {
-  let trimmed = s.trim(chars=" \t").to_string()
+  let trimmed = s.trim(chars=" \t").to_owned()
   if trimmed == "" {
     return Some("empty cron expression")
   }
@@ -5398,10 +5385,7 @@ fn validate_cron_piece(piece : String, lo : Int, hi : Int) -> String? {
   // Split off `/step` suffix.
   let slash = index_of_char(piece, '/')
   let (range_part, step_part) = if slash >= 0 {
-    (
-      piece.substring(start=0, end=slash),
-      Some(piece.substring(start=slash + 1)),
-    )
+    (piece[0:slash].to_owned(), Some(piece[slash + 1:].to_owned()))
   } else {
     (piece, None)
   }
@@ -5421,8 +5405,8 @@ fn validate_cron_piece(piece : String, lo : Int, hi : Int) -> String? {
   }
   let dash = index_of_char(r, '-')
   if dash >= 0 {
-    let a = parse_uint(r.substring(start=0, end=dash).to_string())
-    let b = parse_uint(r.substring(start=dash + 1).to_string())
+    let a = parse_uint(r[0:dash].to_owned())
+    let b = parse_uint(r[dash + 1:].to_owned())
     if a < 0 || b < 0 {
       return Some("invalid range `\{r}`")
     }
@@ -5907,7 +5891,7 @@ fn is_reusable_only(m : Map[String, @yaml.Yaml]) -> Bool {
       true
     }
     Some(@yaml.Yaml::Map(on_map)) =>
-      on_map.size() == 1 && on_map.contains("workflow_call")
+      on_map.length() == 1 && on_map.contains("workflow_call")
     _ => false
   }
 }
@@ -5979,22 +5963,22 @@ fn check_undocumented_permissions(
   }
   let lines : Array[String] = []
   for v in ctx.source.split("\n") {
-    lines.push(v.to_string())
+    lines.push(v.to_owned())
   }
   let n = lines.length()
   let mut i = 0
   while i < n {
     let line = lines[i]
     let indent = leading_spaces(line)
-    let stripped = line.substring(start=indent).to_string()
+    let stripped = line[indent:].to_owned()
     // Header looks like `permissions:` (optionally followed by an inline
     // value or comment). Skip if there's a non-empty inline value.
     if has_permissions_header(stripped) {
-      let after = stripped.substring(start="permissions:".length()).to_string()
+      let after = stripped["permissions:".length():].to_owned()
       let after_trimmed = trim_ws(after)
       // Strip any trailing comment.
       let val = match index_of(after_trimmed, "#") {
-        Some(k) => trim_ws(after_trimmed.substring(start=0, end=k).to_string())
+        Some(k) => trim_ws(after_trimmed[0:k].to_owned())
         None => after_trimmed
       }
       if val != "" {
@@ -6023,11 +6007,11 @@ fn check_undocumented_permissions(
           continue
         }
         let after_pound = match index_of(body, "#") {
-          Some(k) => Some(body.substring(start=k + 1).to_string())
+          Some(k) => Some(body[k + 1:].to_owned())
           None => None
         }
         let before_pound = match index_of(body, "#") {
-          Some(k) => body.substring(start=0, end=k).to_string()
+          Some(k) => body[0:k].to_owned()
           None => body
         }
         entries.push((j, before_pound, comment_text(after_pound)))
@@ -6082,7 +6066,7 @@ fn has_permissions_header(stripped : String) -> Bool {
   if !stripped.has_prefix(needle) {
     return false
   }
-  let rest = stripped.substring(start=needle.length()).to_string()
+  let rest = stripped[needle.length():].to_owned()
   if rest == "" {
     return true
   }
@@ -6123,11 +6107,7 @@ fn check_forbidden_uses(
   }
   match step.uses {
     Some(u) => {
-      let bare = if step.at_idx >= 0 {
-        u.substring(start=0, end=step.at_idx).to_string()
-      } else {
-        u
-      }
+      let bare = if step.at_idx >= 0 { u[0:step.at_idx].to_owned() } else { u }
       for pat in ctx.forbidden_uses {
         if glob_match(pat, u) || glob_match(pat, bare) {
           add_diag(
@@ -6289,11 +6269,7 @@ fn bare_repo_of(uses : String) -> String {
     return ""
   }
   let at = last_at_index(uses)
-  let head = if at >= 0 {
-    uses.substring(start=0, end=at).to_string()
-  } else {
-    uses
-  }
+  let head = if at >= 0 { uses[0:at].to_owned() } else { uses }
   let mut slash = -1
   let mut count = 0
   let n = head.length()
@@ -6312,7 +6288,7 @@ fn bare_repo_of(uses : String) -> String {
     i = i + 1
   }
   if slash >= 0 {
-    head.substring(start=0, end=slash).to_string()
+    head[0:slash].to_owned()
   } else {
     head
   }
@@ -6415,8 +6391,8 @@ fn check_matrix_values_job(
     }
     match value {
       @yaml.Yaml::Array(arr) => {
-        let seen : Map[String, Bool] = Map::new()
-        let reported : Map[String, Bool] = Map::new()
+        let seen : Map[String, Bool] = {}
+        let reported : Map[String, Bool] = {}
         for entry in arr {
           match scalar_repr(entry) {
             Some(repr) =>
@@ -6488,12 +6464,12 @@ fn scan_anchor_tokens(
         i = i + 2
         continue
       }
-      in_single = not(in_single)
+      in_single = !in_single
       i = i + 1
       continue
     }
     if !in_single && ch == '"' {
-      in_double = not(in_double)
+      in_double = !in_double
       i = i + 1
       continue
     }
@@ -6510,7 +6486,15 @@ fn scan_anchor_tokens(
         while j < n && is_anchor_name_char(chars[j]) {
           j = j + 1
         }
-        let name = line.substring(start=i + 1, end=j).to_string()
+        // `i` and `j` index `chars` (a codepoint array), so build the name
+        // from those code points. Slicing `line` directly would use code-unit
+        // offsets and could panic mid-surrogate when the line contains
+        // non-BMP characters.
+        let buf = StringBuilder::new()
+        for k in (i + 1)..<j {
+          buf.write_char(chars[k])
+        }
+        let name = buf.to_string()
         if ch == '&' {
           declared[name] = true
         } else {
@@ -6529,10 +6513,10 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   if ctx.source == "" {
     return
   }
-  let declared : Map[String, Bool] = Map::new()
-  let used : Map[String, Bool] = Map::new()
+  let declared : Map[String, Bool] = {}
+  let used : Map[String, Bool] = {}
   for v in ctx.source.split("\n") {
-    scan_anchor_tokens(v.to_string(), declared, used)
+    scan_anchor_tokens(v.to_owned(), declared, used)
   }
   let names : Array[String] = []
   declared.each(fn(name, _) { names.push(name) })
@@ -6681,8 +6665,8 @@ fn find_meaningless_compare(expr : String) -> (String, String)? {
   // Try `==` first, then `!=`.
   match split_once(expr, "==") {
     Some((lhs, rhs)) => {
-      let l = lhs.trim(chars=" \t").to_string()
-      let r = rhs.trim(chars=" \t").to_string()
+      let l = lhs.trim(chars=" \t").to_owned()
+      let r = rhs.trim(chars=" \t").to_owned()
       if l != "" && l == r {
         return Some(("\{l} == \{r}", "true"))
       }
@@ -6691,8 +6675,8 @@ fn find_meaningless_compare(expr : String) -> (String, String)? {
   }
   match split_once(expr, "!=") {
     Some((lhs, rhs)) => {
-      let l = lhs.trim(chars=" \t").to_string()
-      let r = rhs.trim(chars=" \t").to_string()
+      let l = lhs.trim(chars=" \t").to_owned()
+      let r = rhs.trim(chars=" \t").to_owned()
       if l != "" && l == r {
         return Some(("\{l} != \{r}", "false"))
       }
@@ -7439,7 +7423,7 @@ fn normalize_ws(s : String) -> String {
       last_space = false
     }
   }
-  buf.to_string().trim(chars=" ").to_string()
+  buf.to_string().trim(chars=" ").to_owned()
 }
 
 // ---------------------------------------------------------------------------
@@ -7531,8 +7515,8 @@ fn find_unsound_contains_calls(expr : String) -> Array[String] {
         let args = buf.to_string()
         match split_top_level_comma(args) {
           Some((lhs, rhs)) => {
-            let l = lhs.trim(chars=" \t").to_string()
-            let r = rhs.trim(chars=" \t").to_string()
+            let l = lhs.trim(chars=" \t").to_owned()
+            let r = rhs.trim(chars=" \t").to_owned()
             if looks_like_literal(l) && !looks_like_literal(r) && r != "" {
               let buf2 = StringBuilder::new()
               buf2.write_string("contains(")
