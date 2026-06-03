@@ -188,17 +188,17 @@ fn merge_inline_ignores(
   let extra : Array[String] = []
   let tools = ["karinto", "zizmor", "ghalint", "actionlint"]
   for line in content.split("\n") {
-    let s = line.to_string()
+    let s = line.to_owned()
     for tool in tools {
       let needle = tool + ": ignore["
       match index_of(s, needle) {
         Some(i) => {
-          let after = s.substring(start=i + needle.length())
+          let after = s[i + needle.length():].to_owned()
           match index_of(after, "]") {
             Some(j) => {
-              let inner = after.substring(start=0, end=j)
+              let inner = after[0:j].to_owned()
               for part in inner.split(",") {
-                let trimmed = trim_ws(part.to_string())
+                let trimmed = trim_ws(part.to_owned())
                 if trimmed.length() > 0 {
                   extra.push(trimmed)
                 }
@@ -233,7 +233,7 @@ fn index_of(s : String, needle : String) -> Int? {
   }
   let mut i = 0
   while i + m <= n {
-    if s.substring(start=i, end=i + m) == needle {
+    if s[i:i + m].to_owned() == needle {
       return Some(i)
     }
     i = i + 1
@@ -243,7 +243,7 @@ fn index_of(s : String, needle : String) -> Int? {
 
 ///|
 fn trim_ws(s : String) -> String {
-  s.trim(chars=" \t\r").to_string()
+  s.trim(chars=" \t\r").to_owned()
 }
 
 ///|
