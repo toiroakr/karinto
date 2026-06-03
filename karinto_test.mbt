@@ -310,3 +310,28 @@ test "parse error: malformed YAML is surfaced" {
   json_inspect(res.parse_error is Some(_), content=true)
   json_inspect(res.diagnostics.length(), content=0)
 }
+
+///|
+// Regression: content containing non-BMP characters (emoji are surrogate
+// pairs in UTF-16) used to panic. The inline-ignore scanner (`index_of`) and
+// the YAML anchor scanner sliced strings at arbitrary code-unit offsets, which
+// aborts when a boundary splits a surrogate pair. Linting must complete
+// without throwing.
+test "non-BMP characters do not crash the scanners" {
+  let yaml =
+    #|on:
+    #|  push:
+    #|    branches: &default
+    #|      - main
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - name: Dog fooding 🐶 # karinto: ignore[empty-mappings]
+    #|        run: echo "🙊"
+  let res = @karinto.lint(yaml)
+  json_inspect(res.parse_error is None, content=true)
+}

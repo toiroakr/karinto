@@ -6486,7 +6486,15 @@ fn scan_anchor_tokens(
         while j < n && is_anchor_name_char(chars[j]) {
           j = j + 1
         }
-        let name = line[i + 1:j].to_owned()
+        // `i` and `j` index `chars` (a codepoint array), so build the name
+        // from those code points. Slicing `line` directly would use code-unit
+        // offsets and could panic mid-surrogate when the line contains
+        // non-BMP characters.
+        let buf = StringBuilder::new()
+        for k in (i + 1)..<j {
+          buf.write_char(chars[k])
+        }
+        let name = buf.to_string()
         if ch == '&' {
           declared[name] = true
         } else {
