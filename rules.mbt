@@ -6697,8 +6697,14 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     scan_anchor_tokens(line, declared, used)
     let indent = leading_spaces(line)
     let rest = trim_ws(line[indent:].to_owned())
+    // YAML allows extra spaces after a sequence dash; skip them all so the
+    // reported column lands on the `<<` itself.
     let (content, col0) = if rest.has_prefix("- ") {
-      (trim_ws(rest[2:].to_owned()), indent + 2)
+      let mut k = 2
+      while k < rest.length() && rest.unsafe_get(k) == ' ' {
+        k = k + 1
+      }
+      (rest[k:].to_owned(), indent + k)
     } else {
       (rest, indent)
     }

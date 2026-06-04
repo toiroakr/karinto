@@ -129,9 +129,10 @@ Each diagnostic carries `rule`, `severity`, and `message`. When a finding can
 be tied to a location, it also includes:
 
 - `pos` — the source position, as `{ "line": <1-based>, "col": <1-based> }`.
-  Populated for findings tied to a concrete job or step (a job finding points
-  at the job key, a step finding at the step entry). Omitted for
-  workflow-global findings.
+  A finding about a specific field points at that field — the `uses:` ref, the
+  `run:` script, a multi-line `permissions:` key. Other job/step-scoped
+  findings point at the job key or the step entry. Omitted for workflow-global
+  findings.
 - `job` — the offending job's ID (the key under `jobs:`). Omitted for
   workflow-global findings and for action-file steps.
 - `step` — the step the finding is about, as `{ "index": <0-based position in

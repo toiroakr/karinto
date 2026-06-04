@@ -79,8 +79,51 @@ fn step_node(root : @yaml.Node, job : String?, index : Int) -> @yaml.Node? {
 }
 
 ///|
-/// Resolve the start position of a job's `key` value node, e.g. the `uses:` or
-/// `permissions:` value under `jobs.<job>.<key>`. Returns `None` when the
+/// Look up the `(key, value)` entry for `key` in a mapping node.
+fn node_get_entry(node : @yaml.Node, key : String) -> (@yaml.Node, @yaml.Node)? {
+  match node {
+    Mapping(entries, ..) => {
+      for e in entries {
+        let (k, v) = e
+        if k.as_string() is Some(ks) && ks == key {
+          return Some((k, v))
+        }
+      }
+      None
+    }
+    _ => None
+  }
+}
+
+///|
+/// Position for a `key: value` field. When the value sits on the key's own
+/// line it is the most precise location (`uses: actions/checkout@v4` points at
+/// the ref); when the value spans following lines — a multi-line
+/// `permissions:` block, a `run: |` script body — the key itself is what an
+/// annotation should point at. Empty values also fall back to the key.
+fn entry_field_pos(
+  k : @yaml.Node,
+  v : @yaml.Node,
+  lc : @yaml.LineCounter,
+) -> Position {
+  let (kl, kc) = k.start_pos(lc)
+  let vr = v.range()
+  if vr.node_end > vr.start {
+    let (vl, vc) = v.start_pos(lc)
+    // The value must both start *and* end on the key's line — a `run: |`
+    // block scalar starts at the `|` header on the key's line but its body
+    // lives below, and should be reported at the key.
+    let (el, _) = lc.line_col(vr.node_end - 1)
+    if vl == kl && el == kl {
+      return Position::{ line: vl, col: vc }
+    }
+  }
+  Position::{ line: kl, col: kc }
+}
+
+///|
+/// Resolve the position of a job's `key` field, e.g. the `uses:` or
+/// `permissions:` field under `jobs.<job>.<key>`. Returns `None` when the
 /// positioned parse is unavailable or the field is absent — callers fall back
 /// to the job/step node position so `pos` is never lost.
 fn job_field_pos(ctx : WalkCtx, job : String, key : String) -> Position? {
@@ -90,11 +133,8 @@ fn job_field_pos(ctx : WalkCtx, job : String, key : String) -> Position? {
   for e in entries {
     let (k, v) = e
     if k.as_string() is Some(ks) && ks == job {
-      match node_get(v, key) {
-        Some(field) => {
-          let (line, col) = field.start_pos(lc)
-          return Some(Position::{ line, col })
-        }
+      match node_get_entry(v, key) {
+        Some((fk, fv)) => return Some(entry_field_pos(fk, fv, lc))
         None => return None
       }
     }
@@ -103,7 +143,7 @@ fn job_field_pos(ctx : WalkCtx, job : String, key : String) -> Position? {
 }
 
 ///|
-/// Resolve the start position of a step's `key` value node within its (job or
+/// Resolve the position of a step's `key` field within its (job or
 /// composite-action) steps sequence. `key` may be a plain field (`uses`,
 /// `run`) or a `with.<input>` path, resolved into the step's `with:` mapping.
 /// Returns `None` when unavailable; callers fall back to the step node.
@@ -116,22 +156,19 @@ fn step_field_pos(
   guard ctx.position_root is Some(root) else { return None }
   guard ctx.line_counter is Some(lc) else { return None }
   guard step_node(root, job, step_index) is Some(step) else { return None }
-  let field = match key.find(".") {
+  let entry = match key.find(".") {
     Some(i) => {
       let head = key[0:i].to_owned()
       let tail = key[i + 1:].to_owned()
       match node_get(step, head) {
-        Some(sub) => node_get(sub, tail)
+        Some(sub) => node_get_entry(sub, tail)
         None => None
       }
     }
-    None => node_get(step, key)
+    None => node_get_entry(step, key)
   }
-  match field {
-    Some(n) => {
-      let (line, col) = n.start_pos(lc)
-      Some(Position::{ line, col })
-    }
+  match entry {
+    Some((fk, fv)) => Some(entry_field_pos(fk, fv, lc))
     None => None
   }
 }

@@ -215,7 +215,11 @@ fn hex_digit(c : Int) -> Int {
 /// Append a Unicode code point, encoding to UTF-16 surrogate pairs as needed
 /// so we never write an invalid lone surrogate or split a pair.
 fn append_codepoint(out : StringBuilder, cp : Int) -> Unit {
-  if cp <= 0xFFFF {
+  if cp >= 0xD800 && cp <= 0xDFFF {
+    // An escape naming a lone surrogate is not a valid Unicode scalar value;
+    // substitute U+FFFD so the output never contains an unpaired surrogate.
+    out.write_char('\u{FFFD}')
+  } else if cp <= 0xFFFF {
     out.write_char(cp.unsafe_to_char())
   } else {
     let v = cp - 0x10000

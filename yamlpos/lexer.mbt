@@ -51,9 +51,9 @@ priv struct Lexer {
   len : Int
   mut pos : Int
   tokens : Array[Token]
-  // True once we have seen content (directives or a document) so `---`/`...`
-  // at column 0 are recognised as document markers.
-  mut in_flow : Int // nesting depth of flow collections
+  // Nesting depth of flow collections. `---` / `...` at column 0 are only
+  // recognised as document markers outside any flow context (depth 0).
+  mut in_flow : Int
 }
 
 ///|

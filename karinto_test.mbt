@@ -403,3 +403,37 @@ test "positions: block scalars do not desync step indices" {
     assert_true(d.pos is Some({ line: 10, .. }))
   }
 }
+
+///|
+test "positions: multi-line field values point at the key" {
+  // `run: |` puts the script on following lines; the annotation should land
+  // on the `run` key itself rather than the first body line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: |
+    #|          echo "${{ github.event.issue.title }}"
+  let res = @karinto.lint(yaml)
+  let ti = res.diagnostics.filter(fn(d) { d.rule == "template-injection" })
+  assert_true(ti.length() > 0)
+  assert_true(ti[0].pos is Some({ line: 6, col: 9 }))
+}
+
+///|
+test "positions: merge key column tolerates extra spaces after dash" {
+  let yaml =
+    #|defaults: &d
+    #|  run: echo hi
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      -   <<: *d
+  let res = @karinto.lint(yaml)
+  let mk = res.diagnostics.filter(fn(d) { d.message.contains("merge key") })
+  assert_true(mk.length() == 1)
+  assert_true(mk[0].pos is Some({ line: 7, col: 11 }))
+}

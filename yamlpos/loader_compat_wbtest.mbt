@@ -834,3 +834,32 @@ test "merge key: explicit key after << overrides merged entry" {
     "use": { "k": 1, "run": "bye" },
   })
 }
+
+///|
+/// karinto addition: anchors are scoped to a single document — an alias in a
+/// later document must not resolve against an earlier document's anchors,
+/// even across empty documents.
+test "anchors do not leak across documents" {
+  let source =
+    #|a: &x 1
+    #|b: *x
+    #|---
+    #|c: *x
+  let docs = Yaml::load_from_string(source)
+  json_inspect(docs, content=[{ "a": 1, "b": 1 }, { "c": null }])
+  let source2 =
+    #|a: &x 1
+    #|---
+    #|---
+    #|c: *x
+  let docs2 = Yaml::load_from_string(source2)
+  json_inspect(docs2[docs2.length() - 1], content={ "c": null })
+}
+
+///|
+/// karinto addition: an escape naming a lone surrogate is replaced with
+/// U+FFFD instead of emitting an unpaired surrogate code unit.
+test "lone surrogate escape becomes U+FFFD" {
+  let docs = Yaml::load_from_string("k: \"a\\uD800b\"")
+  json_inspect(docs[0], content={ "k": "a\u{FFFD}b" })
+}

@@ -1514,7 +1514,7 @@ test "unredacted-secrets: secret length manipulated before logging" {
         "rule": "template-injection",
         "severity": "info",
         "message": "code injection via template expansion in `run:` script",
-        "pos": { "line": 10, "col": 14 },
+        "pos": { "line": 10, "col": 9 },
         "job": "build",
         "step": { "index": 0 },
       },

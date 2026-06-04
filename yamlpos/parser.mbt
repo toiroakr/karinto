@@ -140,6 +140,14 @@ fn Parser::parse_stream(self : Parser) -> Array[Document] {
   let docs : Array[Document] = []
   while self.peek() is Some(_) {
     let loop_start = self.i
+    // YAML scopes anchors and %TAG handles to a single document. Reset both
+    // before each document's directives — including empty documents, which the
+    // previous reset (inside the non-empty-root branch) skipped, leaking state
+    // across `--- ---`.
+    self.anchors.clear()
+    self.tag_handles.clear()
+    self.tag_handles["!"] = "!"
+    self.tag_handles["!!"] = "tag:yaml.org,2002:"
     self.skip_trivia()
     // Directives.
     let mut had_directive = false
@@ -177,8 +185,6 @@ fn Parser::parse_stream(self : Parser) -> Array[Document] {
             if nt.kind == DocEnd || nt.kind == DocStart {
               None
             } else {
-              // Anchors reset per document.
-              self.anchors.clear()
               Some(self.parse_node(-1))
             }
           None => None
