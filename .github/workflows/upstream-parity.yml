@@ -6,12 +6,23 @@ name: upstream-parity
 # diff classification. Tool versions and fixtures are kept in lockstep via
 # mise.toml + the weekly upstream-refresh workflow.
 #
+# When does it run, and what happens on a hard divergence?
+#   - pull_request (paths-filtered): the regression gate. A divergence
+#     introduced by the PR hard-fails the check so it gets caught at review
+#     time. Divergence here is almost always the PR's own change.
+#   - push to main: informational. The report posts to the step summary but a
+#     divergence does NOT fail the run (main is already merged).
+#   - schedule (daily) + workflow_dispatch: the safety net. A divergence that
+#     no PR caught — an upstream refresh adding a check karinto misses, or
+#     toolchain drift — is not tied to any PR. The scheduled run stays green
+#     and instead files (or updates) a tracking issue via the separate
+#     `report-issue` job; it auto-closes the issue once parity is restored.
+#
 # Trigger note: the weekly upstream-refresh PR is opened with GITHUB_TOKEN,
 # and GitHub does not start `pull_request` workflows for token-created
-# events. So that PR won't auto-run parity. Adding the `run-parity` label is
-# the manual escape hatch — only users with write access can apply labels, so
-# the job gates on the label name alone. The label is removed after the run
-# so re-adding it re-triggers.
+# events. So that PR won't auto-run parity. Two escape hatches cover it: the
+# `run-parity` label (manual, write-access-gated) runs it on the PR, and the
+# daily schedule catches the divergence on main after merge.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -35,6 +46,15 @@ on:
       - worker/**
       - fixtures/upstream/**
       - scripts/upstream-parity/**
+  schedule:
+    # Daily at 06:00 UTC, a few hours after the Monday 00:00 UTC
+    # upstream-refresh, so a merged refresh or any drift on main surfaces a
+    # divergence issue within a day. Daily is plenty: divergences only appear
+    # when main changes (a merge) or the pinned toolchain/upstream shifts, none
+    # of which move more than once a day in practice. The issue dedupes, so a
+    # standing divergence won't spam.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 jobs:
   parity:
@@ -42,17 +62,25 @@ jobs:
     # `run-parity` trigger label. This is the manual escape hatch for
     # token-created refresh PRs; label application already requires write
     # access, so gating on the label name is enough. Normal
-    # opened/synchronize/push checks are untouched.
+    # opened/synchronize/push/schedule checks are untouched.
     if: >-
       github.event.action != 'labeled'
       || github.event.label.name == 'run-parity'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Read-only: this job builds and runs PR-controlled code (moon build,
-    # compare.mjs). The write-scoped label removal lives in a separate job
-    # below so no write token is ever exposed to attacker-editable code.
+    # compare.mjs). Any write-scoped follow-up (label removal, issue filing)
+    # lives in separate jobs below so no write token is ever exposed to
+    # attacker-editable code.
     permissions:
       contents: read
+    outputs:
+      # compare.mjs exit code: 0 parity holds, 1 hard divergence, 2 config
+      # error. Consumed by report-issue to file / close the tracking issue.
+      code: ${{ steps.compare.outputs.code }}
+      # The markdown report, surfaced only for scheduled divergences so the
+      # issue body can quote it without re-running the comparison.
+      body: ${{ steps.report.outputs.body }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         # Don't leave the job token in .git/config — nothing here needs git
@@ -93,22 +121,143 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Compare karinto vs upstream
-        # `--soft` on main keeps the job green even on divergence (the report
-        # still posts to the step summary). PRs hard-fail on divergence so
-        # newly introduced regressions get caught at review time.
+        id: compare
         # The resolved binary paths come from a trusted step (mise which), but
         # pass them through the environment rather than interpolating into the
-        # shell so the run block stays free of template expansion.
+        # shell so the run block stays free of template expansion. Same for the
+        # event name.
         env:
           ACTIONLINT_BIN: ${{ steps.bins.outputs.actionlint }}
           ZIZMOR_BIN: ${{ steps.bins.outputs.zizmor }}
           GHALINT_BIN: ${{ steps.bins.outputs.ghalint }}
+          EVENT: ${{ github.event_name }}
         run: |
+          # Capture the exit code instead of letting `bash -e` abort: only a
+          # pull_request divergence should fail the check. push / schedule /
+          # workflow_dispatch stay green (the scheduled run files an issue).
+          set +e
           node scripts/upstream-parity/compare.mjs \
             --actionlint "$ACTIONLINT_BIN" \
             --zizmor     "$ZIZMOR_BIN" \
             --ghalint    "$GHALINT_BIN" \
-            ${{ github.event_name == 'push' && '--soft' || '' }}
+            --summary-path report.md
+          code=$?
+          set -e
+          # Publish the code first: a config error (exit 2) can abort
+          # compare.mjs before report.md exists, so guard the `cat` and write
+          # the output unconditionally — otherwise the step would die on the
+          # missing file and never set `code` for the report-issue job.
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ -f report.md ]; then
+            cat report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # compare.mjs documents only 0 (parity), 1 (hard divergence), and 2
+          # (config error). Any other code is an unexpected failure (a crash,
+          # OOM kill, signal) and must fail the job on every event — never let
+          # it green-light as a non-pull_request divergence.
+          case "$code" in
+            0) ;;
+            1)
+              if [ "$EVENT" = "pull_request" ]; then
+                echo "upstream-parity: hard divergence introduced by this PR" >&2
+                exit 1
+              fi
+              ;;
+            2)
+              echo "upstream-parity: configuration error" >&2
+              exit 2
+              ;;
+            *)
+              echo "upstream-parity: compare.mjs exited with unexpected code $code" >&2
+              exit "$code"
+              ;;
+          esac
+
+      - name: Expose report for the tracking issue
+        # Only scheduled divergences need an issue body; hand the report to the
+        # write-scoped report-issue job via a job output (no PR code there).
+        if: github.event_name == 'schedule' && steps.compare.outputs.code == '1'
+        id: report
+        run: |
+          # `code == 1` is normally the controlled divergence exit, which
+          # always writes report.md — but an unexpected exception in
+          # compare.mjs also exits 1 without a report. Fall back to a pointer
+          # so the report-issue job still files an issue (its body already
+          # leads with the run URL) instead of this step failing the job.
+          {
+            echo "body<<__PARITY_REPORT_EOF__"
+            if [ -f report.md ]; then
+              cat report.md
+            else
+              echo "_compare.mjs exited 1 without writing a report — see the run logs._"
+            fi
+            echo "__PARITY_REPORT_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  report-issue:
+    # Isolated write-scoped job for the scheduled safety net: it neither checks
+    # out nor runs any PR-controlled code, so the issues:write token can't be
+    # exfiltrated. Runs only on the daily schedule. Files / updates a tracking
+    # issue when parity diverges, and closes it once parity is restored.
+    needs: parity
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: File or update the divergence issue
+        if: needs.parity.outputs.code == '1'
+        # Pass contexts through the environment rather than interpolating into
+        # the shell so the run block stays free of template expansion. BODY is
+        # the report markdown produced by the parity job.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BODY: ${{ needs.parity.outputs.body }}
+        run: |
+          label="upstream-parity"
+          title="upstream-parity: divergences detected"
+          # Ensure the dedupe label exists (idempotent).
+          gh label create "$label" --repo "$REPO" --color FBCA04 \
+            --description "Scheduled upstream-parity divergence tracker" 2>/dev/null || true
+          {
+            echo "The scheduled \`upstream-parity\` run found hard divergence(s) between karinto and the pinned upstream linters."
+            echo
+            echo "This is not tied to a specific PR — it usually means an upstream refresh (new fixtures / tool version) or toolchain drift surfaced a gap. Investigate, then either implement the missing rule or record the intentional divergence in \`scripts/upstream-parity/allowlist.json\`."
+            echo
+            echo "- Run: ${RUN_URL}"
+            echo
+            echo "$BODY"
+          } > issue-body.md
+          existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            # Refresh the body in place (it leads with the latest run URL)
+            # rather than adding a daily comment — a standing divergence
+            # shouldn't grow a noisy timeline.
+            gh issue edit "$existing" --repo "$REPO" --body-file issue-body.md
+          else
+            gh issue create --repo "$REPO" --title "$title" --label "$label" \
+              --body-file issue-body.md
+          fi
+
+      - name: Close the divergence issue once parity is restored
+        if: needs.parity.outputs.code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label="upstream-parity"
+          existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" \
+              --body "Resolved: the [scheduled run](${RUN_URL}) found no divergences. Closing."
+            gh issue close "$existing" --repo "$REPO"
+          fi
 
   remove-label:
     # Isolated write-scoped job: it neither checks out nor runs any
