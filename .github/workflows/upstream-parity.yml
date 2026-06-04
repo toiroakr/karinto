@@ -166,9 +166,18 @@ jobs:
         if: github.event_name == 'schedule' && steps.compare.outputs.code == '1'
         id: report
         run: |
+          # `code == 1` is normally the controlled divergence exit, which
+          # always writes report.md — but an unexpected exception in
+          # compare.mjs also exits 1 without a report. Fall back to a pointer
+          # so the report-issue job still files an issue (its body already
+          # leads with the run URL) instead of this step failing the job.
           {
             echo "body<<__PARITY_REPORT_EOF__"
-            cat report.md
+            if [ -f report.md ]; then
+              cat report.md
+            else
+              echo "_compare.mjs exited 1 without writing a report — see the run logs._"
+            fi
             echo "__PARITY_REPORT_EOF__"
           } >> "$GITHUB_OUTPUT"
 
