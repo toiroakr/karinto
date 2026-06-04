@@ -1,4 +1,4 @@
 import {
-  "moonbit-community/yaml" @yaml,
+  "toiroakr/karinto/yamlpos" @yaml,
   "moonbitlang/core/json",
 }

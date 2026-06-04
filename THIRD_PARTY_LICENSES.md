@@ -12,8 +12,7 @@ distributed under the MIT License; their license texts are reproduced below.
 | actionlint | <https://github.com/rhysd/actionlint> | MIT | Rule taxonomy inspiration |
 | zizmor | <https://github.com/zizmorcore/zizmor> | MIT | Rule taxonomy inspiration |
 | ghalint | <https://github.com/suzuki-shunsuke/ghalint> | MIT | Rule taxonomy inspiration |
-| moonbit-community/yaml | <https://github.com/moonbit-community/yaml.mbt> | MIT | Bundled runtime dependency |
-| yaml-rust2 | <https://github.com/Ethiraric/yaml-rust2> | MIT | Transitive (via moonbit-community/yaml) |
+| eemeli/yaml | <https://github.com/eemeli/yaml> | ISC | Parser design ported into the in-tree `yamlpos` package |
 
 Rule IDs in karinto are prefixed with `act-`, `ziz-`, or `ghl-` to indicate
 which upstream linter the rule originated from. `cl-*` IDs are karinto-only.
@@ -104,60 +103,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## moonbit-community/yaml
+## eemeli/yaml
 
-This is the one upstream whose source code karinto actually bundles — the
-MoonBit JS build inlines this package into the Worker artifact. The
-package is itself a port of [yaml-rust2](https://github.com/Ethiraric/yaml-rust2),
-so the upstream yaml-rust2 attribution is carried below as well.
-
-```
-MIT License
-
-Copyright 2025-2025 International Digital Economy Academy.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-## yaml-rust2 (transitive, via moonbit-community/yaml)
+karinto's in-tree `yamlpos` package is a MoonBit port of the parser design of
+[eemeli/yaml](https://github.com/eemeli/yaml) (its layered lexer → offset-range
+CST → composed AST, and the `LineCounter` lazy line/column resolution). The
+MoonBit JS build inlines `yamlpos` into the Worker artifact, so the upstream ISC
+attribution is reproduced here. (karinto no longer depends on
+`moonbit-community/yaml`.)
 
 ```
-The MIT License (MIT)
+ISC License
 
-Copyright (c) 2015 Chen Yuheng
-Copyright (c) 2023 Ethiraric
+Copyright Eemeli Aro <eemeli@gmail.com>
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 ```

@@ -128,6 +128,10 @@ version of the karinto engine that produced the diagnostics — see
 Each diagnostic carries `rule`, `severity`, and `message`. When a finding can
 be tied to a location, it also includes:
 
+- `pos` — the source position, as `{ "line": <1-based>, "col": <1-based> }`.
+  Populated for findings tied to a concrete job or step (a job finding points
+  at the job key, a step finding at the step entry). Omitted for
+  workflow-global findings.
 - `job` — the offending job's ID (the key under `jobs:`). Omitted for
   workflow-global findings and for action-file steps.
 - `step` — the step the finding is about, as `{ "index": <0-based position in
@@ -135,8 +139,9 @@ be tied to a location, it also includes:
   present so a step is locatable even without an `id:`; `id` is omitted when
   the step declares none.
 
-The YAML parser does not preserve source layout, so diagnostics do not carry
-line/column positions; `job`/`step` are the location handles instead.
+`pos` comes from karinto's own YAML parser, which records each node's source
+range and resolves line/column on demand; `job`/`step` remain the fallback
+handles for workflow-global findings that have no single source location.
 
 In `repo` mode the result is wrapped:
 

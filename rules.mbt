@@ -2043,11 +2043,12 @@ fn check_composite_step_shell(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   for s in ctx.action_steps {
     if s.run is Some(_) && !s.has_shell {
-      add_diag(
+      add_diag_step(
         out,
         "composite-step-shell-required",
         Warning,
         "composite action step is missing `shell:`",
+        s,
       )
     }
   }

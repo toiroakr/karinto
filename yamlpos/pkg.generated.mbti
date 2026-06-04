@@ -1,0 +1,141 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "toiroakr/karinto/yamlpos"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn lex(String) -> Array[Token]
+
+pub fn parse(String) -> Document
+
+pub fn parse_documents(String) -> Array[Document]
+
+pub fn parse_for_lint(String) -> LintParse raise LoadError
+
+pub fn parse_with_positions(String) -> ParseResult
+
+// Errors
+pub suberror LoadError {
+  LoadError(String)
+} derive(@debug.Debug)
+pub fn LoadError::message(Self) -> String
+
+// Types and methods
+pub(all) struct Document {
+  root : Node?
+  range : Range
+  errors : Array[YamlError]
+} derive(@debug.Debug)
+
+pub struct LineCounter {
+  line_starts : Array[Int]
+}
+pub fn LineCounter::add_newline(Self, Int) -> Unit
+pub fn LineCounter::from_source(String) -> Self
+pub fn LineCounter::line_col(Self, Int) -> (Int, Int)
+pub fn LineCounter::new() -> Self
+
+pub struct LintParse {
+  documents : Array[Yaml]
+  position_root : Node?
+  line_counter : LineCounter
+}
+
+pub(all) enum Node {
+  Scalar(ScalarValue, style~ : ScalarStyle, range~ : Range, tag~ : String?, anchor~ : String?)
+  Mapping(Array[(Node, Node)], range~ : Range, tag~ : String?, anchor~ : String?)
+  Sequence(Array[Node], range~ : Range, tag~ : String?, anchor~ : String?)
+  Alias(name~ : String, range~ : Range, resolved~ : Bool)
+} derive(@debug.Debug)
+pub fn Node::as_string(Self) -> String?
+pub fn Node::dump(Self) -> String
+pub fn Node::range(Self) -> Range
+pub fn Node::start_pos(Self, LineCounter) -> (Int, Int)
+pub fn Node::tag(Self) -> String?
+
+pub struct ParseResult {
+  documents : Array[Document]
+  line_counter : LineCounter
+}
+
+pub(all) struct Range {
+  start : Int
+  value_end : Int
+  node_end : Int
+} derive(Eq, @debug.Debug)
+pub fn Range::new(Int, Int, Int) -> Self
+
+pub(all) enum ScalarStyle {
+  Plain
+  SingleQuoted
+  DoubleQuoted
+  Literal
+  Folded
+} derive(Eq, @debug.Debug)
+
+pub(all) enum ScalarValue {
+  Null
+  Bool(Bool)
+  Int(Int64)
+  Float(Double, repr~ : String)
+  Str(String)
+  Bad
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Token {
+  kind : TokenKind
+  offset : Int
+  source : String
+} derive(@debug.Debug)
+
+pub(all) enum TokenKind {
+  ByteOrderMark
+  DocStart
+  DocEnd
+  Space
+  Comment
+  Newline
+  Directive
+  Anchor
+  Tag
+  SeqItemInd
+  ExplicitKeyInd
+  MapValueInd
+  FlowMapStart
+  FlowMapEnd
+  FlowSeqStart
+  FlowSeqEnd
+  Comma
+  BlockScalarHeader
+  BlockScalarBody
+  Alias
+  SingleQuoted
+  DoubleQuoted
+  Scalar
+} derive(Eq, @debug.Debug)
+
+pub(all) enum Yaml {
+  Real(Double, repr~ : String)
+  Integer(Int64)
+  String(String)
+  Boolean(Bool)
+  Array(Array[Yaml])
+  Map(Map[String, Yaml])
+  Null
+  BadValue
+} derive(Eq, @debug.Debug)
+pub fn Yaml::load_from_string(StringView) -> Array[Self] raise LoadError
+pub impl Show for Yaml
+pub impl ToJson for Yaml
+
+pub(all) struct YamlError {
+  message : String
+  offset : Int
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
+

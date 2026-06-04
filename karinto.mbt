@@ -151,17 +151,23 @@ pub fn lint(
 ) -> LintResult {
   let lines = count_lines(content)
   let merged_disabled = merge_inline_ignores(content, disabled)
-  let docs = try? @yaml.Yaml::load_from_string(content)
-  match docs {
+  // Single parse pass: the value tree (for rules), the position node tree, and
+  // the line counter all come from one lex+parse of `content`.
+  let parsed = try? @yaml.parse_for_lint(content)
+  match parsed {
     Err(e) =>
       LintResult::{
         kind,
         stats: Stats::{ jobs: 0, steps: 0, lines },
         diagnostics: [],
-        parse_error: Some(e.to_string()),
+        parse_error: Some(e.message()),
       }
-    Ok(arr) => {
-      let doc = if arr.length() > 0 { arr[0] } else { @yaml.Yaml::Null }
+    Ok(lp) => {
+      let doc = if lp.documents.length() > 0 {
+        lp.documents[0]
+      } else {
+        @yaml.Yaml::Null
+      }
       let resolved_kind = match kind {
         Unknown => detect_kind(doc)
         _ => kind
@@ -171,6 +177,9 @@ pub fn lint(
         doc, resolved_kind, merged_disabled, vuln_uses, content, forbidden_uses,
         archived_uses,
       )
+      // Stamp line/column positions onto job- and step-scoped findings from the
+      // position node tree. Best-effort: absent positions leave `pos = None`.
+      fill_positions(diagnostics, lp.position_root, lp.line_counter)
       LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
     }
   }
