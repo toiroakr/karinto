@@ -874,3 +874,13 @@ test "double-quoted escaped line break consumes continuation indent" {
   let docs = Yaml::load_from_string(source)
   json_inspect(docs[0], content={ "k": "ab" })
 }
+
+///|
+/// karinto addition: an unterminated flow collection is a parse error even
+/// when it contains no entries.
+test "unterminated empty flow collections are errors" {
+  assert_true((try? Yaml::load_from_string("[")) is Err(_))
+  assert_true((try? Yaml::load_from_string("{")) is Err(_))
+  assert_true((try? Yaml::load_from_string("k: [")) is Err(_))
+  assert_true((try? Yaml::load_from_string("k: {")) is Err(_))
+}

@@ -384,9 +384,10 @@ fn split_lines(s : String) -> Array[String] {
       i = i + 1
     }
   }
-  // Trailing content without a final newline.
-  if sb.to_string().length() > 0 {
-    lines.push(sb.to_string())
+  // Trailing content without a final newline (materialize the tail once).
+  let tail = sb.to_string()
+  if tail.length() > 0 {
+    lines.push(tail)
   }
   lines
 }

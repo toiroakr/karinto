@@ -35,12 +35,12 @@ fn Parser::parse_flow_seq(
     self.skip_trivia()
     match self.peek() {
       None => {
-        if items.length() > 0 {
-          self.errors.push(YamlError::{
-            message: "unterminated flow sequence",
-            offset: start,
-          })
-        }
+        // Reaching EOF inside a flow collection is always an error — even an
+        // empty `[` must be closed.
+        self.errors.push(YamlError::{
+          message: "unterminated flow sequence",
+          offset: start,
+        })
         break
       }
       Some(t) =>
@@ -99,12 +99,12 @@ fn Parser::parse_flow_map(
     self.skip_trivia()
     match self.peek() {
       None => {
-        if entries.length() > 0 {
-          self.errors.push(YamlError::{
-            message: "unterminated flow mapping",
-            offset: start,
-          })
-        }
+        // Reaching EOF inside a flow collection is always an error — even an
+        // empty `{` must be closed.
+        self.errors.push(YamlError::{
+          message: "unterminated flow mapping",
+          offset: start,
+        })
         break
       }
       Some(t) =>
