@@ -12,7 +12,7 @@ name: upstream-parity
 #     time. Divergence here is almost always the PR's own change.
 #   - push to main: informational. The report posts to the step summary but a
 #     divergence does NOT fail the run (main is already merged).
-#   - schedule (weekly) + workflow_dispatch: the safety net. A divergence that
+#   - schedule (daily) + workflow_dispatch: the safety net. A divergence that
 #     no PR caught — an upstream refresh adding a check karinto misses, or
 #     toolchain drift — is not tied to any PR. The scheduled run stays green
 #     and instead files (or updates) a tracking issue via the separate
@@ -22,7 +22,7 @@ name: upstream-parity
 # and GitHub does not start `pull_request` workflows for token-created
 # events. So that PR won't auto-run parity. Two escape hatches cover it: the
 # `run-parity` label (manual, write-access-gated) runs it on the PR, and the
-# weekly schedule catches the divergence on main after merge.
+# daily schedule catches the divergence on main after merge.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -143,8 +143,14 @@ jobs:
             --summary-path report.md
           code=$?
           set -e
-          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          # Publish the code first: a config error (exit 2) can abort
+          # compare.mjs before report.md exists, so guard the `cat` and write
+          # the output unconditionally — otherwise the step would die on the
+          # missing file and never set `code` for the report-issue job.
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ -f report.md ]; then
+            cat report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ "$code" -eq 2 ]; then
             echo "upstream-parity: configuration error" >&2
             exit 2
@@ -169,7 +175,7 @@ jobs:
   report-issue:
     # Isolated write-scoped job for the scheduled safety net: it neither checks
     # out nor runs any PR-controlled code, so the issues:write token can't be
-    # exfiltrated. Runs only on the weekly schedule. Files / updates a tracking
+    # exfiltrated. Runs only on the daily schedule. Files / updates a tracking
     # issue when parity diverges, and closes it once parity is restored.
     needs: parity
     if: always() && github.event_name == 'schedule'
