@@ -157,6 +157,33 @@ In `repo` mode the result is wrapped:
 }
 ```
 
+## Local CLI
+
+Lint local files without deploying anything or making a network
+round-trip — same engine, same JSON envelope as the Worker. Requires
+Node.js (the CLI targets MoonBit's js backend).
+
+```sh
+# stdin
+cat .github/workflows/ci.yml | moon run --target js cmd/main
+
+# file arguments (kind auto-detected from filename / content)
+moon run --target js cmd/main -- .github/workflows/ci.yml action.yml
+
+# the same knobs as the Worker's `type` / `disable` parameters
+moon run --target js cmd/main -- --type action --disable 'permissions-*' action.yml
+```
+
+Exit codes are CI-friendly: `0` clean, `1` error-severity diagnostics or
+YAML parse errors, `2` usage / IO errors. `moon run` does not propagate
+the program's exit status, so in CI (or pre-commit hooks) run the built
+bundle directly:
+
+```sh
+moon build --target js --release
+node _build/js/release/build/cmd/main/main.js .github/workflows/ci.yml
+```
+
 ## Versioning & pinning
 
 `https://karinto.toiroakr.workers.dev` always serves the **latest** release.

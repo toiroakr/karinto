@@ -13,7 +13,7 @@
 ├── ghalint_rules_test.mbt    # fixtures for ghalint policies
 ├── coverage_test.mbt         # asserts catalogue ↔ tests + origins stay in sync
 ├── karinto_wbtest.mbt        # whitebox tests (internal helpers)
-├── cmd/main                  # demo CLI (`moon run cmd/main`)
+├── cmd/main                  # local CLI (js-only; see README "Local CLI")
 ├── worker                    # MoonBit → JS export package for the Worker
 └── cf                        # Cloudflare Worker (`index.js` + `wrangler.jsonc`)
 ```
@@ -24,11 +24,18 @@
 # Tests (active + #skip fixtures)
 moon test
 
+# js-only packages (worker, cmd/main) are skipped by the default target —
+# CI runs both
+moon test --target js
+
 # WASM-gc build (default backend, used by `moon run`)
 moon build
 
 # JS build for the Worker (release)
 moon build --target js --release
+
+# Local CLI (js-only package; usage in README "Local CLI")
+cat .github/workflows/test.yml | moon run --target js cmd/main
 ```
 
 ## Worker

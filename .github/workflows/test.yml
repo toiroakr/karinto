@@ -32,6 +32,11 @@ jobs:
       - name: moon test
         run: moon test
 
+      # js-only packages (worker, cmd/main) are skipped by the default
+      # wasm-gc run above, so cover them explicitly.
+      - name: moon test (js)
+        run: moon test --target js
+
   changeset-check:
     # Skip on the auto-generated "Version Packages" PR from changesets/action,
     # which removes (rather than adds) .changeset/*.md files.
