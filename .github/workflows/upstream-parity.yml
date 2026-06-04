@@ -151,14 +151,27 @@ jobs:
           if [ -f report.md ]; then
             cat report.md >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ "$code" -eq 2 ]; then
-            echo "upstream-parity: configuration error" >&2
-            exit 2
-          fi
-          if [ "$code" -eq 1 ] && [ "$EVENT" = "pull_request" ]; then
-            echo "upstream-parity: hard divergence introduced by this PR" >&2
-            exit 1
-          fi
+          # compare.mjs documents only 0 (parity), 1 (hard divergence), and 2
+          # (config error). Any other code is an unexpected failure (a crash,
+          # OOM kill, signal) and must fail the job on every event — never let
+          # it green-light as a non-pull_request divergence.
+          case "$code" in
+            0) ;;
+            1)
+              if [ "$EVENT" = "pull_request" ]; then
+                echo "upstream-parity: hard divergence introduced by this PR" >&2
+                exit 1
+              fi
+              ;;
+            2)
+              echo "upstream-parity: configuration error" >&2
+              exit 2
+              ;;
+            *)
+              echo "upstream-parity: compare.mjs exited with unexpected code $code" >&2
+              exit "$code"
+              ;;
+          esac
 
       - name: Expose report for the tracking issue
         # Only scheduled divergences need an issue body; hand the report to the
@@ -221,9 +234,10 @@ jobs:
           existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
+            # Refresh the body in place (it leads with the latest run URL)
+            # rather than adding a daily comment — a standing divergence
+            # shouldn't grow a noisy timeline.
             gh issue edit "$existing" --repo "$REPO" --body-file issue-body.md
-            gh issue comment "$existing" --repo "$REPO" \
-              --body "Refreshed by the [scheduled run](${RUN_URL}) — divergence still present."
           else
             gh issue create --repo "$REPO" --title "$title" --label "$label" \
               --body-file issue-body.md
