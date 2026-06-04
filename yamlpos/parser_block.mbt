@@ -211,6 +211,7 @@ fn Parser::parse_block_map_keyed(
   first_tag : String?,
 ) -> Node {
   let entries : Array[(Node, Node)] = []
+  let merged : Array[Bool] = []
   let mut node_end = start
   // First key (with its properties already consumed by the caller).
   let key = self.parse_map_key_props(col, first_anchor, first_tag)
@@ -224,13 +225,13 @@ fn Parser::parse_block_map_keyed(
     self.skip_inline()
     let value = self.parse_value_after_colon(col, ct)
     node_end = value.range().node_end
-    add_entry(entries, key, value, self)
+    add_entry(entries, merged, key, value, self)
   } else {
     let value = self.empty_scalar(None, None, key.range().node_end)
     node_end = value.range().node_end
-    add_entry(entries, key, value, self)
+    add_entry(entries, merged, key, value, self)
   }
-  self.parse_block_map_loop(col, start, node_end, entries, None, None)
+  self.parse_block_map_loop(col, start, node_end, entries, merged, None, None)
 }
 
 ///|
@@ -242,7 +243,7 @@ fn Parser::parse_block_map(
   tag : String?,
   start : Int,
 ) -> Node {
-  self.parse_block_map_loop(col, start, start, [], anchor, tag)
+  self.parse_block_map_loop(col, start, start, [], [], anchor, tag)
 }
 
 ///|
@@ -253,6 +254,7 @@ fn Parser::parse_block_map_loop(
   start : Int,
   node_end0 : Int,
   entries : Array[(Node, Node)],
+  merged : Array[Bool],
   anchor : String?,
   tag : String?,
 ) -> Node {
@@ -295,6 +297,7 @@ fn Parser::parse_block_map_loop(
           }
           node_end = value.range().node_end
           entries.push((key, value))
+          merged.push(false)
           continue
         }
         // Implicit key: parse a key node up to the ':' indicator.
@@ -307,12 +310,13 @@ fn Parser::parse_block_map_loop(
               self.skip_inline()
               let value = self.parse_value_after_colon(col, ct)
               node_end = value.range().node_end
-              add_entry(entries, key, value, self)
+              add_entry(entries, merged, key, value, self)
             } else {
               // key with no value indicator (shouldn't normally happen)
               node_end = key.range().node_end
               add_entry(
                 entries,
+                merged,
                 key,
                 self.empty_scalar(None, None, key.range().node_end),
                 self,
@@ -322,6 +326,7 @@ fn Parser::parse_block_map_loop(
           None => {
             add_entry(
               entries,
+              merged,
               key,
               self.empty_scalar(None, None, key.range().node_end),
               self,
@@ -408,7 +413,7 @@ fn Parser::parse_map_key(self : Parser) -> Node {
       let name = t.source[1:].to_owned()
       Alias(
         name~,
-        resolved=self.anchors.contains(name),
+        target=self.anchors.get(name),
         range=Range::new(
           t.offset,
           t.offset + t.source.length(),
@@ -471,23 +476,40 @@ fn Parser::parse_map_key_props(
 }
 
 ///|
-/// Add a mapping entry, applying `<<` merge-key semantics.
+/// Add a mapping entry, applying `<<` merge-key semantics. `merged` runs
+/// parallel to `entries` and records which entries were injected by a merge
+/// key: per YAML merge semantics explicit keys win, so an explicit key later
+/// in the same mapping must *override* a merge-injected entry rather than trip
+/// the duplicate-key error — that error only applies between explicit keys.
 fn add_entry(
   entries : Array[(Node, Node)],
+  merged : Array[Bool],
   key : Node,
   value : Node,
   p : Parser,
 ) -> Unit {
   if is_merge_key(key) {
-    p.apply_merge(entries, value)
+    apply_merge(entries, merged, value)
   } else {
-    if key_exists(entries, key) {
-      p.errors.push(YamlError::{
-        message: "duplicate mapping key",
-        offset: key.range().start,
-      })
+    match find_key_index(entries, key) {
+      Some(i) =>
+        if merged[i] {
+          // Explicit key overrides the merge-injected entry.
+          entries[i] = (key, value)
+          merged[i] = false
+        } else {
+          p.errors.push(YamlError::{
+            message: "duplicate mapping key",
+            offset: key.range().start,
+          })
+          entries.push((key, value))
+          merged.push(false)
+        }
+      None => {
+        entries.push((key, value))
+        merged.push(false)
+      }
     }
-    entries.push((key, value))
   }
 }
 
@@ -502,25 +524,25 @@ fn is_merge_key(key : Node) -> Bool {
 ///|
 /// Apply `<<` merge: the value is a mapping (or sequence of mappings/aliases)
 /// whose entries are merged in, without overriding existing keys.
-fn Parser::apply_merge(
-  self : Parser,
+fn apply_merge(
   entries : Array[(Node, Node)],
+  merged : Array[Bool],
   value : Node,
 ) -> Unit {
   let merge_one = fn(n : Node) {
-    let resolved = self.deref(n)
-    match resolved {
+    match deref(n) {
       Mapping(es, ..) =>
         for e in es {
           let (k, v) = e
           if !key_exists(entries, k) {
             entries.push((k, v))
+            merged.push(true)
           }
         }
       _ => ()
     }
   }
-  match self.deref(value) {
+  match deref(value) {
     Sequence(items, ..) =>
       for it in items {
         merge_one(it)
@@ -531,13 +553,20 @@ fn Parser::apply_merge(
 
 ///|
 fn key_exists(entries : Array[(Node, Node)], k : Node) -> Bool {
-  for e in entries {
-    let (ek, _) = e
+  find_key_index(entries, k) is Some(_)
+}
+
+///|
+fn find_key_index(entries : Array[(Node, Node)], k : Node) -> Int? {
+  let mut i = 0
+  while i < entries.length() {
+    let (ek, _) = entries[i]
     if node_key_eq(ek, k) {
-      return true
+      return Some(i)
     }
+    i = i + 1
   }
-  false
+  None
 }
 
 ///|
@@ -549,12 +578,12 @@ fn node_key_eq(a : Node, b : Node) -> Bool {
 }
 
 ///|
-/// Resolve an alias to its target node; non-aliases pass through.
-fn Parser::deref(self : Parser, n : Node) -> Node {
+/// Resolve an alias to its captured target node; non-aliases pass through.
+fn deref(n : Node) -> Node {
   match n {
-    Alias(name~, ..) =>
-      match self.anchors.get(name) {
-        Some(target) => target
+    Alias(target~, ..) =>
+      match target {
+        Some(t) => t
         None => n
       }
     _ => n

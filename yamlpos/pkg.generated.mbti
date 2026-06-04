@@ -47,7 +47,7 @@ pub(all) enum Node {
   Scalar(ScalarValue, style~ : ScalarStyle, range~ : Range, tag~ : String?, anchor~ : String?)
   Mapping(Array[(Node, Node)], range~ : Range, tag~ : String?, anchor~ : String?)
   Sequence(Array[Node], range~ : Range, tag~ : String?, anchor~ : String?)
-  Alias(name~ : String, range~ : Range, resolved~ : Bool)
+  Alias(name~ : String, range~ : Range, target~ : Node?)
 } derive(@debug.Debug)
 pub fn Node::as_string(Self) -> String?
 pub fn Node::dump(Self) -> String

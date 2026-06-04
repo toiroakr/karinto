@@ -802,3 +802,35 @@ test "X8DW: Explicit key and value seperated by comment" {
   assert_eq(docs.length(), 1)
   json_inspect(docs[0], content={ "key": "value" })
 }
+
+///|
+/// karinto addition: aliases resolve to the anchor's definition at the point
+/// the alias appears; a later redefinition of the same anchor must not
+/// retarget earlier references.
+test "anchor redefinition keeps earlier alias targets" {
+  let source =
+    #|a: &x 1
+    #|b: *x
+    #|a2: &x 2
+    #|c: *x
+  let docs = Yaml::load_from_string(source)
+  json_inspect(docs[0], content={ "a": 1, "b": 1, "a2": 2, "c": 2 })
+}
+
+///|
+/// karinto addition: per YAML merge semantics an explicit key wins over a
+/// `<<`-merged one even when it appears after the merge key.
+test "merge key: explicit key after << overrides merged entry" {
+  let source =
+    #|base: &b
+    #|  k: 1
+    #|  run: hello
+    #|use:
+    #|  <<: *b
+    #|  run: bye
+  let docs = Yaml::load_from_string(source)
+  json_inspect(docs[0], content={
+    "base": { "k": 1, "run": "hello" },
+    "use": { "k": 1, "run": "bye" },
+  })
+}

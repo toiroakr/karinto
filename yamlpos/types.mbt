@@ -40,11 +40,13 @@ pub(all) enum Node {
   )
   /// A block or flow sequence.
   Sequence(Array[Node], range~ : Range, tag~ : String?, anchor~ : String?)
-  /// An alias `*a` resolved to the node it points at. `range` is the alias
-  /// token range. `resolved` is `false` when the referenced anchor was not yet
-  /// defined at the point the alias appeared (forward / self reference), which
-  /// the value layer renders as `BadValue`.
-  Alias(name~ : String, range~ : Range, resolved~ : Bool)
+  /// An alias `*a`. `range` is the alias token range. `target` is the node the
+  /// anchor referred to **at the point the alias appeared** — YAML resolves
+  /// aliases against the most recent definition, so a later redefinition of the
+  /// same anchor must not retarget earlier references (and can otherwise create
+  /// cycles through an ancestor). `None` when the anchor was not yet defined
+  /// (forward / self reference), which the value layer renders as `BadValue`.
+  Alias(name~ : String, range~ : Range, target~ : Node?)
 } derive(Debug)
 
 ///|

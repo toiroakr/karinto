@@ -260,10 +260,6 @@ test "merge keys" {
       #|      val:
       #|        Scalar int:30 style=Plain [24,26,26]
       #|      key:
-      #|        Scalar str:"retries" style=Plain [29,36,36]
-      #|      val:
-      #|        Scalar int:3 style=Plain [38,39,39]
-      #|      key:
       #|        Scalar str:"retries" style=Plain [59,66,66]
       #|      val:
       #|        Scalar int:5 style=Plain [68,69,69]

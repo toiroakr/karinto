@@ -279,12 +279,28 @@ fn Parser::parse_node_inner(self : Parser, min_indent : Int) -> Node {
     // A node's properties may be followed by a newline before a block value.
     if self.peek() is Some(nt) && nt.kind == Newline {
       prop_newline = true
-      // Look ahead: if next significant token is a block construct indented
-      // under us, allow it.
+      // Look ahead: a block value on the following lines must be indented
+      // strictly deeper than `min_indent`. Otherwise the properties stand
+      // alone (an anchored empty scalar) and the next line belongs to an
+      // outer construct — e.g. `env: &e` followed by a sibling `- item`
+      // must not swallow the sibling as the anchor's value.
       let save = self.i
       self.skip_trivia()
       match self.peek() {
-        Some(_) => ()
+        Some(t2) => {
+          let c2 = self.col_of(t2.offset)
+          // Zero-indented sequences are YAML's one exception: a block
+          // sequence may sit at the parent key's own column.
+          let too_shallow = if t2.kind == SeqItemInd {
+            c2 < min_indent
+          } else {
+            c2 <= min_indent
+          }
+          if too_shallow {
+            self.i = save
+            break
+          }
+        }
         None => {
           self.i = save
           break
@@ -340,7 +356,7 @@ fn Parser::parse_node_content(
             let name = t.source[1:].to_owned()
             Alias(
               name~,
-              resolved=self.anchors.contains(name),
+              target=self.anchors.get(name),
               range=Range::new(
                 t.offset,
                 t.offset + t.source.length(),

@@ -92,6 +92,7 @@ fn Parser::parse_flow_map(
   tag : String?,
 ) -> Node {
   let entries : Array[(Node, Node)] = []
+  let merged : Array[Bool] = []
   let mut node_end = start
   let mut expect_comma = false
   while true {
@@ -134,7 +135,7 @@ fn Parser::parse_flow_map(
             self.empty_scalar(None, None, key.range().node_end)
           }
           node_end = value.range().node_end
-          add_entry(entries, key, value, self)
+          add_entry(entries, merged, key, value, self)
           expect_comma = true
         } else {
           let key = self.parse_flow_node()
@@ -147,7 +148,7 @@ fn Parser::parse_flow_map(
             self.empty_scalar(None, None, key.range().node_end)
           }
           node_end = value.range().node_end
-          add_entry(entries, key, value, self)
+          add_entry(entries, merged, key, value, self)
           expect_comma = true
         }
     }
@@ -207,7 +208,7 @@ fn Parser::parse_flow_node_inner(self : Parser) -> Node {
           let name = t.source[1:].to_owned()
           Alias(
             name~,
-            resolved=self.anchors.contains(name),
+            target=self.anchors.get(name),
             range=Range::new(
               t.offset,
               t.offset + t.source.length(),
@@ -360,7 +361,7 @@ fn Parser::parse_block_scalar(
   let header_src = header.source
   let folded = header_src.unsafe_get(0).to_int() == '>'
   // Parse chomping and indent indicators from the header.
-  let mut chomp = ' ' // ' ' clip(default), '-' strip, '+' keep
+  let mut chomp = '\u{0000}' // ' ' clip(default), '-' strip, '+' keep
   let mut explicit_indent = 0
   let mut k = 1
   while k < header_src.length() {

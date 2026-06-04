@@ -102,27 +102,27 @@ pub fn Yaml::load_from_string(
     for e in d.errors {
       raise LoadError(e.message)
     }
-    out.push(node_to_yaml(d.root, p.anchors))
+    out.push(node_to_yaml(d.root))
   }
   out
 }
 
 ///|
-fn node_to_yaml(node : Node?, anchors : Map[String, Node]) -> Yaml {
+fn node_to_yaml(node : Node?) -> Yaml {
   match node {
     None => Null
-    Some(n) => convert(n, anchors)
+    Some(n) => convert(n)
   }
 }
 
 ///|
-fn convert(n : Node, anchors : Map[String, Node]) -> Yaml {
+fn convert(n : Node) -> Yaml {
   match n {
     Scalar(v, ..) => scalar_to_yaml(v)
     Sequence(items, ..) => {
       let arr : Array[Yaml] = []
       for it in items {
-        arr.push(convert(it, anchors))
+        arr.push(convert(it))
       }
       Array(arr)
     }
@@ -130,7 +130,7 @@ fn convert(n : Node, anchors : Map[String, Node]) -> Yaml {
       let m : Map[String, Yaml] = {}
       for e in entries {
         let (k, val) = e
-        let key = yaml_key_string(convert(k, anchors))
+        let key = yaml_key_string(convert(k))
         // The reference parser uses an empty string as the "no key yet"
         // placeholder in its key stack, so a genuinely empty key collapses the
         // entry (the value is reinterpreted as the next key and ultimately
@@ -138,18 +138,17 @@ fn convert(n : Node, anchors : Map[String, Node]) -> Yaml {
         if key == "" {
           continue
         }
-        m[key] = convert(val, anchors)
+        m[key] = convert(val)
       }
       Map(m)
     }
-    Alias(name~, resolved~, ..) =>
-      if !resolved {
-        BadValue
-      } else {
-        match anchors.get(name) {
-          Some(target) => convert(target, anchors)
-          None => BadValue
-        }
+    // The target was captured when the alias appeared, so anchor redefinitions
+    // later in the document can neither retarget this reference nor create a
+    // cycle through an ancestor node.
+    Alias(target~, ..) =>
+      match target {
+        Some(t) => convert(t)
+        None => BadValue
       }
   }
 }
@@ -202,7 +201,7 @@ pub fn parse_for_lint(source : String) -> LintParse raise LoadError {
     for e in d.errors {
       raise LoadError(e.message)
     }
-    values.push(node_to_yaml(d.root, p.anchors))
+    values.push(node_to_yaml(d.root))
   }
   let position_root = if docs.length() > 0 { docs[0].root } else { None }
   { documents: values, position_root, line_counter: lc }
