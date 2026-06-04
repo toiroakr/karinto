@@ -1,5 +1,54 @@
 # karinto
 
+## 0.7.0
+
+### Minor Changes
+
+- [#38](https://github.com/toiroakr/karinto/pull/38) [`e806129`](https://github.com/toiroakr/karinto/commit/e80612997287f6f908e49d9160616c965d6f3e4f) Thanks [@toiroakr](https://github.com/toiroakr)! - Carry source line/column positions on diagnostics (#35), and replace the YAML
+  parser to make it possible.
+
+  Each diagnostic tied to a concrete job or step now includes a `pos` field —
+  `{ "line": <1-based>, "col": <1-based> }`. Where a finding concerns a specific
+  field it points at that field's node (the `uses:` value, the `run:` script, the
+  `permissions:` key); otherwise it falls back to the job key or step entry. The
+  field is optional and omitted for workflow-global findings, so existing
+  consumers are unaffected; `job` / `step` remain fallback handles.
+
+  To obtain positions, karinto **drops the `moonbit-community/yaml` dependency** in
+  favour of a new in-tree parser, `yamlpos`: a MoonBit port of the
+  [eemeli/yaml](https://github.com/eemeli/yaml) design — a layered lexer →
+  offset-range CST → composed AST with first-class source ranges, plus a
+  `LineCounter` that resolves line/column lazily. It parses full YAML 1.2 (block +
+  flow, anchors/aliases, tags, all block-scalar styles, merge keys, multi-doc) and
+  decodes scalar values, so it is a drop-in replacement for the rule engine's
+  value tree (rule behaviour is unchanged) while additionally exposing positions.
+
+  We prototyped and benchmarked both forking the existing parser and porting
+  eemeli/yaml from scratch; the port won on size, position design (offset-first
+  ranges + lazy line/col), and not carrying a fork.
+
+  This unblocks richer integrations — SARIF `physicalLocation` and GitHub Actions
+  inline annotations.
+
+### Patch Changes
+
+- [#31](https://github.com/toiroakr/karinto/pull/31) [`c27d3ef`](https://github.com/toiroakr/karinto/commit/c27d3efa9e3053da4b49b461b879a90dd505ea0a) Thanks [@toiroakr](https://github.com/toiroakr)! - Replace deprecated MoonBit standard-library APIs with their current
+  equivalents to keep the codebase warning-free on recent toolchains:
+
+  - `StringView::to_string()` → `to_owned()`
+  - `String::substring(...)` → slice syntax `s[a:b]` (plus `to_owned()` where an
+    owned `String` is required)
+  - `not(expr)` → `!expr`
+  - `Map::new()` → `{}`
+  - `.size()` → `.length()`
+
+  Also migrate the module manifest from the deprecated `moon.mod.json` to the
+  current `moon.mod` format (required by recent toolchains) and update the
+  release version-sync script and docs accordingly.
+
+  This is an internal refactor only; there are no changes to the public
+  interface (`.mbti` is unchanged) or runtime behaviour.
+
 ## 0.6.0
 
 ### Minor Changes
