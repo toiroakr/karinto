@@ -6,9 +6,11 @@ Carry source line/column positions on diagnostics (#35), and replace the YAML
 parser to make it possible.
 
 Each diagnostic tied to a concrete job or step now includes a `pos` field —
-`{ "line": <1-based>, "col": <1-based> }` — pointing at the job key or the step
-entry. The field is optional and omitted for workflow-global findings, so
-existing consumers are unaffected; `job` / `step` remain fallback handles.
+`{ "line": <1-based>, "col": <1-based> }`. Where a finding concerns a specific
+field it points at that field's node (the `uses:` value, the `run:` script, the
+`permissions:` key); otherwise it falls back to the job key or step entry. The
+field is optional and omitted for workflow-global findings, so existing
+consumers are unaffected; `job` / `step` remain fallback handles.
 
 To obtain positions, karinto **drops the `moonbit-community/yaml` dependency** in
 favour of a new in-tree parser, `yamlpos`: a MoonBit port of the
