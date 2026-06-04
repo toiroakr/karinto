@@ -863,3 +863,14 @@ test "lone surrogate escape becomes U+FFFD" {
   let docs = Yaml::load_from_string("k: \"a\\uD800b\"")
   json_inspect(docs[0], content={ "k": "a\u{FFFD}b" })
 }
+
+///|
+/// karinto addition: an escaped line break in a double-quoted scalar removes
+/// the break *and* the continuation line's leading whitespace.
+test "double-quoted escaped line break consumes continuation indent" {
+  let source =
+    #|k: "a\
+    #|     b"
+  let docs = Yaml::load_from_string(source)
+  json_inspect(docs[0], content={ "k": "ab" })
+}

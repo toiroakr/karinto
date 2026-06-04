@@ -16,17 +16,23 @@ fn concat_parts(parts : Array[String]) -> String {
 fn split_ws(s : String) -> Array[String] {
   let out : Array[String] = []
   let sb = StringBuilder::new()
+  // Track the pending word length ourselves so each word is materialized by
+  // exactly one `to_string()` (calling it for the emptiness test too would
+  // allocate twice per word).
+  let mut pending = 0
   for c in s {
     if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-      if sb.to_string().length() > 0 {
+      if pending > 0 {
         out.push(sb.to_string())
         sb.reset()
+        pending = 0
       }
     } else {
       sb.write_char(c)
+      pending = pending + 1
     }
   }
-  if sb.to_string().length() > 0 {
+  if pending > 0 {
     out.push(sb.to_string())
   }
   out
@@ -159,9 +165,21 @@ fn decode_double_quoted(src : String) -> String {
           append_codepoint(out, cp)
           i = ni
         }
-        '\n' =>
-          // Escaped newline: line continuation, consume following indentation.
+        '\n' | '\r' => {
+          // Escaped line break: the break disappears and the continuation
+          // line's leading whitespace is consumed along with it.
           i = i + 2
+          if e == '\r' && i < len && inner.unsafe_get(i).to_int() == '\n' {
+            i = i + 1
+          }
+          while i < len &&
+                (
+                  inner.unsafe_get(i).to_int() == ' ' ||
+                  inner.unsafe_get(i).to_int() == '\t'
+                ) {
+            i = i + 1
+          }
+        }
         _ => {
           out.write_char(e.unsafe_to_char())
           i = i + 2

@@ -31,29 +31,42 @@ pub(all) enum Yaml {
 /// `String("string")`) matching without relying on the deprecated
 /// `derive(Show)` whose output diverged across MoonBit versions.
 pub impl Show for Yaml with fn output(self, logger) {
-  let s = match self {
-    Null => "Null"
-    BadValue => "BadValue"
-    Boolean(b) => "Boolean(\{b})"
-    Integer(n) => "Integer(\{n})"
-    Real(f, repr~) => "Real(\{f}, repr=\{repr.escape()})"
-    String(v) => "String(\{v.escape()})"
+  // Write directly to the logger, recursing into children, so rendering stays
+  // linear — no intermediate per-element strings or quadratic concatenation.
+  match self {
+    Null => logger.write_string("Null")
+    BadValue => logger.write_string("BadValue")
+    Boolean(b) => logger.write_string("Boolean(\{b})")
+    Integer(n) => logger.write_string("Integer(\{n})")
+    Real(f, repr~) => logger.write_string("Real(\{f}, repr=\{repr.escape()})")
+    String(v) => logger.write_string("String(\{v.escape()})")
     Array(a) => {
-      let parts = a.map(fn(y) { y.to_string() })
-      "Array([\{parts.iter().intersperse(", ").fold(init="", fn(acc, p) { acc + p })}])"
+      logger.write_string("Array([")
+      let mut first = true
+      for y in a {
+        if !first {
+          logger.write_string(", ")
+        }
+        first = false
+        y.output(logger)
+      }
+      logger.write_string("])")
     }
     Map(m) => {
-      let parts = m
-        .iter()
-        .map(fn(kv) {
-          let (k, v) = kv
-          "(\{k.escape()}, \{v})"
-        })
-        .collect()
-      "Map([\{parts.iter().intersperse(", ").fold(init="", fn(acc, p) { acc + p })}])"
+      logger.write_string("Map([")
+      let mut first = true
+      for k, v in m {
+        if !first {
+          logger.write_string(", ")
+        }
+        first = false
+        logger.write_string("(\{k.escape()}, ")
+        v.output(logger)
+        logger.write_string(")")
+      }
+      logger.write_string("])")
     }
   }
-  logger.write_string(s)
 }
 
 ///|
