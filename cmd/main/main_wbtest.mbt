@@ -22,8 +22,9 @@ test "kind_from_path uses filename conventions" {
   assert_true(kind_from_path(".github/workflows/ci.yml") is Workflow)
   assert_true(kind_from_path("/repo/.github/workflows/ci.yaml") is Workflow)
   assert_true(kind_from_path("random.yml") is Unknown)
-  // a workflow file named like an action wins the basename check
-  assert_true(kind_from_path(".github/workflows/action.yml") is Action)
+  // the workflows-directory hint beats the basename: GitHub runs every
+  // YAML under .github/workflows/ as a workflow, even `action.yml`
+  assert_true(kind_from_path(".github/workflows/action.yml") is Workflow)
 }
 
 ///|

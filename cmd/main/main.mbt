@@ -147,20 +147,21 @@ fn split_csv(s : String) -> Array[String] {
 }
 
 ///|
-/// Filename hint used when `--type` is omitted: `action.yml` /
-/// `action.yaml` basenames are actions, `.github/workflows/` paths are
-/// workflows; anything else falls back to the engine's content-based
-/// auto-detection.
+/// Filename hint used when `--type` is omitted: `.github/workflows/`
+/// paths are workflows (GitHub runs every YAML there as a workflow,
+/// whatever its basename — even `action.yml`), `action.yml` /
+/// `action.yaml` basenames are actions; anything else falls back to the
+/// engine's content-based auto-detection.
 fn kind_from_path(path : String) -> @karinto.FileKind {
+  if path.contains(".github/workflows/") {
+    return @karinto.FileKind::Workflow
+  }
   let basename = match path.rev_find("/") {
     Some(i) => path[i + 1:].to_owned()
     None => path
   }
   if basename == "action.yml" || basename == "action.yaml" {
     return @karinto.FileKind::Action
-  }
-  if path.contains(".github/workflows/") {
-    return @karinto.FileKind::Workflow
   }
   @karinto.FileKind::Unknown
 }
