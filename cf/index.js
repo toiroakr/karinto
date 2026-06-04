@@ -27,7 +27,7 @@
 //
 // The handler logs a one-line JSON record per request to stdout.
 //
-// YAML parsing is delegated to the MoonBit engine (`@moonbit-community/yaml`).
+// YAML parsing is delegated to the MoonBit engine (the in-tree `yamlpos` parser).
 // When the YAML is malformed the engine returns a `parse_error` field which
 // the handler propagates verbatim.
 

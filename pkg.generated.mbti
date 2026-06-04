@@ -2,8 +2,8 @@
 package "toiroakr/karinto"
 
 import {
-  "moonbit-community/yaml",
   "moonbitlang/core/debug",
+  "toiroakr/karinto/yamlpos",
 }
 
 // Values
@@ -13,7 +13,7 @@ pub fn all_rules() -> Array[Rule]
 
 pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String]) -> LintResult
 
-pub fn prewalk(@yaml.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String]) -> WalkCtx
+pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
 
@@ -50,7 +50,7 @@ pub impl ToJson for FileKind
 
 pub(all) struct JobInfo {
   name : String
-  raw : Map[String, @yaml.Yaml]
+  raw : Map[String, @yamlpos.Yaml]
   if_cond : String?
   uses : String?
   has_permissions : Bool
@@ -126,11 +126,11 @@ pub(all) enum Status {
 } derive(Eq, @debug.Debug)
 
 pub(all) struct StepInfo {
-  raw : Map[String, @yaml.Yaml]
+  raw : Map[String, @yamlpos.Yaml]
   uses : String?
   run : String?
   if_cond : String?
-  with_ : Map[String, @yaml.Yaml]?
+  with_ : Map[String, @yamlpos.Yaml]?
   is_actions_checkout : Bool
   is_upload_artifact : Bool
   is_pypi_publish : Bool
@@ -151,19 +151,21 @@ pub(all) struct StepRef {
 pub impl ToJson for StepRef
 
 pub(all) struct WalkCtx {
-  doc : @yaml.Yaml
-  workflow_map : Map[String, @yaml.Yaml]?
+  doc : @yamlpos.Yaml
+  workflow_map : Map[String, @yamlpos.Yaml]?
   workflow_has_permissions : Bool
   jobs : Array[JobInfo]
   workflow_steps : Array[StepInfo]
   action_steps : Array[StepInfo]
   action_is_composite : Bool
-  updates : Array[Map[String, @yaml.Yaml]]
+  updates : Array[Map[String, @yamlpos.Yaml]]
   vuln_uses : Array[String]
   forbidden_uses : Array[String]
   archived_uses : Array[String]
   kind : FileKind
   source : String
+  position_root : @yamlpos.Node?
+  line_counter : @yamlpos.LineCounter?
 }
 
 // Type aliases

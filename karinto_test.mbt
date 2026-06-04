@@ -43,6 +43,7 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "rule": "duplicate-job-step-ids",
         "severity": "error",
         "message": "duplicate job ID `build` (conflicts with `Build` case-insensitively)",
+        "pos": { "line": 10, "col": 3 },
         "job": "build",
       },
       {
@@ -64,12 +65,14 @@ test "duplicate-job-step-ids: duplicate job ids (case-insensitive)" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `Build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
         "job": "Build",
       },
       {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 10, "col": 3 },
         "job": "build",
       },
     ],
@@ -99,6 +102,7 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "rule": "duplicate-job-step-ids",
         "severity": "error",
         "message": "duplicate step ID `a` (conflicts with `A` case-insensitively)",
+        "pos": { "line": 11, "col": 9 },
         "job": "build",
         "step": { "index": 1, "id": "a" },
       },
@@ -121,6 +125,7 @@ test "duplicate-job-step-ids: duplicate step ids" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
         "job": "build",
       },
     ],
@@ -166,6 +171,7 @@ test "permissions-write-all-forbidden: write-all permission rejected at workflow
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 4, "col": 3 },
         "job": "build",
       },
     ],
@@ -210,12 +216,14 @@ test "job-permissions-required: missing job permissions" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
         "job": "build",
       },
       {
         "rule": "job-permissions-required",
         "severity": "warning",
         "message": "job `build` does not declare `permissions:`",
+        "pos": { "line": 3, "col": 3 },
         "job": "build",
       },
     ],
@@ -252,6 +260,7 @@ test "job-permissions-required: satisfied when workflow-level permissions presen
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 5, "col": 3 },
         "job": "build",
       },
     ],
@@ -297,6 +306,7 @@ test "disable: skip a rule with a glob pattern" {
         "rule": "anonymous-definition",
         "severity": "info",
         "message": "job `build` has no `name:`",
+        "pos": { "line": 4, "col": 3 },
         "job": "build",
       },
     ],
@@ -334,4 +344,96 @@ test "non-BMP characters do not crash the scanners" {
     #|        run: echo "🙊"
   let res = @karinto.lint(yaml)
   json_inspect(res.parse_error is None, content=true)
+}
+
+///|
+test "positions: job key and step line/column" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - id: A
+    #|        run: echo a
+    #|      - id: a
+    #|        run: echo a2
+  let result = @karinto.lint(yaml)
+  // Pull out the two findings we can pin to a concrete source location.
+  let dup = result.diagnostics.filter(fn(d) {
+      d.rule == "duplicate-job-step-ids"
+    })[0]
+  let job_anon = result.diagnostics.filter(fn(d) {
+      d.rule == "anonymous-definition" && d.job is Some(_)
+    })[0]
+  // Step index 1 is the `- id: a` item; its position is the step content (the
+  // `id:` key) on line 11, column 9.
+  assert_true(dup.pos is Some({ line: 11, col: 9 }))
+  // Job-only finding resolves to the `build:` key on line 3, column 3.
+  assert_true(job_anon.pos is Some({ line: 3, col: 3 }))
+}
+
+///|
+test "positions: block scalars do not desync step indices" {
+  // The `run: |` body contains lines that look like list items and keys. The
+  // scanner must treat them as scalar content, so the second step still
+  // resolves to its real source line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: |
+    #|          echo hi
+    #|          - not a step
+    #|          fake: not a key
+    #|      - uses: actions/checkout@v4
+  let result = @karinto.lint(yaml)
+  // The checkout step is index 1 on line 10; positions must not be thrown off
+  // by the structure-looking text inside the preceding block scalar. The
+  // `uses:`-oriented findings on this step now resolve to the `uses:` value
+  // node (col 15 on line 10); either way the line must stay 10.
+  let pin = result.diagnostics.filter(fn(d) { d.step is Some({ index: 1, .. }) })
+  assert_true(pin.length() > 0)
+  for d in pin {
+    assert_true(d.pos is Some({ line: 10, .. }))
+  }
+}
+
+///|
+test "positions: multi-line field values point at the key" {
+  // `run: |` puts the script on following lines; the annotation should land
+  // on the `run` key itself rather than the first body line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: |
+    #|          echo "${{ github.event.issue.title }}"
+  let res = @karinto.lint(yaml)
+  let ti = res.diagnostics.filter(fn(d) { d.rule == "template-injection" })
+  assert_true(ti.length() > 0)
+  assert_true(ti[0].pos is Some({ line: 6, col: 9 }))
+}
+
+///|
+test "positions: merge key column tolerates extra spaces after dash" {
+  let yaml =
+    #|defaults: &d
+    #|  run: echo hi
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      -   <<: *d
+  let res = @karinto.lint(yaml)
+  let mk = res.diagnostics.filter(fn(d) { d.message.contains("merge key") })
+  assert_true(mk.length() == 1)
+  assert_true(mk[0].pos is Some({ line: 7, col: 11 }))
 }

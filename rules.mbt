@@ -82,6 +82,13 @@ pub(all) struct WalkCtx {
   // rules like `undocumented-permissions` need both — they re-scan the
   // source. Empty string when no source is available.
   source : String
+  // Position-carrying AST root and line counter from the `yamlpos` parser.
+  // Used by the field-level position resolver so a finding about a specific
+  // field (e.g. `uses:`/`run:`/`permissions:`) can point at that field's node
+  // rather than the whole job/step. `None` when no positioned parse is
+  // available (e.g. tests that build a `WalkCtx` directly).
+  position_root : @yaml.Node?
+  line_counter : @yaml.LineCounter?
 }
 
 ///|
@@ -175,6 +182,8 @@ pub fn prewalk(
   source? : String = "",
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
+  position_root? : @yaml.Node? = None,
+  line_counter? : @yaml.LineCounter? = None,
 ) -> WalkCtx {
   let jobs : Array[JobInfo] = []
   let workflow_steps : Array[StepInfo] = []
@@ -265,6 +274,8 @@ pub fn prewalk(
     source,
     forbidden_uses,
     archived_uses,
+    position_root,
+    line_counter,
   }
 }
 
@@ -941,6 +952,92 @@ fn add_diag_step(
   })
 }
 
+///|
+/// Resolve the fallback position for a step (its entry node), mirroring what
+/// `fill_positions` would later stamp. Used by `add_diag_step_field` when the
+/// requested field can't be located.
+fn step_node_pos(ctx : WalkCtx, job : String?, step_index : Int) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  match step_node(root, job, step_index) {
+    Some(n) => {
+      let (line, col) = n.start_pos(lc)
+      Some(Position::{ line, col })
+    }
+    None => None
+  }
+}
+
+///|
+/// Resolve the fallback position for a job (its key node), mirroring what
+/// `fill_positions` would later stamp. Used by `add_diag_job_field`.
+fn job_node_pos(ctx : WalkCtx, job : String) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  match job_key_node(root, job) {
+    Some(n) => {
+      let (line, col) = n.start_pos(lc)
+      Some(Position::{ line, col })
+    }
+    None => None
+  }
+}
+
+///|
+/// Like `add_diag_step`, but additionally resolves `pos` to the step's `key`
+/// field node (e.g. `uses`, `run`, or a `with.<input>` path). Falls back to
+/// the step entry node when the field can't be located, so `pos` is never
+/// lost. Job/step context is set exactly as `add_diag_step` would.
+fn add_diag_step_field(
+  out : Array[Diagnostic],
+  ctx : WalkCtx,
+  rule : String,
+  severity : Severity,
+  message : String,
+  step : StepInfo,
+  key : String,
+) -> Unit {
+  let pos = match step_field_pos(ctx, step.job, step.step_index, key) {
+    Some(p) => Some(p)
+    None => step_node_pos(ctx, step.job, step.step_index)
+  }
+  out.push(Diagnostic::{
+    rule,
+    severity,
+    message,
+    pos,
+    job: step.job,
+    step: Some(StepRef::{ index: step.step_index, id: step.id }),
+  })
+}
+
+///|
+/// Like `add_diag_job`, but additionally resolves `pos` to the job's `key`
+/// field node (e.g. `permissions`). Falls back to the job key node when the
+/// field can't be located. Job context is set exactly as `add_diag_job` would.
+fn add_diag_job_field(
+  out : Array[Diagnostic],
+  ctx : WalkCtx,
+  rule : String,
+  severity : Severity,
+  message : String,
+  job : String,
+  key : String,
+) -> Unit {
+  let pos = match job_field_pos(ctx, job, key) {
+    Some(p) => Some(p)
+    None => job_node_pos(ctx, job)
+  }
+  out.push(Diagnostic::{
+    rule,
+    severity,
+    message,
+    pos,
+    job: Some(job),
+    step: None,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Rule: duplicate-job-step-ids (actionlint id-naming family)
 // ---------------------------------------------------------------------------
@@ -1007,11 +1104,23 @@ fn check_write_all_workflow(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 
 ///|
 fn check_write_all_job(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
-  check_perm_string(job.raw.get("permissions"), "job `\{job.name}`", out)
+  match job.raw.get("permissions") {
+    Some(String("write-all")) =>
+      add_diag_job_field(
+        out,
+        ctx,
+        "permissions-write-all-forbidden",
+        Error,
+        "job `\{job.name}`: `permissions: write-all` is forbidden",
+        job.name,
+        "permissions",
+      )
+    _ => ()
+  }
 }
 
 ///|
@@ -1142,16 +1251,19 @@ fn check_job_timeout(
 
 ///|
 fn check_checkout_persist_credentials(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   if step.is_actions_checkout && !step.has_persist_creds_false {
-    add_diag(
+    add_diag_step_field(
       out,
+      ctx,
       "checkout-persist-credentials-false",
       Error,
       "actions/checkout requires `persist-credentials: false` to avoid token leakage",
+      step,
+      "uses",
     )
   }
 }
@@ -1162,18 +1274,21 @@ fn check_checkout_persist_credentials(
 
 ///|
 fn check_unpinned_uses(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.uses {
     Some(u) =>
       if !step.is_local_or_docker && step.at_idx >= 0 && !step.has_full_sha {
-        add_diag(
+        add_diag_step_field(
           out,
+          ctx,
           "unpinned-uses",
           Warning,
           "uses `\{u}` is not pinned to a full-length SHA",
+          step,
+          "uses",
         )
       }
     None => ()
@@ -1198,38 +1313,54 @@ fn check_unpinned_uses(
 /// - Templated `persist-credentials: ${{ ... }}` → same Warning.
 /// - `with:` itself is an expression (`with: ${{ fromJson(...) }}`) → Info
 ///   with "may not set persist-credentials: false" (lower confidence).
-fn artipacked_emit_for_step(step : StepInfo, out : Array[Diagnostic]) -> Unit {
+fn artipacked_emit_for_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
   if !step.is_actions_checkout {
     return
   }
   let unsafe_msg = "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false"
   let maybe_msg = "credential persistence through GitHub Actions artifacts: may not set persist-credentials: false"
+  let warn = fn() {
+    add_diag_step_field(
+      out,
+      ctx,
+      "artipacked",
+      Warning,
+      unsafe_msg,
+      step,
+      "uses",
+    )
+  }
   match step.raw.get("with") {
     Some(Map(w)) =>
       match w.get("persist-credentials") {
-        None => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
+        None => warn()
         Some(Boolean(false)) => ()
         Some(Boolean(true)) => () // auditor-only — silent under Regular
         Some(String(s)) =>
           match s.to_lower() {
             "false" | "true" => ()
-            _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
+            _ => warn()
           }
-        _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
+        _ => warn()
       }
-    Some(String(_)) => add_diag_step(out, "artipacked", Info, maybe_msg, step)
-    _ => add_diag_step(out, "artipacked", Warning, unsafe_msg, step)
+    Some(String(_)) =>
+      add_diag_step_field(out, ctx, "artipacked", Info, maybe_msg, step, "uses")
+    _ => warn()
   }
 }
 
 ///|
 fn check_artipacked(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   for s in job.steps {
-    artipacked_emit_for_step(s, out)
+    artipacked_emit_for_step(ctx, s, out)
   }
 }
 
@@ -1245,7 +1376,7 @@ fn check_artipacked_step(
   if ctx.kind != FileKind::Action {
     return
   }
-  artipacked_emit_for_step(step, out)
+  artipacked_emit_for_step(ctx, step, out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,18 +1497,24 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           )
         }
       Some(String("read-all")) =>
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "excessive-permissions",
           Warning,
           "job `\{job.name}`: uses read-all permissions",
+          job.name,
+          "permissions",
         )
       Some(String("write-all")) =>
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "excessive-permissions",
           Warning,
           "job `\{job.name}`: uses write-all permissions",
+          job.name,
+          "permissions",
         )
       _ => ()
     }
@@ -2043,11 +2180,12 @@ fn check_composite_step_shell(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   for s in ctx.action_steps {
     if s.run is Some(_) && !s.has_shell {
-      add_diag(
+      add_diag_step(
         out,
         "composite-step-shell-required",
         Warning,
         "composite action step is missing `shell:`",
+        s,
       )
     }
   }
@@ -3250,25 +3388,34 @@ fn text_has_template_expression(t : String) -> Bool {
 /// * High-cap match → `Error`, with the specific context echoed.
 /// * Otherwise, presence of any `${{ … }}` → `Info` (pedantic backstop).
 fn template_injection_emit(
+  ctx : WalkCtx,
+  step : StepInfo,
+  field : String,
   text : String,
   scope_label : String,
   out : Array[Diagnostic],
 ) -> Unit {
   match find_untrusted_in_text(text) {
     Some(p) =>
-      add_diag(
+      add_diag_step_field(
         out,
+        ctx,
         "template-injection",
         Error,
         "untrusted `\{p}` interpolated into \{scope_label}",
+        step,
+        field,
       )
     None =>
       if text_has_template_expression(text) {
-        add_diag(
+        add_diag_step_field(
           out,
+          ctx,
           "template-injection",
           Info,
           "code injection via template expansion in \{scope_label}",
+          step,
+          field,
         )
       }
   }
@@ -3328,12 +3475,13 @@ fn step_template_sink_inputs(step : StepInfo) -> Array[String] {
 
 ///|
 fn check_template_injection(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
-    Some(r) => template_injection_emit(r, "`run:` script", out)
+    Some(r) =>
+      template_injection_emit(ctx, step, "run", r, "`run:` script", out)
     None => ()
   }
   let sink_inputs = step_template_sink_inputs(step)
@@ -3344,7 +3492,15 @@ fn check_template_injection(
     Some(w) =>
       for name in sink_inputs {
         match w.get(name) {
-          Some(String(s)) => template_injection_emit(s, "`with.\{name}`", out)
+          Some(String(s)) =>
+            template_injection_emit(
+              ctx,
+              step,
+              "with.\{name}",
+              s,
+              "`with.\{name}`",
+              out,
+            )
           _ => ()
         }
       }
@@ -4119,18 +4275,21 @@ fn tool_installer_action(uses : String) -> String? {
 
 ///|
 fn check_unpinned_tools(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
     Some(r) =>
       if run_has_pipe_to_shell(r) {
-        add_diag(
+        add_diag_step_field(
           out,
+          ctx,
           "unpinned-tools",
           Warning,
           "run step fetches and executes an external script without pinning",
+          step,
+          "run",
         )
         return
       }
@@ -4171,7 +4330,15 @@ fn check_unpinned_tools(
             _ => ""
           }
           if msg.length() > 0 {
-            add_diag(out, "unpinned-tools", Warning, msg)
+            add_diag_step_field(
+              out,
+              ctx,
+              "unpinned-tools",
+              Warning,
+              msg,
+              step,
+              "uses",
+            )
           }
         }
         None => ()
@@ -6110,11 +6277,14 @@ fn check_forbidden_uses(
       let bare = if step.at_idx >= 0 { u[0:step.at_idx].to_owned() } else { u }
       for pat in ctx.forbidden_uses {
         if glob_match(pat, u) || glob_match(pat, bare) {
-          add_diag(
+          add_diag_step_field(
             out,
+            ctx,
             "forbidden-uses",
             Warning,
             "uses `\{u}` matches forbidden pattern `\{pat}`",
+            step,
+            "uses",
           )
           break
         }
@@ -6515,8 +6685,39 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   let declared : Map[String, Bool] = {}
   let used : Map[String, Bool] = {}
+  // GitHub Actions' YAML loader does not implement merge keys, so actionlint
+  // flags every `<<:` mapping key (syntax-check). Our parser *does* expand
+  // merges before rules run, so detection re-scans the source for `<<` used
+  // in key position (start of the line's content, optionally after a block
+  // sequence dash).
+  let mut lineno = 0
   for v in ctx.source.split("\n") {
-    scan_anchor_tokens(v.to_owned(), declared, used)
+    lineno = lineno + 1
+    let line = v.to_owned()
+    scan_anchor_tokens(line, declared, used)
+    let indent = leading_spaces(line)
+    let rest = trim_ws(line[indent:].to_owned())
+    // YAML allows extra spaces after a sequence dash; skip them all so the
+    // reported column lands on the `<<` itself.
+    let (content, col0) = if rest.has_prefix("- ") {
+      let mut k = 2
+      while k < rest.length() && rest.unsafe_get(k) == ' ' {
+        k = k + 1
+      }
+      (rest[k:].to_owned(), indent + k)
+    } else {
+      (rest, indent)
+    }
+    if content.has_prefix("<<:") {
+      out.push(Diagnostic::{
+        rule: "yaml-anchor-issues",
+        severity: Error,
+        message: "GitHub Actions does not support YAML merge key \"<<\"",
+        pos: Some(Position::{ line: lineno, col: col0 + 1 }),
+        job: None,
+        step: None,
+      })
+    }
   }
   let names : Array[String] = []
   declared.each(fn(name, _) { names.push(name) })
