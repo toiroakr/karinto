@@ -6685,8 +6685,33 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   let declared : Map[String, Bool] = {}
   let used : Map[String, Bool] = {}
+  // GitHub Actions' YAML loader does not implement merge keys, so actionlint
+  // flags every `<<:` mapping key (syntax-check). Our parser *does* expand
+  // merges before rules run, so detection re-scans the source for `<<` used
+  // in key position (start of the line's content, optionally after a block
+  // sequence dash).
+  let mut lineno = 0
   for v in ctx.source.split("\n") {
-    scan_anchor_tokens(v.to_owned(), declared, used)
+    lineno = lineno + 1
+    let line = v.to_owned()
+    scan_anchor_tokens(line, declared, used)
+    let indent = leading_spaces(line)
+    let rest = trim_ws(line[indent:].to_owned())
+    let (content, col0) = if rest.has_prefix("- ") {
+      (trim_ws(rest[2:].to_owned()), indent + 2)
+    } else {
+      (rest, indent)
+    }
+    if content.has_prefix("<<:") {
+      out.push(Diagnostic::{
+        rule: "yaml-anchor-issues",
+        severity: Error,
+        message: "GitHub Actions does not support YAML merge key \"<<\"",
+        pos: Some(Position::{ line: lineno, col: col0 + 1 }),
+        job: None,
+        step: None,
+      })
+    }
   }
   let names : Array[String] = []
   declared.each(fn(name, _) { names.push(name) })

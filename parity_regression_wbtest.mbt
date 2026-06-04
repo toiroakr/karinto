@@ -41,6 +41,15 @@ test "parity regression: merge keys with explicit override lint cleanly" {
   assert_true(res.parse_error is None)
   assert_true(res.stats.jobs == 1)
   assert_true(res.stats.steps == 4)
+  // GitHub Actions itself rejects merge keys, so (matching actionlint's
+  // syntax-check) every `<<:` key must be flagged, at the same positions.
+  let mk = res.diagnostics.filter(fn(d) {
+    d.rule == "yaml-anchor-issues" && d.message.contains("merge key")
+  })
+  assert_true(mk.length() == 3)
+  assert_true(mk[0].pos is Some({ line: 8, col: 7 }))
+  assert_true(mk[1].pos is Some({ line: 21, col: 11 }))
+  assert_true(mk[2].pos is Some({ line: 27, col: 9 }))
 }
 
 ///|
