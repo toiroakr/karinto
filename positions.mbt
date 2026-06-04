@@ -79,6 +79,64 @@ fn step_node(root : @yaml.Node, job : String?, index : Int) -> @yaml.Node? {
 }
 
 ///|
+/// Resolve the start position of a job's `key` value node, e.g. the `uses:` or
+/// `permissions:` value under `jobs.<job>.<key>`. Returns `None` when the
+/// positioned parse is unavailable or the field is absent — callers fall back
+/// to the job/step node position so `pos` is never lost.
+fn job_field_pos(ctx : WalkCtx, job : String, key : String) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  guard node_get(root, "jobs") is Some(Mapping(entries, ..)) else { None }
+  for e in entries {
+    let (k, v) = e
+    if k.as_string() is Some(ks) && ks == job {
+      match node_get(v, key) {
+        Some(field) => {
+          let (line, col) = field.start_pos(lc)
+          return Some(Position::{ line, col })
+        }
+        None => return None
+      }
+    }
+  }
+  None
+}
+
+///|
+/// Resolve the start position of a step's `key` value node within its (job or
+/// composite-action) steps sequence. `key` may be a plain field (`uses`,
+/// `run`) or a `with.<input>` path, resolved into the step's `with:` mapping.
+/// Returns `None` when unavailable; callers fall back to the step node.
+fn step_field_pos(
+  ctx : WalkCtx,
+  job : String?,
+  step_index : Int,
+  key : String,
+) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  guard step_node(root, job, step_index) is Some(step) else { return None }
+  let field = match key.find(".") {
+    Some(i) => {
+      let head = key[0:i].to_owned()
+      let tail = key[i + 1:].to_owned()
+      match node_get(step, head) {
+        Some(sub) => node_get(sub, tail)
+        None => None
+      }
+    }
+    None => node_get(step, key)
+  }
+  match field {
+    Some(n) => {
+      let (line, col) = n.start_pos(lc)
+      Some(Position::{ line, col })
+    }
+    None => None
+  }
+}
+
+///|
 /// Stamp `pos` onto every diagnostic tied to a concrete job or step that has no
 /// explicit position yet, resolving line/column from the `yamlpos` node tree.
 fn fill_positions(

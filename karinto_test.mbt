@@ -394,11 +394,12 @@ test "positions: block scalars do not desync step indices" {
     #|      - uses: actions/checkout@v4
   let result = @karinto.lint(yaml)
   // The checkout step is index 1 on line 10; positions must not be thrown off
-  // by the structure-looking text inside the preceding block scalar. The step
-  // position is its content (the `uses:` key) at col 9.
+  // by the structure-looking text inside the preceding block scalar. The
+  // `uses:`-oriented findings on this step now resolve to the `uses:` value
+  // node (col 15 on line 10); either way the line must stay 10.
   let pin = result.diagnostics.filter(fn(d) { d.step is Some({ index: 1, .. }) })
   assert_true(pin.length() > 0)
   for d in pin {
-    assert_true(d.pos is Some({ line: 10, col: 9 }))
+    assert_true(d.pos is Some({ line: 10, .. }))
   }
 }

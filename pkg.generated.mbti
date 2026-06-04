@@ -13,7 +13,7 @@ pub fn all_rules() -> Array[Rule]
 
 pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String]) -> LintResult
 
-pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String]) -> WalkCtx
+pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
 
@@ -164,6 +164,8 @@ pub(all) struct WalkCtx {
   archived_uses : Array[String]
   kind : FileKind
   source : String
+  position_root : @yamlpos.Node?
+  line_counter : @yamlpos.LineCounter?
 }
 
 // Type aliases

@@ -174,8 +174,15 @@ pub fn lint(
       }
       let stats = compute_stats(doc, lines)
       let diagnostics = run_rules(
-        doc, resolved_kind, merged_disabled, vuln_uses, content, forbidden_uses,
+        doc,
+        resolved_kind,
+        merged_disabled,
+        vuln_uses,
+        content,
+        forbidden_uses,
         archived_uses,
+        lp.position_root,
+        Some(lp.line_counter),
       )
       // Stamp line/column positions onto job- and step-scoped findings from the
       // position node tree. Best-effort: absent positions leave `pos = None`.
@@ -313,6 +320,8 @@ fn run_rules(
   source : String,
   forbidden_uses : Array[String],
   archived_uses : Array[String],
+  position_root : @yaml.Node?,
+  line_counter : @yaml.LineCounter?,
 ) -> Array[Diagnostic] {
   let ctx = prewalk(
     doc,
@@ -321,6 +330,8 @@ fn run_rules(
     source~,
     forbidden_uses~,
     archived_uses~,
+    position_root~,
+    line_counter~,
   )
   let out : Array[Diagnostic] = []
 
