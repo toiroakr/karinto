@@ -50,6 +50,14 @@ fn run() -> Int {
     None => []
   }
   if files.length() == 0 {
+    // No files and an interactive terminal: reading stdin would just
+    // block waiting for Ctrl-D, which looks like a hang. Bail out with
+    // usage instead.
+    if js_stdin_is_tty() {
+      eprintln("error: no input: pipe YAML via stdin or pass file paths\n")
+      eprintln(build_command().render_help())
+      return 2
+    }
     lint_stdin(kind, disabled)
   } else {
     lint_files(files, kind, disabled)
@@ -262,6 +270,10 @@ extern "js" fn js_read_stdin() -> String? =
   #|   try { return require("node:fs").readFileSync(0, "utf8"); }
   #|   catch (e) { return undefined; }
   #| }
+
+///|
+extern "js" fn js_stdin_is_tty() -> Bool =
+  #| () => !!(typeof process !== "undefined" && process.stdin && process.stdin.isTTY)
 
 ///|
 extern "js" fn js_read_file(path : String) -> String? =
