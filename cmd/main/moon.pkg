@@ -1,7 +1,11 @@
 import {
-  "toiroakr/karinto" @karinto,
+  "toiroakr/karinto",
   "moonbitlang/core/json",
+  "moonbitlang/core/argparse",
+  "moonbitlang/core/env",
 }
+
+supported_targets = "js"
 
 options(
   "is-main": true,
