@@ -33,7 +33,12 @@ jobs:
         run: moon test
 
       # js-only packages (worker, cmd/main) are skipped by the default
-      # wasm-gc run above, so cover them explicitly.
+      # wasm-gc run above, so cover them explicitly. Pin Node rather than
+      # relying on whatever ubuntu-latest preinstalls.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
       - name: moon test (js)
         run: moon test --target js
 

@@ -153,6 +153,9 @@ fn split_csv(s : String) -> Array[String] {
 /// `action.yaml` basenames are actions; anything else falls back to the
 /// engine's content-based auto-detection.
 fn kind_from_path(path : String) -> @karinto.FileKind {
+  // Windows callers pass `\`-separated paths — normalize so the hints
+  // below only deal with `/`.
+  let path = path.replace_all(old="\\", new="/")
   if path.contains(".github/workflows/") {
     return @karinto.FileKind::Workflow
   }
