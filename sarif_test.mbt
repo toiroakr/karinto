@@ -99,10 +99,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": ".github/workflows/ci.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": ".github/workflows/ci.yml" },
                     "region": { "startLine": 9, "startColumn": 9 },
                   },
                   "logicalLocations": [
@@ -124,10 +121,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": ".github/workflows/ci.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": ".github/workflows/ci.yml" },
                   },
                 },
               ],
@@ -140,10 +134,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": ".github/workflows/ci.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": ".github/workflows/ci.yml" },
                   },
                 },
               ],
@@ -156,10 +147,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": ".github/workflows/ci.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": ".github/workflows/ci.yml" },
                     "region": { "startLine": 4, "startColumn": 3 },
                   },
                   "logicalLocations": [{ "name": "build", "kind": "job" }],
@@ -176,10 +164,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": ".github/workflows/ci.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": ".github/workflows/ci.yml" },
                     "region": { "startLine": 4, "startColumn": 3 },
                   },
                   "logicalLocations": [{ "name": "build", "kind": "job" }],
@@ -366,10 +351,7 @@ test "sarif_report: parse error becomes a synthetic parse-error result" {
               "locations": [
                 {
                   "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": "bad.yml",
-                      "uriBaseId": "%SRCROOT%",
-                    },
+                    "artifactLocation": { "uri": "bad.yml" },
                   },
                 },
               ],
@@ -418,10 +400,7 @@ test "sarif_report: io errors surface as toolExecutionNotifications" {
                   "locations": [
                     {
                       "physicalLocation": {
-                        "artifactLocation": {
-                          "uri": "missing.yml",
-                          "uriBaseId": "%SRCROOT%",
-                        },
+                        "artifactLocation": { "uri": "missing.yml" },
                       },
                     },
                   ],

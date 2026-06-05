@@ -246,10 +246,10 @@ fn sarif_location(
   let loc : Map[String, Json] = {}
   match path {
     Some(p) => {
-      let artifact : Map[String, Json] = {
-        "uri": p.to_json(),
-        "uriBaseId": "%SRCROOT%".to_json(),
-      }
+      // Plain relative URI, no `uriBaseId`: a base-id reference is only
+      // meaningful with a matching `originalUriBaseIds` entry, and GitHub
+      // Code Scanning resolves relative URIs against the repository root.
+      let artifact : Map[String, Json] = { "uri": p.to_json() }
       let phys : Map[String, Json] = { "artifactLocation": artifact.to_json() }
       match pos {
         Some(pp) => {
@@ -320,10 +320,7 @@ fn sarif_parse_error_result(
   m["message"] = msg.to_json()
   match path {
     Some(p) => {
-      let artifact : Map[String, Json] = {
-        "uri": p.to_json(),
-        "uriBaseId": "%SRCROOT%".to_json(),
-      }
+      let artifact : Map[String, Json] = { "uri": p.to_json() }
       let phys : Map[String, Json] = { "artifactLocation": artifact.to_json() }
       let loc : Map[String, Json] = { "physicalLocation": phys.to_json() }
       let locs : Array[Json] = [loc.to_json()]
@@ -337,10 +334,7 @@ fn sarif_parse_error_result(
 ///|
 fn sarif_io_notification(err : SarifIoError) -> Json {
   let msg : Map[String, Json] = { "text": err.message.to_json() }
-  let artifact : Map[String, Json] = {
-    "uri": err.path.to_json(),
-    "uriBaseId": "%SRCROOT%".to_json(),
-  }
+  let artifact : Map[String, Json] = { "uri": err.path.to_json() }
   let phys : Map[String, Json] = { "artifactLocation": artifact.to_json() }
   let loc : Map[String, Json] = { "physicalLocation": phys.to_json() }
   let locs : Array[Json] = [loc.to_json()]

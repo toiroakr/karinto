@@ -10,7 +10,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const TARGETS = [
   { file: "moon.mod", re: /^(version\s*=\s*)"([^"]*)"/m },
-  { file: "version.mbt", re: /^(pub const ENGINE_VERSION\s*=\s*)"([^"]*)"/m },
+  // Tolerate indentation and an optional `: String` annotation so a future
+  // reformat of the constant can't silently break release automation.
+  {
+    file: "version.mbt",
+    re: /^(\s*pub const ENGINE_VERSION(?:\s*:\s*String)?\s*=\s*)"([^"]*)"/m,
+  },
 ];
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 
