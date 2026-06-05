@@ -800,6 +800,79 @@ test "expression-matrix-type: expression-built matrix is skipped" {
 }
 
 ///|
+test "expression-steps-type: bare outputs mapping evaluated in template" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - name: show
+    #|        if: ${{ steps.gen.outputs }}
+    #|        run: echo done
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-steps-type",
+        "severity": "error",
+        "message": "`steps.gen.outputs` is a mapping; index by output name",
+        "pos": { "line": 16, "col": 9 },
+        "job": "build",
+        "step": { "index": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-needs-type: toJSON-wrapped outputs mapping is clean" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  prep:
+    #|    name: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    outputs:
+    #|      tag: ${{ steps.t.outputs.tag }}
+    #|    steps:
+    #|      - id: t
+    #|        run: echo "tag=v1" >> "$GITHUB_OUTPUT"
+    #|  build:
+    #|    name: build
+    #|    needs: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    env:
+    #|      ALL: ${{ toJSON(needs.prep.outputs) }}
+    #|    steps:
+    #|      - run: echo "$ALL"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 2, "steps": 2, "lines": 26 },
+    "diagnostics": [],
+  })
+}
+
+///|
 test "meaningless-comparison: meaningless comparison `1 == 1`" {
   let yaml =
     #|on: push

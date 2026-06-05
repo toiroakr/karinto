@@ -868,7 +868,21 @@ fn expr_collect_findings_in_string(
   }
   for body in extract_expr_bodies(s) {
     match parse_ga_expr(body) {
-      Some(node) => ignore(infer_expr_type(node, env, out))
+      Some(node) =>
+        // An expression whose own result is an outputs mapping (e.g.
+        // `${{ steps.foo.outputs }}`) renders an object into the template —
+        // actionlint rejects evaluating object values in `${{ }}`. Wrapped
+        // uses like `toJSON(steps.foo.outputs)` return a string and pass.
+        match infer_expr_type(node, env, out) {
+          TObj(o) =>
+            if o.rule != "" && o.path.has_suffix(".outputs") {
+              out.push(ExprFinding::{
+                rule: o.rule,
+                message: "`\{o.path}` is a mapping; index by output name",
+              })
+            }
+          _ => ()
+        }
       None => ()
     }
   }
