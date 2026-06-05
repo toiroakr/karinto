@@ -208,6 +208,13 @@
       "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
     },
     {
+      "file": "fixtures/upstream/actionlint/testdata/err/evaluated_template.yaml",
+      "expect": [
+        "fires:expression-steps-type"
+      ],
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
+    },
+    {
       "file": "fixtures/upstream/actionlint/testdata/err/exclusive_webhook_filters.yaml",
       "expect": [
         "upstream-only"
@@ -309,9 +316,9 @@
     {
       "file": "fixtures/upstream/actionlint/testdata/err/issue151_child_of_child_job.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-needs-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/err/issue155_env_in_job_level_if.yaml",
@@ -393,9 +400,9 @@
     {
       "file": "fixtures/upstream/actionlint/testdata/err/outputs_map_object.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-steps-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/err/outputs_of_action_skipping_inputs_check.yaml",
@@ -608,23 +615,23 @@
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/contextual_matrix_values.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-matrix-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/contextual_needs_object.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-needs-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/contextual_steps_outputs.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-steps-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/cyclic_deps_needs.yaml",
@@ -672,9 +679,16 @@
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/local_action_outputs.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-steps-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/examples/main.yaml",
+      "expect": [
+        "fires:expression-matrix-type"
+      ],
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/missing_required_keys.yaml",
@@ -700,9 +714,9 @@
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/popular_action_outputs.yaml",
       "expect": [
-        "upstream-only"
+        "fires:expression-steps-type"
       ],
-      "reason": "baseline: tracked at PR #13. Source=actionlint. Remove this entry once karinto catches up."
+      "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
       "file": "fixtures/upstream/actionlint/testdata/examples/runner_label_conflict.yaml",

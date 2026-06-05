@@ -169,10 +169,18 @@ fn lex_ga_expr(s : String) -> Array[ExprTok] raise ExprError {
 // ---------------------------------------------------------------------------
 
 ///|
+/// `depth` counts nested recursion (parenthesised groups, call arguments,
+/// index expressions, `!` chains) so a hostile input like `((((…))))` fails
+/// fast instead of exhausting the JS stack on the Worker target. Real
+/// expressions nest a handful of levels at most.
 priv struct ExprParser {
   toks : Array[ExprTok]
   mut pos : Int
+  mut depth : Int
 }
+
+///|
+const EXPR_MAX_DEPTH : Int = 64
 
 ///|
 fn ExprParser::peek_op(self : ExprParser, op : String) -> Bool {
@@ -208,10 +216,15 @@ fn ExprParser::expect_op(
 
 ///|
 fn ExprParser::parse_expr(self : ExprParser) -> ExprNode raise ExprError {
+  self.depth = self.depth + 1
+  if self.depth > EXPR_MAX_DEPTH {
+    raise ExprError
+  }
   let mut l = self.parse_and()
   while self.eat_op("||") {
     l = EBin("||", l, self.parse_and())
   }
+  self.depth = self.depth - 1
   l
 }
 
@@ -287,7 +300,15 @@ fn ExprParser::parse_mul(self : ExprParser) -> ExprNode raise ExprError {
 ///|
 fn ExprParser::parse_unary(self : ExprParser) -> ExprNode raise ExprError {
   if self.eat_op("!") {
-    ENot(self.parse_unary())
+    // `!` chains recurse without passing through parse_expr, so they need
+    // their own depth accounting.
+    self.depth = self.depth + 1
+    if self.depth > EXPR_MAX_DEPTH {
+      raise ExprError
+    }
+    let e = ENot(self.parse_unary())
+    self.depth = self.depth - 1
+    e
   } else {
     self.parse_postfix()
   }
@@ -382,7 +403,7 @@ fn parse_ga_expr(body : String) -> ExprNode? {
   if toks.length() == 0 {
     return None
   }
-  let p = ExprParser::{ toks, pos: 0 }
+  let p = ExprParser::{ toks, pos: 0, depth: 0 }
   try p.parse_expr() catch {
     _ => None
   } noraise {
@@ -776,7 +797,15 @@ fn matrix_context_type(job : JobInfo) -> ExprType? {
         Array(arr) =>
           for entry in arr {
             match entry {
-              Map(em) => em.each(fn(k, _v) { props[k.to_lower()] = TAny })
+              Map(em) =>
+                em.each(fn(k, _v) {
+                  // Same guard as dimension keys: an expression-built key
+                  // makes the member set unknowable.
+                  if k.contains("${{") {
+                    static_keys = false
+                  }
+                  props[k.to_lower()] = TAny
+                })
               _ => static_keys = false
             }
           }

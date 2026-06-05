@@ -837,6 +837,136 @@ test "expression-steps-type: bare outputs mapping evaluated in template" {
 }
 
 ///|
+test "expression-matrix-type: bracket indexing checks declared keys" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest, macos-14]
+    #|    steps:
+    #|      - if: ${{ matrix['os'] == matrix['arch'] }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-matrix-type",
+        "severity": "error",
+        "message": "matrix.arch is not declared in the strategy",
+        "pos": { "line": 17, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-steps-type: member lookup is case-insensitive" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - if: ${{ steps.GEN.Outputs.v == '1' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 17 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-steps-type: unknown field on steps.<id>" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - if: ${{ steps.gen.result == 'success' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 17 },
+    "diagnostics": [
+      {
+        "rule": "expression-steps-type",
+        "severity": "error",
+        "message": "steps.gen has no field `result`",
+        "pos": { "line": 16, "col": 9 },
+        "job": "build",
+        "step": { "index": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-matrix-type: expression-built include key disables the check" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest]
+    #|        include:
+    #|          - "${{ github.ref_name }}": dynamic
+    #|    steps:
+    #|      - if: ${{ matrix.undeclared }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 20 },
+    "diagnostics": [],
+  })
+}
+
+///|
 test "expression-needs-type: toJSON-wrapped outputs mapping is clean" {
   let yaml =
     #|name: ci
