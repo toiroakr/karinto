@@ -106,9 +106,10 @@ pub fn lint_string_sarif(
 /// `invocations[].toolExecutionNotifications`, mirroring envelope mode's
 /// `{path, ok: false, error}` entries). `kind` / `vuln` are per-file because
 /// repo mode guesses the kind from each path and resolves OSV advisories per
-/// file. Malformed `files_json` (or malformed items) degrades to an empty
-/// report rather than failing the request — the HTTP layer builds this JSON
-/// itself, so a mismatch is a bug, not caller input.
+/// file. Malformed top-level `files_json` degrades to an empty report and
+/// malformed items are skipped (well-formed ones still lint) rather than
+/// failing the request — the HTTP layer builds this JSON itself, so a
+/// mismatch is a bug, not caller input.
 pub fn lint_files_sarif(
   files_json : String,
   disable_str : String,

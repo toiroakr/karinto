@@ -30,7 +30,7 @@ test "sarif_report: finding maps rule/severity/pos/job/step" {
       version="9.9.9-test",
     ),
     content={
-      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
       "version": "2.1.0",
       "runs": [
         {
@@ -194,7 +194,7 @@ test "sarif_report: pathless entry keeps logical locations only" {
   json_inspect(
     @karinto.sarif_report([sarif_entry(yaml)], version="9.9.9-test"),
     content={
-      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
       "version": "2.1.0",
       "runs": [
         {
@@ -323,7 +323,7 @@ test "sarif_report: parse error becomes a synthetic parse-error result" {
       version="9.9.9-test",
     ),
     content={
-      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
       "version": "2.1.0",
       "runs": [
         {
@@ -377,7 +377,7 @@ test "sarif_report: io errors surface as toolExecutionNotifications" {
       version="9.9.9-test",
     ),
     content={
-      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
       "version": "2.1.0",
       "runs": [
         {
@@ -438,7 +438,7 @@ test "sarif_report: clean multi-file report has no results" {
       version="9.9.9-test",
     ),
     content={
-      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
       "version": "2.1.0",
       "runs": [
         {

@@ -24,7 +24,10 @@
 /// `content` parameter without a `path` label) keep logical locations only.
 
 ///|
-const SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+/// The OASIS-published errata01 schema URL — the canonical stable host.
+/// (The raw.githubusercontent.com/oasis-tcs/sarif-spec URL many tools used
+/// to ship 404s since the repo was restructured.)
+const SARIF_SCHEMA = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
 ///|
 const SARIF_INFORMATION_URI = "https://github.com/toiroakr/karinto"
