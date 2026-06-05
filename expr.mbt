@@ -8,7 +8,9 @@
 /// the workflow itself (`needs`, `steps`, `matrix`) are typed strictly, every
 /// other context (`github`, `env`, `inputs`, ...) types as `any` so unknown
 /// shapes never produce false positives. Any expression the parser cannot
-/// handle is skipped — `expression-syntax` owns syntax-level reporting.
+/// handle is silently skipped — these rules never report syntax errors.
+/// (The separate `expression-syntax` rule covers delimiter mismatches such
+/// as an unterminated `${{`; expression grammar beyond that is unchecked.)
 
 // ---------------------------------------------------------------------------
 // AST + tokens

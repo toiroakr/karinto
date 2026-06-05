@@ -27,6 +27,8 @@ A new in-tree `${{ … }}` expression parser (lexer + recursive-descent parser
 The model is deliberately conservative: contexts whose shape can't be read
 from the file (`github`, `env`, dynamic ids/matrices, reusable-workflow
 outputs) type as `any` and never fire, and unparseable expressions are
-skipped (`expression-syntax` owns syntax reporting). All four rules hold
+silently skipped rather than reported (the `expression-syntax` rule
+separately covers `${{` / `}}` delimiter mismatches, not full expression
+grammar). All four rules hold
 zero hard divergences against actionlint's vendored fixtures in the
 upstream-parity check.
