@@ -6,5 +6,15 @@ import {
 supported_targets = "js"
 
 options(
-  link: { "js": { "exports": [ "lint_string", "osv_match" ], "format": "esm" } },
+  link: {
+    "js": {
+      "exports": [
+        "lint_string",
+        "lint_string_sarif",
+        "lint_files_sarif",
+        "osv_match",
+      ],
+      "format": "esm",
+    },
+  },
 )

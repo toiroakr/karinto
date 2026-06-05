@@ -123,3 +123,60 @@ test "osv_match: last_affected boundary (inclusive)" {
   )
   inspect(@worker.osv_match("foo/bar@v2.0.1", advisories), content="")
 }
+
+///|
+test "lint_string_sarif: emits a SARIF document with the path label" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let out = @worker.lint_string_sarif(
+    yaml,
+    "workflow",
+    "",
+    "",
+    path=".github/workflows/ci.yml",
+  )
+  let doc = @json.parse(out)
+  assert_true(out.contains("\"version\": \"2.1.0\""))
+  assert_true(out.contains(".github/workflows/ci.yml"))
+  assert_true(doc is Object(_))
+}
+
+///|
+test "lint_string_sarif: empty path omits physicalLocation" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let out = @worker.lint_string_sarif(yaml, "workflow", "", "")
+  assert_false(out.contains("physicalLocation"))
+}
+
+///|
+test "lint_files_sarif: lints fetched files and surfaces fetch errors" {
+  let files_json =
+    #|[
+    #|  {"path": ".github/workflows/ci.yml",
+    #|   "content": "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    #|   "kind": "workflow", "vuln": ""},
+    #|  {"path": ".github/workflows/gone.yml", "error": "GET raw → 404"}
+    #|]
+  let out = @worker.lint_files_sarif(files_json, "")
+  assert_true(out.contains("\"uri\": \".github/workflows/ci.yml\""))
+  assert_true(out.contains("toolExecutionNotifications"))
+  assert_true(out.contains("GET raw → 404"))
+  assert_true(out.contains("\"executionSuccessful\": false"))
+}
+
+///|
+test "lint_files_sarif: malformed files_json degrades to an empty report" {
+  let out = @worker.lint_files_sarif("not json", "")
+  assert_true(out.contains("\"results\": []"))
+}

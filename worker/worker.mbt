@@ -60,6 +60,122 @@ pub fn lint_string(
 }
 
 ///|
+/// SARIF variant of `lint_string` (`format=sarif`, #33). Same lint inputs;
+/// the output is a complete SARIF 2.1.0 document instead of the JSON
+/// envelope. `path` is an optional artifact label for the linted content
+/// (a relative path like `.github/workflows/ci.yml`): when non-empty every
+/// result gets a `physicalLocation` pointing at it, which GitHub Code
+/// Scanning needs to anchor findings; when `""` results carry logical
+/// (job/step) locations only. `tool.driver.version` is stamped from
+/// `ENGINE_VERSION`, which release automation keeps in lockstep with the
+/// `package.json` version the HTTP layer reports.
+pub fn lint_string_sarif(
+  content : String,
+  kind_str : String,
+  disable_str : String,
+  vuln_uses_str : String,
+  forbidden_uses_str? : String = "",
+  archived_uses_str? : String = "",
+  path? : String = "",
+) -> String {
+  let kind = match kind_str {
+    "workflow" => @karinto.FileKind::Workflow
+    "action" => @karinto.FileKind::Action
+    _ => @karinto.FileKind::Unknown
+  }
+  let result = @karinto.lint(
+    content,
+    kind~,
+    disabled=split_csv(disable_str),
+    vuln_uses=split_csv(vuln_uses_str),
+    forbidden_uses=split_csv(forbidden_uses_str),
+    archived_uses=split_csv(archived_uses_str),
+  )
+  let entry_path = if path == "" { None } else { Some(path) }
+  @karinto.sarif_report([@karinto.SarifEntry::{ path: entry_path, result }]).stringify(
+    indent=2,
+  )
+}
+
+///|
+/// Multi-file SARIF export for the Worker's repo mode (`format=sarif`).
+///
+/// `files_json` is a JSON array prepared by the HTTP layer, one object per
+/// target: `{"path", "content", "kind", "vuln"}` for fetched files, or
+/// `{"path", "error"}` for targets that could not be fetched (those become
+/// `invocations[].toolExecutionNotifications`, mirroring envelope mode's
+/// `{path, ok: false, error}` entries). `kind` / `vuln` are per-file because
+/// repo mode guesses the kind from each path and resolves OSV advisories per
+/// file. Malformed `files_json` (or malformed items) degrades to an empty
+/// report rather than failing the request — the HTTP layer builds this JSON
+/// itself, so a mismatch is a bug, not caller input.
+pub fn lint_files_sarif(
+  files_json : String,
+  disable_str : String,
+  forbidden_uses_str? : String = "",
+  archived_uses_str? : String = "",
+) -> String {
+  let disabled = split_csv(disable_str)
+  let forbidden_uses = split_csv(forbidden_uses_str)
+  let archived_uses = split_csv(archived_uses_str)
+  let entries : Array[@karinto.SarifEntry] = []
+  let io_errors : Array[@karinto.SarifIoError] = []
+  let parsed : Json = @json.parse(files_json) catch { _ => Json::null() }
+  let items = match parsed {
+    Array(a) => a
+    _ => []
+  }
+  for item in items {
+    let m = match item {
+      Object(m) => m
+      _ => continue
+    }
+    let path = match read_string_field(m, "path") {
+      Some(p) => p
+      None => continue
+    }
+    match read_string_field(m, "error") {
+      Some(err) => {
+        io_errors.push(@karinto.SarifIoError::{ path, message: err })
+        continue
+      }
+      None => ()
+    }
+    let content = match read_string_field(m, "content") {
+      Some(c) => c
+      None => continue
+    }
+    let kind = match read_string_field(m, "kind") {
+      Some("workflow") => @karinto.FileKind::Workflow
+      Some("action") => @karinto.FileKind::Action
+      _ => @karinto.FileKind::Unknown
+    }
+    let vuln_uses = match read_string_field(m, "vuln") {
+      Some(v) => split_csv(v)
+      None => []
+    }
+    let result = @karinto.lint(
+      content,
+      kind~,
+      disabled~,
+      vuln_uses~,
+      forbidden_uses~,
+      archived_uses~,
+    )
+    entries.push(@karinto.SarifEntry::{ path: Some(path), result })
+  }
+  @karinto.sarif_report(entries, io_errors~).stringify(indent=2)
+}
+
+///|
+fn read_string_field(m : Map[String, Json], key : String) -> String? {
+  match m.get(key) {
+    Some(String(s)) => Some(s)
+    _ => None
+  }
+}
+
+///|
 /// Match a list of `uses:` refs against an OSV-derived advisories map and
 /// return the subset whose pinned version falls inside an advisory range.
 ///
