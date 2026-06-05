@@ -1004,6 +1004,43 @@ test "expression engine: hostile operator/property chains are skipped, not crash
 }
 
 ///|
+test "expression-matrix-type: bare `if:` without braces is type-checked" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest]
+    #|    steps:
+    #|      - if: matrix.gradle == 1
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-matrix-type",
+        "severity": "error",
+        "message": "matrix.gradle is not declared in the strategy",
+        "pos": { "line": 17, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
 test "expression-needs-type: toJSON-wrapped outputs mapping is clean" {
   let yaml =
     #|name: ci

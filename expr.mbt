@@ -897,6 +897,33 @@ fn expr_env_for_step(ctx : WalkCtx, step : StepInfo) -> Map[String, ExprType] {
 // ---------------------------------------------------------------------------
 
 ///|
+fn expr_check_body(
+  body : String,
+  env : Map[String, ExprType],
+  out : Array[ExprFinding],
+) -> Unit {
+  match parse_ga_expr(body) {
+    Some(node) =>
+      // An expression whose own result is an outputs mapping (e.g.
+      // `${{ steps.foo.outputs }}`) uses the mapping as a scalar value,
+      // whatever the surrounding field — actionlint likewise rejects
+      // evaluating object values in `${{ }}`. Wrapped uses like
+      // `toJSON(steps.foo.outputs)` return a string and pass.
+      match infer_expr_type(node, env, out) {
+        TObj(o) =>
+          if o.rule != "" && o.path.has_suffix(".outputs") {
+            out.push(ExprFinding::{
+              rule: o.rule,
+              message: "`\{o.path}` is a mapping; index by output name",
+            })
+          }
+        _ => ()
+      }
+    None => ()
+  }
+}
+
+///|
 fn expr_collect_findings_in_string(
   s : String,
   env : Map[String, ExprType],
@@ -906,26 +933,25 @@ fn expr_collect_findings_in_string(
     return
   }
   for body in extract_expr_bodies(s) {
-    match parse_ga_expr(body) {
-      Some(node) =>
-        // An expression whose own result is an outputs mapping (e.g.
-        // `${{ steps.foo.outputs }}`) uses the mapping as a scalar value,
-        // whatever the surrounding field — actionlint likewise rejects
-        // evaluating object values in `${{ }}`. Wrapped uses like
-        // `toJSON(steps.foo.outputs)` return a string and pass.
-        match infer_expr_type(node, env, out) {
-          TObj(o) =>
-            if o.rule != "" && o.path.has_suffix(".outputs") {
-              out.push(ExprFinding::{
-                rule: o.rule,
-                message: "`\{o.path}` is a mapping; index by output name",
-              })
-            }
-          _ => ()
-        }
-      None => ()
-    }
+    expr_check_body(body, env, out)
   }
+}
+
+///|
+/// `if:` values are evaluated as an expression by GitHub even without the
+/// `${{ }}` delimiters (`if: matrix.gradle == 1`). When no delimiter is
+/// present the whole value is one expression body; otherwise fall back to
+/// the per-`${{ }}` scan (mixed text stays template-substituted).
+fn expr_collect_findings_in_if(
+  s : String,
+  env : Map[String, ExprType],
+  out : Array[ExprFinding],
+) -> Unit {
+  if s.contains("${{") {
+    expr_collect_findings_in_string(s, env, out)
+    return
+  }
+  expr_check_body(s, env, out)
 }
 
 ///|
@@ -960,6 +986,13 @@ fn run_expr_rule_job(
     if k == "steps" {
       return
     }
+    if k == "if" {
+      match v {
+        String(s) => expr_collect_findings_in_if(s, env, findings)
+        _ => ()
+      }
+      return
+    }
     walk_strings(v, fn(s) { expr_collect_findings_in_string(s, env, findings) })
   })
   expr_emit_rule(rule_id, findings, out)
@@ -974,7 +1007,14 @@ fn run_expr_rule_step(
 ) -> Unit {
   let env = expr_env_for_step(ctx, step)
   let findings : Array[ExprFinding] = []
-  step.raw.each(fn(_k, v) {
+  step.raw.each(fn(k, v) {
+    if k == "if" {
+      match v {
+        String(s) => expr_collect_findings_in_if(s, env, findings)
+        _ => ()
+      }
+      return
+    }
     walk_strings(v, fn(s) { expr_collect_findings_in_string(s, env, findings) })
   })
   expr_emit_rule(rule_id, findings, out)

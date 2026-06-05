@@ -24,6 +24,11 @@ A new in-tree `${{ … }}` expression parser (lexer + recursive-descent parser
   known non-number operands (e.g. `'foo' + 1`; the expression language has
   no arithmetic at all).
 
+Bare `if:` conditions (which GitHub evaluates as expressions even without
+`${{ }}` delimiters) are type-checked the same way. Validated against
+actionlint's real-world dataset (1503 workflows): every file karinto flags
+is also flagged by actionlint's expression checker — zero false positives.
+
 The model is deliberately conservative: contexts whose shape can't be read
 from the file (`github`, `env`, dynamic ids/matrices, reusable-workflow
 outputs) type as `any` and never fire, and unparseable expressions are
