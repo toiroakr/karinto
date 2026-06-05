@@ -190,6 +190,36 @@ locations, but GitHub Code Scanning cannot anchor those to a file — pass
 `path=` (or use `repo` mode) when uploading. `online_audit_candidates` and
 the dark-launch capture are envelope-mode-only.
 
+A complete workflow that surfaces findings in the repository **Security**
+tab (public repos — `repo` mode fetches the files from
+raw.githubusercontent.com):
+
+```yaml
+name: karinto
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  karinto:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint workflows to SARIF
+        run: |
+          curl -sf "https://karinto.toiroakr.workers.dev/${{ github.repository }}/${{ github.sha }}?format=sarif&targets=.github/workflows/ci.yml,.github/workflows/release.yml" \
+            -o karinto.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: karinto.sarif
+```
+
+For private repos, run the [Local CLI](#local-cli) on a checkout instead
+(`--format sarif` with file arguments) — and note the CLI exits `1` when
+error-severity findings exist, so give the lint step `continue-on-error:
+true` (or append `|| true`) so the upload step still runs.
+
 ## Local CLI
 
 Lint local files without deploying anything or making a network
