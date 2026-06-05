@@ -967,6 +967,43 @@ test "expression-matrix-type: expression-built include key disables the check" {
 }
 
 ///|
+test "expression engine: hostile operator/property chains are skipped, not crashed" {
+  // Left-associated chains parse iteratively but build a left-nested AST
+  // whose height equals the chain length; the token cap keeps type
+  // inference from recursing that deep. Both floods stay far above
+  // EXPR_MAX_TOKENS and must be skipped without a stack overflow.
+  // The yaml is assembled through a StringBuilder with the `$` split off
+  // from `{{` — the JS backend compiles string concatenation into template
+  // literals, where a literal `${` would be read as an interpolation.
+  let sb = StringBuilder::new()
+  sb.write_string(
+    "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n",
+  )
+  sb.write_string("      - if: $")
+  sb.write_string("{{ 1")
+  for _i in 0..<5000 {
+    sb.write_string(" && 1")
+  }
+  sb.write_string(" + 'x' }}\n        run: echo hi\n")
+  sb.write_string("      - if: $")
+  sb.write_string("{{ github")
+  for _i in 0..<5000 {
+    sb.write_string(".a")
+  }
+  sb.write_string(" }}\n        run: echo ho\n")
+  let res = @karinto.lint(sb.to_string())
+  assert_true(res.parse_error is None)
+  // Over the token cap the expressions are skipped entirely — the trailing
+  // `+ 'x'` mismatch is intentionally not reported.
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "expression-type-mismatch" })
+    .length() ==
+    0,
+  )
+}
+
+///|
 test "expression-needs-type: toJSON-wrapped outputs mapping is clean" {
   let yaml =
     #|name: ci

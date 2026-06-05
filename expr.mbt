@@ -183,6 +183,16 @@ priv struct ExprParser {
 const EXPR_MAX_DEPTH : Int = 64
 
 ///|
+/// Token-count cap on a single `${{ ... }}` body. Left-associated chains
+/// (`a && b && c ...`, `a.b.c.d...`) are parsed iteratively — no parser
+/// recursion — but they still build a left-nested AST whose height grows
+/// with chain length, and `infer_expr_type` recurses on it. Since every AST
+/// node consumes at least one token, capping tokens bounds the AST height
+/// and keeps inference recursion safe on the JS/Worker target. Real
+/// expressions are a few dozen tokens at most.
+const EXPR_MAX_TOKENS : Int = 512
+
+///|
 fn ExprParser::peek_op(self : ExprParser, op : String) -> Bool {
   if self.pos < self.toks.length() {
     match self.toks[self.pos] {
@@ -400,7 +410,7 @@ fn ExprParser::parse_primary(self : ExprParser) -> ExprNode raise ExprError {
 /// false positive.
 fn parse_ga_expr(body : String) -> ExprNode? {
   let toks = lex_ga_expr(body) catch { _ => return None }
-  if toks.length() == 0 {
+  if toks.length() == 0 || toks.length() > EXPR_MAX_TOKENS {
     return None
   }
   let p = ExprParser::{ toks, pos: 0, depth: 0 }
