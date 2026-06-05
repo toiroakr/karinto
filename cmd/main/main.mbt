@@ -34,11 +34,12 @@ fn run() -> Int {
       return 2
     }
   }
-  let kind = match parse_kind(last_value(matches, "type")) {
+  let type_str = last_value(matches, "type")
+  let kind = match parse_kind(type_str) {
     Some(k) => k
     None => {
       eprintln(
-        "error: invalid value for '--type': expected 'workflow' or 'action'",
+        "error: invalid value '\{type_str}' for '--type': expected 'workflow' or 'action'",
       )
       return 2
     }
@@ -156,7 +157,10 @@ fn kind_from_path(path : String) -> @karinto.FileKind {
   // Windows callers pass `\`-separated paths — normalize so the hints
   // below only deal with `/`.
   let path = path.replace_all(old="\\", new="/")
-  if path.contains(".github/workflows/") {
+  // Match `.github/workflows/` only as a path segment, so directories
+  // like `foo.github/workflows/` don't false-positive.
+  if path.has_prefix(".github/workflows/") ||
+    path.contains("/.github/workflows/") {
     return @karinto.FileKind::Workflow
   }
   let basename = match path.rev_find("/") {

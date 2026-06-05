@@ -28,6 +28,8 @@ test "kind_from_path uses filename conventions" {
   // Windows-style separators are normalized before matching
   assert_true(kind_from_path(".github\\workflows\\ci.yml") is Workflow)
   assert_true(kind_from_path("some\\dir\\action.yml") is Action)
+  // `.github/workflows/` must be a path segment, not a substring
+  assert_true(kind_from_path("foo.github/workflows/ci.yml") is Unknown)
 }
 
 ///|
