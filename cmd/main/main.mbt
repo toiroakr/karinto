@@ -11,8 +11,10 @@
 ///   moon run --target js cmd/main -- --disable 'permissions-*' ci.yml
 ///
 /// Output is the same JSON envelope the Worker returns (`{ok, result}` for
-/// stdin; `{ok, files: [{path, ok, result}, ...]}` for file arguments,
-/// where `ok` mirrors the Worker's "parse succeeded" semantics).
+/// stdin; `{ok, files: [...]}` for file arguments, where each entry is
+/// `{path, ok, result}` — or `{path, ok: false, error}` with no `result`
+/// when the file can't be read, like the Worker's repo mode. `ok` mirrors
+/// the Worker's "parse succeeded" semantics).
 ///
 /// Exit codes: 0 — clean; 1 — error-severity diagnostics or YAML parse
 /// errors (CI-friendly); 2 — usage / IO errors.

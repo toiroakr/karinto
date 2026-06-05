@@ -15,7 +15,9 @@ now a real CLI that runs locally with MoonBit's js backend (Node.js):
   filename hint: `action.yml` basenames and `.github/workflows/` paths) and
   `--disable` comma-separated rule-ID globs (repeatable).
 - Prints the same JSON envelope as the Worker (`{ok, result}` for stdin;
-  `{ok, files: [{path, ok, result}, ...]}` for file arguments).
+  `{ok, files: [...]}` for file arguments — each entry is `{path, ok, result}`,
+  or `{path, ok: false, error}` without `result` when the file can't be read,
+  matching the Worker's repo mode).
 - CI-friendly exit codes: `0` clean, `1` error-severity diagnostics or YAML
   parse errors, `2` usage / IO errors. `moon run` swallows exit codes, so for
   CI run the built bundle directly:
