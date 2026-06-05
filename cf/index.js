@@ -94,17 +94,23 @@ export default {
       const { params, pathTarget } = await readParams(request);
       const result = await handle(params, env, pathTarget);
       const elapsed = Date.now() - started;
+      const targetsStr = Object.prototype.hasOwnProperty.call(params, "targets")
+        ? String(params.targets ?? "")
+        : pathTarget || "";
       log("request", {
         method: request.method,
         type: params.type || "(auto)",
         disable: params.disable || "",
         repo: params.repo || "",
         commit: params.commit || "",
-        targets: Object.prototype.hasOwnProperty.call(params, "targets")
-          ? String(params.targets ?? "")
-          : pathTarget || "",
+        targets: targetsStr,
         content_lines: params.content ? params.content.split("\n").length : 0,
-        files: result.files?.length ?? (params.content ? 1 : 0),
+        // SARIF responses carry no `files` array, so fall back to the request
+        // inputs: target count in repo mode, 1 for a content lint.
+        files: result.files?.length ??
+          (targetsStr
+            ? targetsStr.split(",").filter((s) => s.trim()).length
+            : params.content ? 1 : 0),
         elapsed_ms: elapsed,
       });
       // SARIF responses are already serialized by the MoonBit side and
