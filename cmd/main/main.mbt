@@ -54,7 +54,8 @@ fn run() -> Int {
     // block waiting for Ctrl-D, which looks like a hang. Bail out with
     // usage instead.
     if js_stdin_is_tty() {
-      eprintln("error: no input: pipe YAML via stdin or pass file paths\n")
+      eprintln("error: no input: pipe YAML via stdin or pass file paths")
+      eprintln("")
       eprintln(build_command().render_help())
       return 2
     }
@@ -228,9 +229,19 @@ fn lint_files(
   let mut code = 0
   for path in files {
     match js_read_file(path) {
+      // Mirror the Worker's repo mode: an unreadable file becomes a
+      // `{path, ok: false, error}` entry and the rest of the batch
+      // still gets linted. IO errors dominate the exit code.
       None => {
         eprintln("error: cannot read file '\{path}'")
-        return 2
+        all_ok = false
+        code = 2
+        let entry : Map[String, Json] = {
+          "path": path.to_json(),
+          "ok": false.to_json(),
+          "error": "cannot read file".to_json(),
+        }
+        entries.push(entry.to_json())
       }
       Some(content) => {
         let file_kind = match kind {
@@ -242,7 +253,7 @@ fn lint_files(
         if !ok {
           all_ok = false
         }
-        if has_blocking(result) {
+        if has_blocking(result) && code == 0 {
           code = 1
         }
         let entry : Map[String, Json] = {
