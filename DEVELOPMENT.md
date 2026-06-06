@@ -294,6 +294,7 @@ binding is dropped, see below).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
+| `REPO_MODE_ENABLED` | `false` (off) | Truthy (`1`/`true`/`yes`/`on`) enables repo mode — the GitHub-fetching `/owner/repo[/...]` endpoints (`repo`/`commit`/`ref` params, the `blob`/`tree` path forms, and whole-repo discovery). Off by default because it makes the Worker fetch arbitrary public content and draw on GitHub's API rate limit; `content` linting is always available. Overlaid onto every request-serving Worker via `--var` at deploy time (`scripts/release-publish.sh`, `scripts/manage-pinned-workers.mjs`, and the deploy workflows). |
 | `D1_DATABASE_ID` | _(none)_ | D1 database id for the archived-uses worklist, injected into the deploy config by `scripts/prepare-wrangler-d1.mjs`. Unset → the `DB` binding is dropped from every deploy and the archived sweep stays dormant (`cf/index.js` no-ops when `env.DB` is absent). |
 | `REPLAY_LIMIT` | 200 | Captures replayed per CI run (both auto-on-open and label-triggered). |
 | `CAPTURE_CONTENT_LIMIT_KIB` | 100 | Skip capturing requests whose `content` exceeds this size. Applied by `cf/index.js` at write time. |

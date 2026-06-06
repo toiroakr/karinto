@@ -24,6 +24,21 @@ mirror of the in-code source of truth at
 
 ## API
 
+> **Recommended: send the YAML directly.** `POST` the workflow / `action.yml`
+> as the request body (or pass it as the `content` parameter). It works on
+> every deployment, makes no GitHub round-trip, and is **not** subject to any
+> GitHub rate limit. This is the path to use in CI and other automated callers.
+
+The **repo-mode** endpoints (below) fetch files from GitHub *for* you instead
+of taking `content`. They are **opt-in** — disabled unless the deployment sets
+the `REPO_MODE_ENABLED` variable, so they may be off on a given endpoint
+(including the public `karinto.toiroakr.workers.dev`). When enabled they lean
+on GitHub's raw hosting and API, so they are **far more likely to hit GitHub
+rate limits**: whole-repo discovery in particular shares a single
+unauthenticated **60 req/hour/IP** budget across *all* callers (the requests
+egress from the Worker's shared Cloudflare IP). Reach for repo mode for
+one-off, interactive checks — not high-volume automation; send `content` there.
+
 `GET` or `POST`. Parameters can come from the URL path
 (`/<owner>/<repo>` to lint **every workflow on the default branch**;
 `/<owner>/<repo>/<commit>[/<target/path/...>]`; or a domain-swapped GitHub
@@ -45,9 +60,9 @@ below.
 | Key | Type | Notes |
 | --- | --- | --- |
 | `type` | `workflow` \| `action` \| *(omit)* | Optional; auto-detected when blank |
-| `content` | string | The YAML source |
+| `content` | string | The YAML source. **The recommended input** — always available, no GitHub round-trip, no rate limit. |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
-| `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
+| `repo` | `owner/name` | Repo mode; mutually exclusive with `content`. **Opt-in** (`REPO_MODE_ENABLED`) and GitHub-rate-limit-prone — see the note above. Returns `403` when the deployment has repo mode disabled. |
 | `commit` | hex SHA, 7–64 chars | An **immutable pin**. Either this or `ref` is required whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected here — use `ref` for those. A short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
 | `ref` | branch \| tag \| `HEAD` \| SHA | **Mutable** ref; fetches that ref's *latest* commit. Use it to lint the default branch (`ref=HEAD`) or any branch/tag by name. Takes precedence over `commit`. A domain-swapped GitHub URL (`…/blob/<ref>/<path>`) fills this from the path. Slashy branch names (`release/1.x`) work via `ref=` but not the path form, which treats only the first post-`blob` segment as the ref. |
 | `targets` | string | Comma-separated literal file paths. Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. Omit it (with no path target either) to lint **all** `.github/workflows` files on the chosen ref — see *Whole-repo mode*. |
@@ -87,6 +102,11 @@ curl -G https://karinto.toiroakr.workers.dev \
      --data-urlencode "content=$(cat workflow.yml)" \
      --data "type=workflow"
 ```
+
+The remaining examples use **repo mode**, which must be enabled on the
+deployment (`REPO_MODE_ENABLED`) — otherwise they return `403`. They are handy
+for one-off checks but draw on GitHub rate limits; prefer sending `content` for
+anything automated.
 
 `GET`/`POST` over a public repo (single target via path):
 

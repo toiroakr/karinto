@@ -58,7 +58,9 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cf
-          command: deploy --config wrangler.deploy.jsonc --env staging
+          # `--var REPO_MODE_ENABLED:...` gates the GitHub-fetching repo-mode
+          # endpoints (off unless the repo variable is set truthy).
+          command: deploy --config wrangler.deploy.jsonc --env staging --var REPO_MODE_ENABLED:${{ vars.REPO_MODE_ENABLED || 'false' }}
 
       # Mirror the optional public-read PAT into the staging Worker so
       # whole-repo discovery authenticates its GitHub API calls (60 → 5000

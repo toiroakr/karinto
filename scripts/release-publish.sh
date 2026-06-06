@@ -21,6 +21,13 @@ if [ -n "${CAPTURE_CONTENT_LIMIT_KIB:-}" ]; then
   PROD_VAR_FLAGS+=(--var "CAPTURE_CONTENT_LIMIT_KIB:${CAPTURE_CONTENT_LIMIT_KIB}")
 fi
 
+# Repo-mode gate. Off by default (empty → "false"); a truthy REPO_MODE_ENABLED
+# repo variable turns on the GitHub-fetching `/owner/repo[/...]` endpoints.
+# Applied to every request-serving Worker (prod, pinned snapshot, and — in
+# manage-pinned-workers.mjs — the major alias). The maintenance Worker doesn't
+# serve repo mode, so it is left out.
+REPO_MODE_FLAG=(--var "REPO_MODE_ENABLED:${REPO_MODE_ENABLED:-false}")
+
 MAINT_VAR_FLAGS=()
 if [ -n "${CAPTURES_SIZE_LIMIT_MIB:-}" ]; then
   MAINT_VAR_FLAGS+=(--var "CAPTURES_SIZE_LIMIT_MIB:${CAPTURES_SIZE_LIMIT_MIB}")
@@ -53,7 +60,7 @@ put_github_token() {
 
 # `--env production` attaches the CAPTURES R2 binding; top-level deploys
 # (used by PR previews) deliberately have no binding so they can't write.
-npx wrangler deploy --config wrangler.deploy.jsonc --env production "${PROD_VAR_FLAGS[@]}"
+npx wrangler deploy --config wrangler.deploy.jsonc --env production "${PROD_VAR_FLAGS[@]}" "${REPO_MODE_FLAG[@]}"
 put_github_token --config wrangler.deploy.jsonc --env production
 npx wrangler deploy --config wrangler.maintenance.jsonc "${MAINT_VAR_FLAGS[@]}"
 bash smoke.sh
@@ -68,7 +75,7 @@ bash smoke.sh
 VERSION=$(node -p "require('../package.json').version")
 PINNED_NAME="karinto-v${VERSION//./-}"
 PINNED_URL="https://${PINNED_NAME}.toiroakr.workers.dev"
-npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME"
+npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME" "${REPO_MODE_FLAG[@]}"
 put_github_token --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME"
 bash smoke.sh "$PINNED_URL"
 

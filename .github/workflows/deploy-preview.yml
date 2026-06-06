@@ -71,7 +71,9 @@ jobs:
           # deliberately omits the CAPTURES R2 binding so preview Workers
           # can't write to the captures bucket. Without this flag, wrangler 4
           # warns and the deploy is ambiguous.
-          command: deploy --config wrangler.deploy.jsonc --env="" --name ${{ env.WORKER_NAME }}
+          # `--var REPO_MODE_ENABLED:...` gates the GitHub-fetching repo-mode
+          # endpoints (off unless the repo variable is set truthy).
+          command: deploy --config wrangler.deploy.jsonc --env="" --name ${{ env.WORKER_NAME }} --var REPO_MODE_ENABLED:${{ vars.REPO_MODE_ENABLED || 'false' }}
 
       # Mirror the optional public-read PAT into the preview Worker so
       # whole-repo discovery authenticates its GitHub API calls (60 → 5000

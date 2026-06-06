@@ -10,7 +10,9 @@
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
-//   - repo      "owner/name" — fetch files from a public GitHub repo
+//   - repo      "owner/name" — fetch files from a public GitHub repo. Repo
+//               mode (this plus the `/owner/repo[/...]` path forms) is opt-in
+//               via the REPO_MODE_ENABLED deployment variable; off by default.
 //   - commit    commit SHA (7-64 hex chars); an immutable pin. Either this or
 //               `ref` is required whenever `repo` is set.
 //   - ref       branch / tag / `HEAD` / SHA to fetch at (mutable; resolves to
@@ -573,6 +575,19 @@ async function handle(params, env, pathTarget) {
     .join(",");
 
   if (params.repo) {
+    // Repo mode — fetching workflow / action files from GitHub by `owner/repo`
+    // (+ optional commit/ref/path, or whole-repo discovery) — is opt-in. It
+    // makes the Worker fetch arbitrary public content and, in discovery mode,
+    // spend the shared GitHub API budget, so it stays off unless the deployment
+    // sets the `REPO_MODE_ENABLED` variable (see DEVELOPMENT.md). Posting the
+    // YAML as `content` is always available.
+    if (!isTrue(env?.REPO_MODE_ENABLED)) {
+      throw httpError(
+        "repo mode is disabled on this deployment; POST the workflow `content` " +
+          "directly, or enable it by setting the REPO_MODE_ENABLED variable",
+        403,
+      );
+    }
     return await handleRepo(
       params, pathTarget, disable, type, useOsv, worker, forbidden, archived, env,
     );

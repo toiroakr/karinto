@@ -300,20 +300,22 @@
 
   <section>
     <h2>Try it</h2>
-    <p>Lint a file from a public repo, or paste YAML directly. Repo modes
-    resolve the file's commit SHA via the GitHub API and build a
-    <code>karinto.toiroakr.workers.dev</code> URL you open in a new tab; the
-    <strong>Paste YAML</strong> tab POSTs your content straight to the linter
-    and opens the JSON in a new tab. (Navigation — rather than <code>fetch</code> —
-    avoids cross-origin issues some privacy browsers have with
-    <code>*.workers.dev</code>.)</p>
+    <p><strong>Recommended:</strong> use the <strong>Paste YAML</strong> tab —
+    it POSTs your content straight to the linter (no GitHub round-trip, no rate
+    limit) and opens the JSON in a new tab. The <strong>Repo + path</strong> and
+    <strong>GitHub URL</strong> tabs resolve the file's commit SHA via the GitHub
+    API and build a <code>karinto.toiroakr.workers.dev</code> repo-mode URL; that
+    mode is opt-in per deployment (it returns <code>403</code> where disabled)
+    and leans on GitHub rate limits, so prefer Paste YAML for anything routine.
+    (Navigation — rather than <code>fetch</code> — avoids cross-origin issues
+    some privacy browsers have with <code>*.workers.dev</code>.)</p>
     <form id="lint-form" autocomplete="off">
       <div class="tabs" aria-label="Input method">
-        <button type="button" id="tab-btn-split" class="tab" aria-pressed="true">Repo + path</button>
+        <button type="button" id="tab-btn-content" class="tab" aria-pressed="true">Paste YAML</button>
+        <button type="button" id="tab-btn-split" class="tab" aria-pressed="false">Repo + path</button>
         <button type="button" id="tab-btn-url" class="tab" aria-pressed="false">GitHub URL</button>
-        <button type="button" id="tab-btn-content" class="tab" aria-pressed="false">Paste YAML</button>
       </div>
-      <div id="tab-split" class="tab-panel">
+      <div id="tab-split" class="tab-panel" hidden>
         <div class="row">
           <div class="field">
             <label for="repo">owner/repo</label>
@@ -331,7 +333,7 @@
           <input id="ghurl" name="ghurl" type="url" placeholder="https://github.com/actions/checkout/blob/main/action.yml" spellcheck="false" autocapitalize="off" />
         </div>
       </div>
-      <div id="tab-content" class="tab-panel" hidden>
+      <div id="tab-content" class="tab-panel">
         <div class="field">
           <label for="content">workflow / action YAML</label>
           <textarea id="content" name="content" spellcheck="false" autocapitalize="off" placeholder="name: CI&#10;on: push&#10;jobs:&#10;  build:&#10;    runs-on: ubuntu-latest&#10;    steps:&#10;      - uses: actions/checkout@v4"></textarea>
@@ -406,7 +408,7 @@
     content: { btn: document.getElementById("tab-btn-content"), panel: document.getElementById("tab-content") },
   };
 
-  let mode = "split"; // "split" | "url" | "content"
+  let mode = "content"; // "content" | "split" | "url" — content is the default
 
   function setMode(next) {
     mode = next;
@@ -759,7 +761,10 @@
   // Prefill from query string so links like
   // ?repo=actions/checkout&target=action.yml or ?url=https://github.com/... are shareable.
   const qs = new URLSearchParams(location.search);
-  if (qs.get("repo")) repoEl.value = qs.get("repo");
+  if (qs.get("repo")) {
+    repoEl.value = qs.get("repo");
+    setMode("split"); // a shared repo link overrides the content default
+  }
   if (qs.get("target")) targetEl.value = qs.get("target");
   if (qs.get("osv") === "1") osvEl.checked = true;
   if (qs.get("url")) {
