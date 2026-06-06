@@ -282,6 +282,7 @@ action keeps a "chore: release" PR open that previews the next version.
 | `R2_ACCESS_KEY_ID` (optional) | Created in CF Dashboard → R2 → Manage R2 API Tokens. Scoped to **read-only** on the `karinto-captures` bucket. Enables the PR dark-launch replay step. |
 | `R2_SECRET_ACCESS_KEY` (optional) | The matching secret from the same R2 API token. |
 | `ARCHIVED_REFRESH_TOKEN` (optional) | A GitHub PAT with public read access (classic `public_repo`, or a fine-grained token with no extra scopes). Lets `refresh-archived.yml` use the 5000-req/hour quota instead of the job token's 1000/hour. Only needed if the worklist outgrows 1000 checks/day. |
+| `GITHUB_TOKEN` (optional, Worker secret) | A GitHub PAT (public read) bound to the **Worker** via `wrangler secret put GITHUB_TOKEN`. Whole-repo mode (`/owner/repo` with no targets) lists `.github/workflows` through the GitHub contents API; the binding raises the request-path ceiling from the unauthenticated 60 req/hour/IP to 5000/hour (and reaches private repos the token can see). The public deployment runs without it — over-limit listing requests return `429`. |
 
 ### Optional GitHub variables
 
