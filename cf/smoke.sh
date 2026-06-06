@@ -66,10 +66,10 @@ fi
 res_body=$(mktemp)
 code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&targets=action.yml")
 res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` is required"))' >/dev/null <<<"$res"; then
-  ok "repo without commit -> 400"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` or `ref` is required"))' >/dev/null <<<"$res"; then
+  ok "repo without commit/ref -> 400"
 else
-  bad "repo without commit (status=$code): $res"
+  bad "repo without commit/ref (status=$code): $res"
 fi
 
 # 5. repo + non-hex commit (branch name) -> 400
@@ -121,7 +121,44 @@ else
   bad "percent-encoded traversal (status=$code): $res"
 fi
 
-# 10. every response carries a non-empty `engine_version` so CI can pin /
+# 10. domain-swapped GitHub blob URL (`/owner/repo/blob/<ref>/<path>`) resolves
+#     to a lint. Pinned to a SHA so the lint output is stable; response carries
+#     both `ref` and the echoed `commit`.
+res=$(curl -fsS "$URL/actions/checkout/blob/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+if jq -e '.ok and .ref == "b4ffde65f46336ab88eb53be808477a3936bae11" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
+  ok "blob URL form /owner/repo/blob/<sha>/target -> repo lint"
+else
+  bad "blob URL form: $res"
+fi
+
+# 11. branch ref via `ref=` lints the branch's latest commit. The response
+#     carries `ref` but no `commit` (no SHA resolved on the hot path).
+res=$(curl -fsS "$URL?repo=actions/checkout&ref=main&targets=action.yml")
+if jq -e '.ok and .ref == "main" and (has("commit") | not) and (.files | length) == 1' >/dev/null <<<"$res"; then
+  ok "ref=main -> latest-commit lint, no echoed commit"
+else
+  bad "ref=main branch lint: $res"
+fi
+
+# 12. ref=HEAD lints the default branch's latest commit.
+res=$(curl -fsS "$URL?repo=actions/checkout&ref=HEAD&targets=action.yml")
+if jq -e '.ok and .ref == "HEAD" and (.files | length) == 1' >/dev/null <<<"$res"; then
+  ok "ref=HEAD -> default-branch lint"
+else
+  bad "ref=HEAD default-branch lint: $res"
+fi
+
+# 13. ref with a `..` traversal segment -> 400 (can't escape into another path).
+res_body=$(mktemp)
+code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&ref=../main&targets=action.yml")
+res=$(cat "$res_body"); rm -f "$res_body"
+if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid ref"))' >/dev/null <<<"$res"; then
+  ok "ref with .. segment -> 400"
+else
+  bad "ref with .. segment (status=$code): $res"
+fi
+
+# 14. every response carries a non-empty `engine_version` so CI can pin /
 #     assert the deployed engine (present on both success and error paths).
 res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
 if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then

@@ -25,9 +25,10 @@ mirror of the in-code source of truth at
 ## API
 
 `GET` or `POST`. Parameters can come from the URL path
-(`/<owner>/<repo>/<commit>[/<target/path/...>]` — segments after the
-commit are joined into a single nested target path), the query string,
-the request body (raw `key=value&...`, JSON, or a plain YAML blob), or
+(`/<owner>/<repo>/<commit>[/<target/path/...>]`, or a domain-swapped GitHub
+file URL `/<owner>/<repo>/{blob,tree,raw}/<ref>/<target/path/...>` — segments
+after the commit/ref are joined into a single nested target path), the query
+string, the request body (raw `key=value&...`, JSON, or a plain YAML blob), or
 any mix — body beats query, query beats path on conflict. Paths that
 don't match the repo-mode shape are ignored so the Worker can be served
 under arbitrary path prefixes.
@@ -38,7 +39,8 @@ under arbitrary path prefixes.
 | `content` | string | The YAML source |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected. Hex-shaped refs are accepted at face value — a short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
+| `commit` | hex SHA, 7–64 chars | An **immutable pin**. Either this or `ref` is required whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected here — use `ref` for those. A short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
+| `ref` | branch \| tag \| `HEAD` \| SHA | **Mutable** ref; fetches that ref's *latest* commit. Use it to lint the default branch (`ref=HEAD`) or any branch/tag by name. Takes precedence over `commit`. A domain-swapped GitHub URL (`…/blob/<ref>/<path>`) fills this from the path. Slashy branch names (`release/1.x`) work via `ref=` but not the path form, which treats only the first post-`blob` segment as the ref. |
 | `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 | `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
@@ -81,6 +83,20 @@ curl -G https://karinto.toiroakr.workers.dev \
 
 ```sh
 curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"
+```
+
+Lint the latest commit on a branch by **swapping the domain** of a GitHub file
+URL (`github.com` → `karinto.toiroakr.workers.dev`):
+
+```sh
+# https://github.com/actions/checkout/blob/main/action.yml
+curl "https://karinto.toiroakr.workers.dev/actions/checkout/blob/main/action.yml"
+```
+
+Or pin nothing and lint the default branch's latest commit via `ref`:
+
+```sh
+curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&ref=HEAD&targets=action.yml"
 ```
 
 Or with explicit query parameters and multiple targets:
@@ -150,12 +166,19 @@ In `repo` mode the result is wrapped:
 {
   "ok": true,
   "repo": "actions/checkout",
+  "ref": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "commit": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "targets": ["action.yml"],
   "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ],
   "engine_version": "0.3.1"
 }
 ```
+
+`ref` echoes the branch / tag / `HEAD` / SHA that was fetched. `commit` is
+present **only** when `ref` is an immutable SHA pin (the Worker does not call
+the GitHub API on the request path, so a branch/tag ref has no resolved SHA in
+the response). A `ref=main` request therefore returns `"ref": "main"` and no
+`commit`.
 
 ## Local CLI
 

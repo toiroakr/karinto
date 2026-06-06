@@ -1,16 +1,22 @@
 // Cloudflare Workers entry point for karinto.
 //
 // Accepts GET or POST. Parameters can come from the URL path
-// (`/owner/repo/commit[/target]`), the URL query string, the request body
-// (raw `key=value&...`, JSON, or a YAML blob as the whole body), or a mix
-// of all three. Body > query > path on conflicts.
+// (`/owner/repo/commit[/target]`, or a domain-swapped GitHub file URL
+// `/owner/repo/{blob,tree,raw}/<ref>/<target>`), the URL query string, the
+// request body (raw `key=value&...`, JSON, or a YAML blob as the whole body),
+// or a mix of all three. Body > query > path on conflicts.
 //
 // Keys:
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
 //   - repo      "owner/name" — fetch files from a public GitHub repo
-//   - commit    commit SHA (7-64 hex chars); required whenever `repo` is set
+//   - commit    commit SHA (7-64 hex chars); an immutable pin. Either this or
+//               `ref` is required whenever `repo` is set.
+//   - ref       branch / tag / `HEAD` / SHA to fetch at (mutable; resolves to
+//               that ref's latest commit). Use it to lint the default branch
+//               (`ref=HEAD`) or any branch by name. Takes precedence over
+//               `commit`. A domain-swapped GitHub URL fills this from the path.
 //   - targets   comma-separated literal paths. With `repo`, either
 //               `targets=` or a single target via the URL path
 //               (`/owner/repo/commit/target/...`) must be supplied
@@ -100,6 +106,7 @@ export default {
         disable: params.disable || "",
         repo: params.repo || "",
         commit: params.commit || "",
+        ref: params.ref || "",
         targets: Object.prototype.hasOwnProperty.call(params, "targets")
           ? String(params.targets ?? "")
           : pathTarget || "",
@@ -393,6 +400,7 @@ async function readParams(request) {
   const params = {};
   if (path.repo) params.repo = path.repo;
   if (path.commit) params.commit = path.commit;
+  if (path.ref) params.ref = path.ref;
   for (const [k, v] of url.searchParams) params[k] = v;
 
   const cl = Number(request.headers.get("content-length"));
@@ -412,15 +420,17 @@ async function readParams(request) {
   return { params, pathTarget: path.pathTarget };
 }
 
-// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`.
-// Segments after the commit are joined as a single target path (so nested
-// paths like `.github/workflows/ci.yml` work). Returned separately from the
-// `params` map so a client cannot inject `pathTarget` via query / body.
-// Multi-target requests still need to come through `targets=` query/body.
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`, or a
+// domain-swapped GitHub file URL `/owner/repo/{blob,tree,raw}/<ref>/<target>`
+// → `{ repo, ref, pathTarget? }`. Segments after the commit/ref are joined as
+// a single target path (so nested paths like `.github/workflows/ci.yml` work).
+// Returned separately from the `params` map so a client cannot inject
+// `pathTarget`/`ref` via query / body. Multi-target requests still need to come
+// through `targets=` query/body.
 //
-// Only paths that look like the repo-mode pattern are interpreted; anything
-// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`, malformed
-// percent-encoding) returns `{}` so the request falls through to the
+// Only paths that look like one of the repo-mode patterns are interpreted;
+// anything else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`,
+// malformed percent-encoding) returns `{}` so the request falls through to the
 // regular content/repo body parameters. This keeps the Worker mountable
 // under arbitrary path prefixes without bricking unrelated requests.
 function parsePath(pathname) {
@@ -432,10 +442,31 @@ function parsePath(pathname) {
   } catch {
     return {};
   }
-  const [owner, repo, commit, ...rest] = segments;
+  const [owner, repo, marker, ...rest] = segments;
   if (!/^[A-Za-z0-9_.\-]+$/.test(owner) || !/^[A-Za-z0-9_.\-]+$/.test(repo)) return {};
-  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) return {};
-  const out = { repo: `${owner}/${repo}`, commit };
+  const base = { repo: `${owner}/${repo}` };
+
+  // GitHub web / raw file URL shape: `/owner/repo/{blob,tree,raw}/<ref>/<path>`.
+  // Domain-swapping a `github.com/.../blob/<branch>/<file>` URL lands here, so
+  // a bare domain swap can lint a branch's latest commit. Only the first
+  // post-marker segment is taken as the ref — a multi-segment branch name
+  // (e.g. `release/1.x`) is ambiguous against the file path without a GitHub
+  // API probe, so those callers must use `?ref=` + `targets=`. The ref is
+  // validated downstream in `resolveRef`.
+  if (/^(blob|tree|raw)$/.test(marker) && rest.length >= 1) {
+    const [ref, ...pathRest] = rest;
+    const out = { ...base, ref };
+    if (pathRest.length > 0) out.pathTarget = pathRest.join("/");
+    return out;
+  }
+
+  // Bare shape: `/owner/repo/<commit>/<path...>`. The 3rd segment must be a hex
+  // SHA — a non-hex value falls through to `{}` so the Worker stays mountable
+  // under arbitrary path prefixes. Branch/tag refs in the bare shape come
+  // through `?ref=` instead (the raw.githubusercontent.com URL has no marker
+  // segment, so a domain-swapped raw URL only auto-works for SHA refs).
+  if (!/^[0-9a-fA-F]{7,64}$/.test(marker)) return {};
+  const out = { ...base, commit: marker };
   if (rest.length > 0) out.pathTarget = rest.join("/");
   return out;
 }
@@ -476,6 +507,7 @@ const KNOWN_KEYS = new Set([
   "disable",
   "repo",
   "commit",
+  "ref",
   "targets",
   "osv",
   "no_capture",
@@ -516,7 +548,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture|forbidden|archived)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -687,21 +719,7 @@ async function handleRepo(
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
   }
-  if (params.commit !== undefined && typeof params.commit !== "string") {
-    throw httpError("`commit` must be a string", 400);
-  }
-  const commit = params.commit || "";
-  if (!commit) {
-    throw new Error("`commit` is required with `repo` (commit SHA, full or abbreviated)");
-  }
-  // Accept the same range Git itself uses for abbreviated SHAs (7-64 hex).
-  // An all-hex value of this shape could technically collide with a branch
-  // or tag of the same name (e.g. `deadbee`); we accept that trade-off for
-  // ergonomics. Callers who need ironclad immutability should pass the full
-  // 40-char SHA.
-  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
-    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
-  }
+  const { ref, isSha } = resolveRef(params);
   let targets;
   if (Object.prototype.hasOwnProperty.call(params, "targets")) {
     const rawTargets = params.targets ?? "";
@@ -730,11 +748,12 @@ async function handleRepo(
 
   const files = [];
   for (const path of targets) {
-    // Encode each segment so a `?` / `#` / `%` / space in a filename cannot
-    // be reinterpreted as a URL delimiter by fetch; keep `/` as the segment
-    // separator so nested paths still address one file.
+    // Encode each segment so a `?` / `#` / `%` / space in a filename (or a
+    // branch name) cannot be reinterpreted as a URL delimiter by fetch; keep
+    // `/` as the segment separator so nested paths / slashy refs still resolve.
     const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${encodedPath}`;
+    const encodedRef = ref.split("/").map(encodeURIComponent).join("/");
+    const url = `https://raw.githubusercontent.com/${repo}/${encodedRef}/${encodedPath}`;
     const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
       files.push({ path, ok: false, error: `GET raw → ${res.status}` });
@@ -765,10 +784,79 @@ async function handleRepo(
   return {
     ok: files.every((f) => f.ok !== false),
     repo,
-    commit,
+    ref,
+    // Echo `commit` only for an immutable SHA pin, so callers can keep keying
+    // off it; for a mutable branch/tag/HEAD ref there is no resolved SHA on the
+    // hot path (the Worker never calls the GitHub API here), so `ref` is the
+    // only handle.
+    ...(isSha ? { commit: ref } : {}),
     targets,
     files,
   };
+}
+
+// Resolve the git ref to fetch from. `ref` (branch / tag / `HEAD` / SHA) takes
+// precedence over `commit` (SHA-only pin); returns whether the ref is an
+// immutable SHA so the response can echo `commit` for the pinned case.
+function resolveRef(params) {
+  if (params.ref !== undefined) {
+    if (typeof params.ref !== "string") {
+      throw httpError("`ref` must be a string", 400);
+    }
+    const ref = params.ref.trim();
+    if (!ref) {
+      throw new Error("`ref` is empty (branch, tag, `HEAD`, or commit SHA)");
+    }
+    validateRef(ref);
+    return { ref, isSha: /^[0-9a-fA-F]{7,64}$/.test(ref) };
+  }
+  if (params.commit !== undefined && typeof params.commit !== "string") {
+    throw httpError("`commit` must be a string", 400);
+  }
+  const commit = (params.commit || "").trim();
+  if (!commit) {
+    throw new Error(
+      "`commit` or `ref` is required with `repo` (commit SHA, or `ref=` for a branch/tag/HEAD)",
+    );
+  }
+  // `commit` is SHA-only by contract (an immutable pin). Accept the same range
+  // Git uses for abbreviated SHAs (7-64 hex). An all-hex value of this shape
+  // could technically collide with a branch/tag of the same name (e.g.
+  // `deadbee`); we accept that trade-off for ergonomics. Branch/tag refs go
+  // through `ref=` so the SHA-pin guarantee here stays unambiguous.
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
+    throw new Error(
+      `invalid commit: ${commit} (expected 7-64 hex characters; use \`ref=\` for a branch/tag name)`,
+    );
+  }
+  return { ref: commit, isSha: true };
+}
+
+// Validate a git ref before it is interpolated into
+// `https://raw.githubusercontent.com/<repo>/<ref>/<path>`. Mirrors
+// `validateTargetPath`: reject anything that could escape the ref into a
+// different path (`..`, leading/trailing `/`, `\`, `%`) and restrict to the
+// characters git permits in ref names (the charset already rules out space /
+// `~^:?*[` and other delimiters).
+function validateRef(ref) {
+  if (ref.length > 256) {
+    throw httpError(`ref too long (max 256 chars): ${truncatePreview(ref)}`, 400);
+  }
+  if (
+    ref.startsWith("/") ||
+    ref.endsWith("/") ||
+    ref.includes("..") ||
+    ref.includes("\\") ||
+    ref.includes("%") ||
+    !/^[A-Za-z0-9._/-]+$/.test(ref)
+  ) {
+    throw httpError(`invalid ref: ${truncatePreview(ref)}`, 400);
+  }
+  for (const seg of ref.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") {
+      throw httpError(`invalid ref: ${truncatePreview(ref)}`, 400);
+    }
+  }
 }
 
 function isTrue(v) {
