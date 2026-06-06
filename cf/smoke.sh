@@ -158,21 +158,15 @@ else
   bad "ref with .. segment (status=$code): $res"
 fi
 
-# 14. whole-repo mode: bare `/owner/repo` discovers and lints all default-branch
-#     workflows. Discovery calls the GitHub contents API, so tolerate a `429`
-#     rate-limit (60 req/hour/IP unauthenticated) as a non-failure.
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/actions/checkout")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "200" ] && jq -e '.ok and .ref == "HEAD" and (.targets | length) >= 1 and (.files | length) >= 1' >/dev/null <<<"$res"; then
-  ok "bare /owner/repo -> default-branch workflow discovery ($(jq -r '.files | length' <<<"$res") file(s))"
-elif [ "$code" = "429" ] && jq -e '.ok == false and (.error | test("rate limit"))' >/dev/null <<<"$res"; then
-  ok "bare /owner/repo -> discovery rate-limited (429, expected without a token)"
-else
-  bad "bare /owner/repo discovery (status=$code): $res"
-fi
+# NOTE: whole-repo discovery (`/owner/repo` with no targets) is deliberately
+# NOT smoke-tested here. It calls the GitHub contents API from the Worker's
+# (Cloudflare) egress IP, which shares the unauthenticated 60-req/hour/IP
+# budget with real user traffic — and smoke.sh runs on every deploy (twice in
+# release-publish.sh: prod + pinned snapshot). Burning that scarce quota on a
+# liveness probe is wasteful and could rate-limit genuine requests. The
+# discovery path is covered by the mocked unit tests instead.
 
-# 15. every response carries a non-empty `engine_version` so CI can pin /
+# 14. every response carries a non-empty `engine_version` so CI can pin /
 #     assert the deployed engine (present on both success and error paths).
 res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
 if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then
