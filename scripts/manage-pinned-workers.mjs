@@ -32,6 +32,9 @@
 //   The Cloudflare free tier caps at 100 Worker scripts; 50 leaves
 //   comfortable headroom for prod/staging/maintenance + per-PR previews +
 //   major aliases.
+//   GITHUB_PUBLIC_READ_TOKEN — public-read PAT mirrored into the alias Worker
+//   as a secret so whole-repo discovery authenticates its GitHub API calls.
+//   Unset → the alias serves whole-repo mode anonymously (60 req/hour/IP).
 //
 // Failure semantics: alias deploy/smoke failures exit non-zero (CI users
 // pinned to `karinto-vX` would otherwise see a stale alias). Individual
@@ -131,6 +134,20 @@ function shell(cmd, args) {
   execFileSync(cmd, args, { stdio: "inherit" });
 }
 
+// Mirror the optional GITHUB_PUBLIC_READ_TOKEN repo secret into a Worker as an
+// encrypted secret so whole-repo discovery mode authenticates its GitHub
+// contents-API calls (60 → 5000 req/hour/IP). No-op when the env var is unset.
+// Piped via stdin so the value never lands in argv (`ps`).
+function putGithubToken(targetArgs) {
+  const token = process.env.GITHUB_PUBLIC_READ_TOKEN;
+  if (!token) return;
+  execFileSync(
+    "npx",
+    ["wrangler", "secret", "put", "GITHUB_PUBLIC_READ_TOKEN", ...targetArgs],
+    { input: token, stdio: ["pipe", "inherit", "inherit"] },
+  );
+}
+
 const scripts = await listScripts();
 const versioned = [];
 for (const name of scripts) {
@@ -172,6 +189,7 @@ if (releaseMajorTop && cmpVersion(releaseMajorTop, release) === 0) {
   const alias = aliasName(release.major);
   console.log(`Deploying alias ${alias} -> ${release.raw}`);
   shell("npx", ["wrangler", "deploy", "--env=", "--name", alias]);
+  putGithubToken(["--env=", "--name", alias]);
   shell("bash", ["smoke.sh", aliasUrl(release.major)]);
 } else {
   console.log(

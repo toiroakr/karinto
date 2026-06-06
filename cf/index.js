@@ -856,8 +856,9 @@ function collectTargets(params, pathTarget) {
 // (the repo's default branch when `ref` is undefined) via the GitHub contents
 // API. This is the one place the Worker calls the GitHub API on the request
 // path; it fails loudly (with an actionable message) on rate-limit / outage so
-// the caller can fall back to explicit `targets=`. A `GITHUB_TOKEN` binding,
-// when present, raises the unauthenticated 60 req/hour/IP ceiling to 5000/hour.
+// the caller can fall back to explicit `targets=`. A `GITHUB_PUBLIC_READ_TOKEN`
+// binding, when present, raises the unauthenticated 60 req/hour/IP ceiling to
+// 5000/hour.
 async function discoverWorkflows(repo, ref, env) {
   const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   const url = `https://api.github.com/repos/${repo}/contents/${WORKFLOW_DIR}${refQuery}`;
@@ -878,7 +879,7 @@ async function discoverWorkflows(repo, ref, env) {
   if (res.status === 403 || res.status === 429) {
     throw httpError(
       "GitHub API rate limit reached while listing workflows; retry later, " +
-        "pass explicit `targets=`, or deploy with a GITHUB_TOKEN",
+        "pass explicit `targets=`, or deploy with a GITHUB_PUBLIC_READ_TOKEN",
       429,
     );
   }
@@ -914,7 +915,9 @@ function githubApiHeaders(env) {
     "user-agent": "karinto-worker",
     accept: "application/vnd.github+json",
   };
-  if (env?.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+  if (env?.GITHUB_PUBLIC_READ_TOKEN) {
+    headers.authorization = `Bearer ${env.GITHUB_PUBLIC_READ_TOKEN}`;
+  }
   return headers;
 }
 

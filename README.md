@@ -136,9 +136,10 @@ the one mode that calls the **GitHub contents API** on the request path:
   When that is hit the request fails with `429` and a message pointing you at
   the escape hatches (retry later, pass explicit `targets=`, or self-host with
   a token).
-- Self-hosters can set a `GITHUB_TOKEN` Worker secret to raise the ceiling to
-  5000 req/hour and reach private repos the token can see. The public
-  deployment runs token-less.
+- Set a `GITHUB_PUBLIC_READ_TOKEN` repo secret and the release / staging /
+  preview deploys mirror it into the Worker (as an encrypted secret), raising
+  the ceiling to 5000 req/hour and reaching private repos the token can see.
+  Unset → the deployment runs token-less and this mode stays anonymous.
 - At most 50 workflows are linted per request (the `targets` cap). When a repo
   has more, the response sets `"truncated": true` and `"discovered": <count>`
   so you know the result is partial; pass explicit `targets=` to pick the rest.
@@ -275,10 +276,10 @@ versions are listed under [GitHub Releases](https://github.com/toiroakr/karinto/
 
 ## Private repositories
 
-For private repos pass `content` directly — the **public** deployment fetches
-`repo`-mode files anonymously and cannot read private repos. A self-hosted
-deployment with a `GITHUB_TOKEN` Worker secret (see
-[`DEVELOPMENT.md`](DEVELOPMENT.md#optional-github-variables)) can reach private
+For private repos pass `content` directly — a deployment without a token
+fetches `repo`-mode files anonymously and cannot read private repos. A
+deployment with a `GITHUB_PUBLIC_READ_TOKEN` secret (see
+[`DEVELOPMENT.md`](DEVELOPMENT.md#required-github-secrets)) can reach private
 repos the token can see in whole-repo discovery mode.
 
 ## Privacy
