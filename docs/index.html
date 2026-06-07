@@ -301,14 +301,15 @@
   <section>
     <h2>Try it</h2>
     <p><strong>Recommended:</strong> use the <strong>Paste YAML</strong> tab —
-    it POSTs your content straight to the linter (no GitHub round-trip, no rate
-    limit) and opens the JSON in a new tab. The <strong>Repo + path</strong> and
-    <strong>GitHub URL</strong> tabs resolve the file's commit SHA via the GitHub
-    API and build a <code>karinto.toiroakr.workers.dev</code> repo-mode URL; that
-    mode is opt-in per deployment (it returns <code>403</code> where disabled)
-    and leans on GitHub rate limits, so prefer Paste YAML for anything routine.
-    (Navigation — rather than <code>fetch</code> — avoids cross-origin issues
-    some privacy browsers have with <code>*.workers.dev</code>.)</p>
+    it POSTs your content straight to the linter (no GitHub round-trip) and
+    opens the JSON in a new tab. The <strong>Repo + path</strong> and
+    <strong>GitHub URL</strong> tabs fetch the file from GitHub <em>in your
+    browser</em> (on your own IP and rate limit) and then POST its content the
+    same way, so they work on any deployment — but they use GitHub's
+    unauthenticated API (~60 requests/hour per IP), so prefer Paste YAML for
+    anything routine. (The lint result opens via a form-POST navigation rather
+    than <code>fetch</code>, which avoids cross-origin issues some privacy
+    browsers have with <code>*.workers.dev</code>.)</p>
     <form id="lint-form" autocomplete="off">
       <div class="tabs" aria-label="Input method">
         <button type="button" id="tab-btn-content" class="tab" aria-pressed="true">Paste YAML</button>
@@ -358,22 +359,26 @@
 
   <details>
     <summary>What gets called</summary>
-    <p>Two unauthenticated GETs:</p>
+    <p>The <strong>Repo + path</strong> / <strong>GitHub URL</strong> tabs make
+    two unauthenticated GETs to GitHub <em>from your browser</em>:</p>
     <ol>
       <li>
         <code>https://api.github.com/repos/{owner}/{repo}/commits?per_page=1&amp;sha={ref}</code>
         — resolves a ref (default branch, branch name, tag, or short SHA from a pasted URL) to a full commit SHA.
       </li>
       <li>
-        <code>https://karinto.toiroakr.workers.dev/{owner}/{repo}/{sha}/{file_path}</code>
-        — lints the file at that pinned commit.
+        <code>https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={sha}</code>
+        (raw media type) — fetches the file's content.
       </li>
     </ol>
-    <p>The Worker requires a 7–64-character hex SHA in the URL — literal <code>HEAD</code> / <code>main</code> won't work; resolve the ref first via the GitHub API.</p>
+    <p>That content is then POSTed to <code>https://karinto.toiroakr.workers.dev</code>
+    — the same always-available path the <strong>Paste YAML</strong> tab uses, so
+    these tabs don't depend on the Worker's (opt-in) repo mode.</p>
     <p>GitHub's unauthenticated API allows ~60 requests/hour per IP. The karinto Worker
     rate-limits at 60/minute per IP.</p>
-    <p>You can reproduce the karinto call locally:</p>
-    <pre>curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"</pre>
+    <p>You can reproduce it locally — fetch the file and pipe it to the linter:</p>
+    <pre>curl -sL "https://raw.githubusercontent.com/actions/checkout/&lt;sha&gt;/action.yml" \
+  | curl -X POST --data-binary @- "https://karinto.toiroakr.workers.dev"</pre>
     <p>The <strong>Paste YAML</strong> tab skips GitHub entirely and POSTs your
     content to the Worker (a single request, no SHA resolution):</p>
     <pre>curl -X POST --data-binary @workflow.yml "https://karinto.toiroakr.workers.dev?type=workflow"</pre>
@@ -388,6 +393,9 @@
 (() => {
   const KARINTO = "https://karinto.toiroakr.workers.dev";
   const GH_API = "https://api.github.com";
+  // Named target for the result tab so the repo/url flows can POST into the
+  // tab we open synchronously (popup blockers only fire on *new* windows).
+  const RESULT_WINDOW = "karinto_lint_result";
   const REPO_RE = /^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/;
 
   const form = document.getElementById("lint-form");
@@ -584,6 +592,39 @@
     return commits[0].sha;
   }
 
+  // Fetch the file's raw bytes through the GitHub contents API (the `raw`
+  // media type returns the content directly, and api.github.com sends CORS
+  // headers so this works from the browser). We lint by POSTing this content
+  // to the Worker, so the playground never needs the Worker's (opt-in) repo
+  // mode — the GitHub round-trip happens here, on the visitor's own IP/quota.
+  async function fetchFileContent(owner, name, target, sha) {
+    const url = `${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/contents/${encodePath(target)}?ref=${encodeURIComponent(sha)}`;
+    const res = await fetchWithContext(url, "api.github.com", {
+      headers: { "Accept": "application/vnd.github.raw" },
+    });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).message || ""; } catch (_) {}
+      const err = new Error(
+        res.status === 404
+          ? `File not found: ${target} @ ${sha.slice(0, 7)}.`
+          : `GitHub API ${res.status}${detail ? ": " + detail : ""}`,
+      );
+      err.status = res.status;
+      throw err;
+    }
+    return res.text();
+  }
+
+  // Mirror the Worker's path-based kind guess so auto-detect has a hint; the
+  // Worker still auto-detects from content when this is blank.
+  function guessType(target) {
+    const t = target.toLowerCase();
+    if (t.endsWith("action.yml") || t.endsWith("action.yaml")) return "action";
+    if (t.includes(".github/workflows/")) return "workflow";
+    return "";
+  }
+
   // Walk the candidate (ref, target) splits in order. 404 / 422 from the
   // commits API means the ref doesn't exist — try the next, longer ref.
   // Any other error (network, rate limit, 5xx) aborts immediately.
@@ -631,11 +672,11 @@
     submitEl.disabled = true;
     hideResult();
 
-    // Open a blank tab synchronously inside the user gesture so popup
-    // blockers (and Arc / Brave heuristics) don't kill the navigation that
-    // happens after `await resolveSha`. If the tab was blocked we fall back
-    // to rendering an inline link.
-    const popup = window.open("about:blank", "_blank");
+    // Open a named blank tab synchronously inside the user gesture so popup
+    // blockers (and Arc / Brave heuristics) don't kill the result tab we POST
+    // into after the awaits below. If it was blocked we fall back to the curl
+    // reproduction in the result panel.
+    const popup = window.open("about:blank", RESULT_WINDOW);
 
     try {
       const initial = candidates[0];
@@ -645,23 +686,27 @@
           ? `Resolving <code>${repoSlug}</code>…`
           : `Resolving latest commit on default branch of <code>${repoSlug}</code>…`,
       );
-      const { ref, target, sha } = await resolveCandidates(owner, name, candidates);
+      const { target, sha } = await resolveCandidates(owner, name, candidates);
       const shortSha = sha.slice(0, 7);
 
-      let karintoUrl = `${KARINTO}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
-      if (osvEl.checked) karintoUrl += "?osv=1";
+      setStatus(`Fetching <code>${htmlEscape(target)}</code>@<code>${shortSha}</code>…`);
+      const content = await fetchFileContent(owner, name, target, sha);
 
-      showResult({ owner, name, shortSha, target, url: karintoUrl });
+      const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
+      showResult({ owner, name, shortSha, target, rawUrl, osv: osvEl.checked });
 
       if (popup && !popup.closed) {
-        popup.location.href = karintoUrl;
+        // POST the fetched YAML as `content` into the pre-opened tab. This goes
+        // through the always-available content path, so it works even where the
+        // Worker has repo mode disabled.
+        postContent(content, guessType(target), osvEl.checked, RESULT_WINDOW);
         setStatus(
-          `Opened <code>${repoSlug}@${shortSha}</code> in a new tab.`,
+          `Linted <code>${repoSlug}@${shortSha}</code> — see the new tab for the JSON.`,
           "ok",
         );
       } else {
         setStatus(
-          `Tap the link below to open the lint result. (Your browser blocked the auto-open.)`,
+          `Your browser blocked the auto-open — use the curl command below to lint it.`,
           "ok",
         );
       }
@@ -681,11 +726,11 @@
   // Submit the pasted YAML as a form POST targeting a new tab. Called inside
   // the submit handler (a user gesture) with no preceding await, so popup
   // blockers leave the new tab alone.
-  function postContent(content, type, osv) {
+  function postContent(content, type, osv, targetWindow) {
     const form = document.createElement("form");
     form.method = "POST";
     form.action = KARINTO;
-    form.target = "_blank";
+    form.target = targetWindow || "_blank";
     form.acceptCharset = "utf-8";
     form.style.display = "none";
 
@@ -732,28 +777,31 @@
 
   // Build the result panel via DOM APIs so user-controlled `owner` / `name` /
   // `target` (which may contain HTML-special characters once we accept pasted
-  // GitHub URLs) can't inject markup.
-  function showResult({ owner, name, shortSha, target, url }) {
+  // GitHub URLs) can't inject markup. The repo/url flows lint by POSTing the
+  // fetched file as `content`, so the reproduction fetches the raw file and
+  // pipes it to the linter — no dependency on the Worker's repo mode.
+  function showResult({ owner, name, shortSha, target, rawUrl, osv }) {
     resultEl.hidden = false;
     resultEl.replaceChildren();
 
     const label = makeEl("p", "result-label");
     label.append(
-      "Lint URL for ",
+      "Linted ",
       makeEl("code", null, `${owner}/${name}@${shortSha}`),
       " · ",
       makeEl("code", null, target),
+      " in a new tab.",
     );
 
-    const link = makeEl("a", "result-url", url);
-    link.href = url;
-    link.target = "_blank";
-    link.rel = "noopener";
-
+    const postUrl = KARINTO + (osv ? "?osv=1" : "");
     const curlLabel = makeEl("p", "result-curl", "Reproduce in a terminal:");
-    const curlCmd = makeEl("pre", "result-curl-cmd", `curl ${JSON.stringify(url)}`);
+    const curlCmd = makeEl(
+      "pre",
+      "result-curl-cmd",
+      `curl -sL ${JSON.stringify(rawUrl)} \\\n  | curl -X POST --data-binary @- ${JSON.stringify(postUrl)}`,
+    );
 
-    resultEl.append(label, link, curlLabel, curlCmd);
+    resultEl.append(label, curlLabel, curlCmd);
   }
 
   form.addEventListener("submit", run);
