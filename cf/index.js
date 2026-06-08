@@ -1228,6 +1228,9 @@ function guessKindFromPath(path) {
   if (path.startsWith(".github/workflows/") || path.includes("/.github/workflows/")) {
     return "workflow";
   }
+  if (path.startsWith(".github/dependabot.") || path.includes("/.github/dependabot.")) {
+    return "dependabot";
+  }
   const basename = path.slice(path.lastIndexOf("/") + 1);
   if (basename === "action.yml" || basename === "action.yaml") return "action";
   return "";

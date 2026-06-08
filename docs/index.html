@@ -625,6 +625,9 @@
     if (target.startsWith(".github/workflows/") || target.includes("/.github/workflows/")) {
       return "workflow";
     }
+    if (target.startsWith(".github/dependabot.") || target.includes("/.github/dependabot.")) {
+      return "dependabot";
+    }
     const basename = target.slice(target.lastIndexOf("/") + 1).toLowerCase();
     if (basename === "action.yml" || basename === "action.yaml") return "action";
     return "";

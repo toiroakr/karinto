@@ -8,6 +8,7 @@
 pub(all) enum FileKind {
   Workflow
   Action
+  Dependabot
   Unknown
 } derive(Eq, Debug)
 
@@ -110,6 +111,7 @@ pub impl ToJson for FileKind with fn to_json(self) {
   match self {
     Workflow => "workflow"
     Action => "action"
+    Dependabot => "dependabot"
     Unknown => "unknown"
   }
 }
@@ -277,6 +279,10 @@ fn detect_kind(doc : @yaml.Yaml) -> FileKind {
         Workflow
       } else if m.contains("runs") {
         Action
+      } else if m.contains("updates") {
+        // Dependabot config (`.github/dependabot.yml`): `updates:` is unique to
+        // it — workflows/actions never carry a top-level `updates` key.
+        Dependabot
       } else {
         Unknown
       }

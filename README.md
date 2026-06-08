@@ -59,7 +59,7 @@ below.
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `type` | `workflow` \| `action` \| *(omit)* | Optional; auto-detected when blank |
+| `type` | `workflow` \| `action` \| `dependabot` \| *(omit)* | Optional; auto-detected when blank (`jobs`/`on` → workflow, `runs` → action, `updates` → dependabot) |
 | `content` | string | The YAML source. **The recommended input** — always available, no GitHub round-trip, no rate limit. |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
 | `repo` | `owner/name` | Repo mode; mutually exclusive with `content`. **Opt-in** (`REPO_MODE_ENABLED`) and GitHub-rate-limit-prone — see the note above. Returns `403` when the deployment has repo mode disabled. |
