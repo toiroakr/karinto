@@ -324,14 +324,14 @@
           </div>
           <div class="field">
             <label for="target">file path</label>
-            <input id="target" name="target" type="text" placeholder="action.yml" spellcheck="false" autocapitalize="off" />
+            <input id="target" name="target" type="text" placeholder=".github/workflows/test.yml" spellcheck="false" autocapitalize="off" />
           </div>
         </div>
       </div>
       <div id="tab-url" class="tab-panel" hidden>
         <div class="field">
           <label for="ghurl">GitHub file URL</label>
-          <input id="ghurl" name="ghurl" type="url" placeholder="https://github.com/actions/checkout/blob/main/action.yml" spellcheck="false" autocapitalize="off" />
+          <input id="ghurl" name="ghurl" type="url" placeholder="https://github.com/actions/checkout/blob/main/.github/workflows/test.yml" spellcheck="false" autocapitalize="off" />
         </div>
       </div>
       <div id="tab-content" class="tab-panel">
@@ -619,9 +619,14 @@
   // Mirror the Worker's path-based kind guess so auto-detect has a hint; the
   // Worker still auto-detects from content when this is blank.
   function guessType(target) {
-    const t = target.toLowerCase();
-    if (t.endsWith("action.yml") || t.endsWith("action.yaml")) return "action";
-    if (t.includes(".github/workflows/")) return "workflow";
+    // Match the Worker's guessKindFromPath / CLI kind_from_path: anything under
+    // .github/workflows/ is a workflow (any basename), and only an exact
+    // action.yml / action.yaml basename is an action — not any *action.yml.
+    if (target.startsWith(".github/workflows/") || target.includes("/.github/workflows/")) {
+      return "workflow";
+    }
+    const basename = target.slice(target.lastIndexOf("/") + 1).toLowerCase();
+    if (basename === "action.yml" || basename === "action.yaml") return "action";
     return "";
   }
 

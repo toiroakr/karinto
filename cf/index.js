@@ -1219,8 +1219,17 @@ function collectOnlineAuditCandidates(yaml) {
 }
 
 function guessKindFromPath(path) {
-  if (path.endsWith("action.yml") || path.endsWith("action.yaml")) return "action";
-  if (path.startsWith(".github/workflows/")) return "workflow";
+  // GitHub runs every YAML under `.github/workflows/` as a workflow whatever
+  // its basename (even `action.yml`), so match that path segment first — then
+  // treat only an exact `action.yml`/`action.yaml` basename as an action, not
+  // any `*action.yml` (e.g. a `release-action.yml` workflow). Mirrors the CLI's
+  // `kind_from_path` and ghalint's path globs (`^\.github/workflows/.*\.ya?ml$`
+  // for workflows, `action.ya?ml` basenames for actions).
+  if (path.startsWith(".github/workflows/") || path.includes("/.github/workflows/")) {
+    return "workflow";
+  }
+  const basename = path.slice(path.lastIndexOf("/") + 1);
+  if (basename === "action.yml" || basename === "action.yaml") return "action";
   return "";
 }
 

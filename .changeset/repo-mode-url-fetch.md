@@ -27,3 +27,9 @@ The `repo`-mode endpoints now go beyond `/owner/repo/<sha>/<path>`:
 The GitHub Pages playground now fetches files in the browser and POSTs their
 content to the linter, so its Repo / GitHub URL tabs no longer depend on the
 Worker's repo mode; the **Paste YAML** tab is the default.
+
+Path-based kind detection (repo mode + playground) now matches the CLI and
+ghalint's conventions: a file under `.github/workflows/` is always a workflow
+(any basename), and only an exact `action.yml` / `action.yaml` basename is an
+action — fixing a false positive where a workflow like `release-action.yml` was
+hinted as an action.
