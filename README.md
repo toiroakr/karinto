@@ -13,7 +13,7 @@ Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
-68 of 83 catalogued rules are active. They cover syntax, expression typing
+72 of 83 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
@@ -70,6 +70,8 @@ below.
 | `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
 | `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
+| `format` | `json` \| `sarif` | Output format; defaults to the JSON envelope. `sarif` returns a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) document — see [*SARIF output*](#sarif-output). |
+| `path` | string | Optional artifact label for `format=sarif` with `content` — becomes the SARIF `artifactLocation.uri` (e.g. `.github/workflows/ci.yml`). Same shape rules as `targets` paths. Ignored in envelope mode; unnecessary in `repo` mode, where targets already carry paths. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -242,6 +244,75 @@ therefore returns `"ref": "main"` and no `commit`. In whole-repo mode, `targets`
 lists the discovered files; if discovery found more than the 50-file cap, the
 response also carries `"truncated": true` and `"discovered": <count>`.
 
+### SARIF output
+
+`format=sarif` swaps the envelope for a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+document (content type `application/sarif+json`) that uploads directly to
+GitHub Code Scanning via
+[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action/tree/main/upload-sarif).
+It works in both `content` and `repo` mode:
+
+```sh
+# content mode (always available) — pass `path=` so findings anchor to a file
+curl -X POST --data-binary @.github/workflows/ci.yml \
+     "https://karinto.toiroakr.workers.dev?format=sarif&path=.github/workflows/ci.yml"
+
+# repo mode (requires REPO_MODE_ENABLED on the deployment)
+curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml?format=sarif"
+```
+
+Mapping:
+
+| Envelope | SARIF |
+| --- | --- |
+| `rule` | `result.ruleId`, plus a `tool.driver.rules[]` entry carrying the catalogue title, default severity, and upstream `origins` |
+| `severity` | `result.level` (`error` / `warning`; `info` becomes `note`) |
+| `message` | `result.message.text` |
+| `pos` | `physicalLocation.region` (`startLine` / `startColumn`) |
+| `job` / `step` | `locations[].logicalLocations[]` (`kind: "job"` / `"step"`) |
+| `parse_error` | one `error`-level result under a synthetic `parse-error` rule |
+| `files[].error` (repo mode) | `invocations[].toolExecutionNotifications[]`, with `executionSuccessful: false` |
+| `engine_version` | `tool.driver.version` |
+
+`physicalLocation` needs an artifact URI, so it is emitted when the input
+has a path: always in `repo` mode, and in `content` mode only when the
+request also passes `path=`. Pathless results keep their logical (job/step)
+locations, but GitHub Code Scanning cannot anchor those to a file — pass
+`path=` (or use `repo` mode) when uploading. `online_audit_candidates` and
+the dark-launch capture are envelope-mode-only.
+
+A complete workflow that surfaces findings in the repository **Security**
+tab (public repos — `repo` mode fetches the files from
+raw.githubusercontent.com). Note this uses **repo mode**, so it only works
+against an endpoint with `REPO_MODE_ENABLED` set; otherwise POST each file as
+`content` with `format=sarif&path=…`, or run the [Local CLI](#local-cli):
+
+```yaml
+name: karinto
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  karinto:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint workflows to SARIF
+        run: |
+          curl -sf "https://karinto.toiroakr.workers.dev/${{ github.repository }}/${{ github.sha }}?format=sarif&targets=.github/workflows/ci.yml,.github/workflows/release.yml" \
+            -o karinto.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: karinto.sarif
+```
+
+For private repos, run the [Local CLI](#local-cli) on a checkout instead
+(`--format sarif` with file arguments) — and note the CLI exits `1` when
+error-severity findings exist, so give the lint step `continue-on-error:
+true` (or append `|| true`) so the upload step still runs.
+
 ## Local CLI
 
 Lint local files without deploying anything or making a network
@@ -257,6 +328,10 @@ moon run --target js cmd/main -- .github/workflows/ci.yml action.yml
 
 # the same knobs as the Worker's `type` / `disable` parameters
 moon run --target js cmd/main -- --type action --disable 'permissions-*' action.yml
+
+# SARIF 2.1.0 for GitHub Code Scanning (same as the Worker's `format=sarif`);
+# file arguments become artifact URIs, stdin yields pathless results
+moon run --target js cmd/main -- --format sarif .github/workflows/ci.yml > karinto.sarif
 ```
 
 Exit codes are CI-friendly: `0` clean, `1` error-severity diagnostics or

@@ -226,7 +226,6 @@ test "expression-syntax: malformed `${{` expression" {
 }
 
 ///|
-#skip("not implemented yet")
 test "expression-type-mismatch: arithmetic on string literal" {
   let yaml =
     #|on: push
@@ -243,9 +242,46 @@ test "expression-type-mismatch: arithmetic on string literal" {
     "stats": { "jobs": 1, "steps": 1, "lines": 9 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
         "rule": "expression-type-mismatch",
         "severity": "error",
         "message": "expression type mismatch: cannot apply `+` to string and number",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "obfuscation",
+        "severity": "info",
+        "message": "`if:` expression can be replaced by its static evaluation",
+        "pos": { "line": 8, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `build` does not declare `timeout-minutes:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
       },
     ],
   })
@@ -349,7 +385,6 @@ test "context-availability: `needs` referenced at workflow level" {
 }
 
 ///|
-#skip("not implemented yet")
 test "expression-steps-type: steps.<id>.outputs typed wrongly" {
   let yaml =
     #|on: push
@@ -368,16 +403,47 @@ test "expression-steps-type: steps.<id>.outputs typed wrongly" {
     "stats": { "jobs": 1, "steps": 2, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
         "rule": "expression-steps-type",
         "severity": "error",
         "message": "`steps.gen.outputs` is a mapping; index by output name",
+        "pos": { "line": 10, "col": 9 },
+        "job": "build",
+        "step": { "index": 1 },
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `build` does not declare `timeout-minutes:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
       },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "expression-matrix-type: matrix.foo not declared in strategy" {
   let yaml =
     #|on: push
@@ -396,16 +462,55 @@ test "expression-matrix-type: matrix.foo not declared in strategy" {
     "stats": { "jobs": 1, "steps": 1, "lines": 11 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
+        "pos": { "line": 11, "col": 14 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+      {
         "rule": "expression-matrix-type",
         "severity": "error",
         "message": "matrix.foo is not declared in the strategy",
+        "pos": { "line": 11, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `build` does not declare `timeout-minutes:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
       },
     ],
   })
 }
 
 ///|
-#skip("not implemented yet")
 test "expression-needs-type: needs.<id>.outputs type mismatch" {
   let yaml =
     #|on: push
@@ -431,11 +536,543 @@ test "expression-needs-type: needs.<id>.outputs type mismatch" {
     "stats": { "jobs": 2, "steps": 2, "lines": 18 },
     "diagnostics": [
       {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `prep` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "prep",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `use` has no `name:`",
+        "pos": { "line": 12, "col": 3 },
+        "job": "use",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
+        "pos": { "line": 18, "col": 14 },
+        "job": "use",
+        "step": { "index": 0 },
+      },
+      {
         "rule": "expression-needs-type",
         "severity": "error",
         "message": "needs.prep.outputs has no field `missing`",
+        "pos": { "line": 18, "col": 9 },
+        "job": "use",
+        "step": { "index": 0 },
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `prep` does not declare `timeout-minutes:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "prep",
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `use` does not declare `timeout-minutes:`",
+        "pos": { "line": 12, "col": 3 },
+        "job": "use",
       },
     ],
+  })
+}
+
+///|
+test "expression-needs-type: reference to a job outside `needs`" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  prep:
+    #|    name: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - run: echo ok
+    #|  build:
+    #|    name: build
+    #|    needs: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - if: ${{ needs.deploy.result == 'success' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 2, "steps": 2, "lines": 22 },
+    "diagnostics": [
+      {
+        "rule": "expression-needs-type",
+        "severity": "error",
+        "message": "needs.deploy is not defined; `deploy` is not in this job's `needs`",
+        "pos": { "line": 21, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-needs-type: reusable-workflow outputs are not second-guessed" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  prep:
+    #|    name: prep
+    #|    uses: octo/shared/.github/workflows/build.yml@0123456789012345678901234567890123456789
+    #|  build:
+    #|    name: build
+    #|    needs: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - if: ${{ needs.prep.outputs.anything == 'x' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 2, "steps": 1, "lines": 19 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-steps-type: forward reference to a later step" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - if: ${{ steps.later.outcome == 'success' }}
+    #|        run: echo first
+    #|      - id: later
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 17 },
+    "diagnostics": [
+      {
+        "rule": "expression-steps-type",
+        "severity": "error",
+        "message": "steps.later is not defined (no step with `id: later` is in scope)",
+        "pos": { "line": 14, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-steps-type: declared output access is clean" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    outputs:
+    #|      tag: ${{ steps.gen.outputs.tag }}
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "tag=v1" >> "$GITHUB_OUTPUT"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 17 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-matrix-type: include-introduced keys are declared" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest, macos-14]
+    #|        include:
+    #|          - os: ubuntu-latest
+    #|            extra: true
+    #|    steps:
+    #|      - if: ${{ matrix.extra }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 21 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-matrix-type: expression-built matrix is skipped" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  gen:
+    #|    name: gen
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    outputs:
+    #|      matrix: ${{ steps.m.outputs.matrix }}
+    #|    steps:
+    #|      - id: m
+    #|        run: echo "matrix=..." >> "$GITHUB_OUTPUT"
+    #|  build:
+    #|    name: build
+    #|    needs: gen
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix: ${{ fromJSON(needs.gen.outputs.matrix) }}
+    #|    steps:
+    #|      - if: ${{ matrix.os == 'ubuntu-latest' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 2, "steps": 2, "lines": 27 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-steps-type: bare outputs mapping evaluated in template" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - name: show
+    #|        if: ${{ steps.gen.outputs }}
+    #|        run: echo done
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-steps-type",
+        "severity": "error",
+        "message": "`steps.gen.outputs` is a mapping; index by output name",
+        "pos": { "line": 16, "col": 9 },
+        "job": "build",
+        "step": { "index": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-matrix-type: bracket indexing checks declared keys" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest, macos-14]
+    #|    steps:
+    #|      - if: ${{ matrix['os'] == matrix['arch'] }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-matrix-type",
+        "severity": "error",
+        "message": "matrix.arch is not declared in the strategy",
+        "pos": { "line": 17, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-steps-type: member lookup is case-insensitive" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - if: ${{ steps.GEN.Outputs.v == '1' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 17 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression-steps-type: unknown field on steps.<id>" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    steps:
+    #|      - id: gen
+    #|        run: echo "v=1" >> "$GITHUB_OUTPUT"
+    #|      - if: ${{ steps.gen.result == 'success' }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 17 },
+    "diagnostics": [
+      {
+        "rule": "expression-steps-type",
+        "severity": "error",
+        "message": "steps.gen has no field `result`",
+        "pos": { "line": 16, "col": 9 },
+        "job": "build",
+        "step": { "index": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-matrix-type: expression-built include key disables the check" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest]
+    #|        include:
+    #|          - "${{ github.ref_name }}": dynamic
+    #|    steps:
+    #|      - if: ${{ matrix.undeclared }}
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 20 },
+    "diagnostics": [],
+  })
+}
+
+///|
+test "expression engine: hostile operator/property chains are skipped, not crashed" {
+  // Left-associated chains parse iteratively but build a left-nested AST
+  // whose height equals the chain length; the token cap keeps type
+  // inference from recursing that deep. Both floods stay far above
+  // EXPR_MAX_TOKENS and must be skipped without a stack overflow.
+  // The yaml is assembled through a StringBuilder with the `$` split off
+  // from `{{` — the JS backend compiles string concatenation into template
+  // literals, where a literal `${` would be read as an interpolation.
+  let sb = StringBuilder::new()
+  sb.write_string(
+    "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n",
+  )
+  sb.write_string("      - if: $")
+  sb.write_string("{{ 1")
+  for _i in 0..<5000 {
+    sb.write_string(" && 1")
+  }
+  sb.write_string(" + 'x' }}\n        run: echo hi\n")
+  sb.write_string("      - if: $")
+  sb.write_string("{{ github")
+  for _i in 0..<5000 {
+    sb.write_string(".a")
+  }
+  sb.write_string(" }}\n        run: echo ho\n")
+  let res = @karinto.lint(sb.to_string())
+  assert_true(res.parse_error is None)
+  // Over the token cap the expressions are skipped entirely — the trailing
+  // `+ 'x'` mismatch is intentionally not reported.
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "expression-type-mismatch" })
+    .length() ==
+    0,
+  )
+}
+
+///|
+test "expression-matrix-type: bare `if:` without braces is type-checked" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    strategy:
+    #|      matrix:
+    #|        os: [ubuntu-latest]
+    #|    steps:
+    #|      - if: matrix.gradle == 1
+    #|        run: echo ok
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 18 },
+    "diagnostics": [
+      {
+        "rule": "expression-matrix-type",
+        "severity": "error",
+        "message": "matrix.gradle is not declared in the strategy",
+        "pos": { "line": 17, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "expression-needs-type: toJSON-wrapped outputs mapping is clean" {
+  let yaml =
+    #|name: ci
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|concurrency:
+    #|  group: ci-${{ github.ref }}
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  prep:
+    #|    name: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    outputs:
+    #|      tag: ${{ steps.t.outputs.tag }}
+    #|    steps:
+    #|      - id: t
+    #|        run: echo "tag=v1" >> "$GITHUB_OUTPUT"
+    #|  build:
+    #|    name: build
+    #|    needs: prep
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    env:
+    #|      ALL: ${{ toJSON(needs.prep.outputs) }}
+    #|    steps:
+    #|      - run: echo "$ALL"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 2, "steps": 2, "lines": 26 },
+    "diagnostics": [],
   })
 }
 

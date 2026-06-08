@@ -7,6 +7,8 @@ import {
 }
 
 // Values
+pub const ENGINE_VERSION : String = "0.7.0"
+
 pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
@@ -16,6 +18,8 @@ pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Ar
 pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
+
+pub fn sarif_report(Array[SarifEntry], io_errors? : Array[SarifIoError], version? : String) -> Json
 
 // Errors
 
@@ -98,6 +102,16 @@ pub(all) struct RuleSpec {
   applies_to_workflow : Bool
   applies_to_action : Bool
 } derive(Eq, @debug.Debug)
+
+pub(all) struct SarifEntry {
+  path : String?
+  result : LintResult
+}
+
+pub(all) struct SarifIoError {
+  path : String
+  message : String
+}
 
 pub(all) enum Severity {
   Error

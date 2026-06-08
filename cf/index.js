@@ -102,6 +102,9 @@ export default {
       const { params, pathTarget } = await readParams(request);
       const result = await handle(params, env, pathTarget);
       const elapsed = Date.now() - started;
+      const targetsStr = Object.prototype.hasOwnProperty.call(params, "targets")
+        ? String(params.targets ?? "")
+        : pathTarget || "";
       log("request", {
         method: request.method,
         type: params.type || "(auto)",
@@ -109,13 +112,22 @@ export default {
         repo: params.repo || "",
         commit: params.commit || "",
         ref: params.ref || "",
-        targets: Object.prototype.hasOwnProperty.call(params, "targets")
-          ? String(params.targets ?? "")
-          : pathTarget || "",
+        targets: targetsStr,
         content_lines: params.content ? params.content.split("\n").length : 0,
-        files: result.files?.length ?? (params.content ? 1 : 0),
+        // SARIF responses carry no `files` array, so fall back to the request
+        // inputs: target count in repo mode, 1 for a content lint.
+        files: result.files?.length ??
+          (targetsStr
+            ? targetsStr.split(",").filter((s) => s.trim()).length
+            : params.content ? 1 : 0),
         elapsed_ms: elapsed,
       });
+      // SARIF responses are already serialized by the MoonBit side and
+      // bypass capture/replay and the archived-uses enqueue — both consume
+      // the JSON envelope shape.
+      if (result && typeof result.sarif === "string") {
+        return sarifResponse(result.sarif);
+      }
       // Only register the waitUntil promise when CAPTURES is actually bound
       // (production env). Preview/staging skip the wrapper entirely so
       // non-production traffic doesn't pay the Promise/catch overhead on
@@ -522,6 +534,8 @@ const KNOWN_KEYS = new Set([
   "no_capture",
   "forbidden",
   "archived",
+  "format",
+  "path",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -557,13 +571,14 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
   const forbidden = sanitizeUsesList(params.forbidden, "forbidden");
   const callerArchived = sanitizeUsesList(params.archived, "archived");
   const type = params.type || "";
+  const format = parseFormat(params.format);
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
   // Merge the caller's `archived` list with the live KV baseline and the
@@ -589,7 +604,7 @@ async function handle(params, env, pathTarget) {
       );
     }
     return await handleRepo(
-      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, env,
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
     );
   }
   if (!params.content) {
@@ -599,12 +614,48 @@ async function handle(params, env, pathTarget) {
     throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
   }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
+  if (format === "sarif") {
+    return {
+      sarif: worker.lint_string_sarif(
+        params.content, type, disable, vuln, forbidden, archived,
+        sanitizePathLabel(params.path),
+      ),
+    };
+  }
   return {
     ...JSON.parse(
       worker.lint_string(params.content, type, disable, vuln, forbidden, archived),
     ),
     online_audit_candidates: collectOnlineAuditCandidates(params.content),
   };
+}
+
+// `format=sarif` swaps the JSON envelope for a SARIF 2.1.0 document (#33).
+// Absent / "" / "json" keep the envelope so existing callers are unaffected.
+function parseFormat(raw) {
+  if (raw == null || raw === "") return "json";
+  if (typeof raw !== "string") {
+    throw httpError("`format` must be a string", 400);
+  }
+  if (raw === "json" || raw === "sarif") return raw;
+  throw httpError(
+    `invalid format: ${truncatePreview(raw)} (expected 'json' or 'sarif')`,
+    400,
+  );
+}
+
+// Optional artifact label for `format=sarif` content mode — it becomes the
+// SARIF `artifactLocation.uri`, so it must look like a safe relative path
+// (same shape rules as repo-mode targets). Without it, results carry
+// logical (job/step) locations only, which GitHub Code Scanning can't
+// anchor to a file.
+function sanitizePathLabel(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`path` must be a string", 400);
+  }
+  validateTargetPath(raw);
+  return raw;
 }
 
 // Read the KV-cached archived baseline, memoized per-isolate with a TTL.
@@ -735,7 +786,7 @@ function validateTargetPath(path) {
 }
 
 async function handleRepo(
-  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, env,
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
 ) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
@@ -794,32 +845,51 @@ async function handleRepo(
     });
   }
 
+  // In SARIF mode the per-file lint runs inside `lint_files_sarif` so the
+  // whole batch lands in one SARIF run; this loop only gathers inputs.
+  // Fetch failures become `{path, error}` items there (the MoonBit side
+  // turns them into tool execution notifications) instead of the envelope's
+  // `{path, ok: false, error}` entries.
+  const sarif = format === "sarif";
   const files = [];
+  const sarifFiles = [];
+  const pushFailure = (path, error) => {
+    if (sarif) sarifFiles.push({ path, error });
+    else files.push({ path, ok: false, error });
+  };
   for (const spec of specs) {
     const { path } = spec;
+    // `spec.size` is set in discovery mode (from the contents API listing);
+    // short-circuit oversized files before fetching.
     if (Number.isFinite(spec.size) && spec.size > MAX_BODY_BYTES) {
-      files.push({ path, ok: false, error: `file too large (${spec.size} > ${MAX_BODY_BYTES} bytes)` });
+      pushFailure(path, `file too large (${spec.size} > ${MAX_BODY_BYTES} bytes)`);
       continue;
     }
+    // `spec.url` is the prebuilt raw URL (explicit targets) or the contents
+    // API `download_url` (discovery); both are on raw.githubusercontent.com.
     const res = await fetch(spec.url, { headers: { "user-agent": "karinto-worker" } });
     if (!res.ok) {
-      files.push({ path, ok: false, error: `GET raw → ${res.status}` });
+      pushFailure(path, `GET raw → ${res.status}`);
       continue;
     }
     const cl = Number(res.headers.get("content-length"));
     if (Number.isFinite(cl) && cl > MAX_BODY_BYTES) {
-      files.push({ path, ok: false, error: `file too large (${cl} > ${MAX_BODY_BYTES} bytes)` });
+      pushFailure(path, `file too large (${cl} > ${MAX_BODY_BYTES} bytes)`);
       continue;
     }
     let raw;
     try {
       raw = await readBoundedResponse(res);
     } catch (e) {
-      files.push({ path, ok: false, error: String(e?.message ?? e) });
+      pushFailure(path, String(e?.message ?? e));
       continue;
     }
     const guessKind = type || guessKindFromPath(path);
     const vuln = useOsv ? await fetchVulnUses(raw, worker) : "";
+    if (sarif) {
+      sarifFiles.push({ path, content: raw, kind: guessKind, vuln });
+      continue;
+    }
     files.push({
       path,
       ...JSON.parse(
@@ -827,6 +897,13 @@ async function handleRepo(
       ),
       online_audit_candidates: collectOnlineAuditCandidates(raw),
     });
+  }
+  if (sarif) {
+    return {
+      sarif: worker.lint_files_sarif(
+        JSON.stringify(sarifFiles), disable, forbidden, archived,
+      ),
+    };
   }
   return {
     ok: files.every((f) => f.ok !== false),
@@ -1154,6 +1231,17 @@ function json(body, status = 200) {
       "content-type": "application/json; charset=utf-8",
       // Public, credential-less API — allow browser-based clients (e.g. the
       // GitHub Pages playground at docs/index.html) to read the response.
+      "access-control-allow-origin": "*",
+    },
+  });
+}
+
+// `format=sarif` body — already a serialized SARIF 2.1.0 document.
+function sarifResponse(body) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/sarif+json; charset=utf-8",
       "access-control-allow-origin": "*",
     },
   });
