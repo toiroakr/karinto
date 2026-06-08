@@ -8,6 +8,15 @@ test "parse_kind maps the Worker's type parameter contract" {
 }
 
 ///|
+test "parse_format maps the Worker's format parameter contract" {
+  assert_true(parse_format("") is Some(Envelope))
+  assert_true(parse_format("json") is Some(Envelope))
+  assert_true(parse_format("sarif") is Some(Sarif))
+  assert_true(parse_format("SARIF") is None)
+  assert_true(parse_format("xml") is None)
+}
+
+///|
 test "split_csv trims and drops empties" {
   assert_eq(split_csv("").join("|"), "")
   assert_eq(split_csv("a,b").join("|"), "a|b")

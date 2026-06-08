@@ -9,12 +9,20 @@
 ///   moon run --target js cmd/main -- .github/workflows/ci.yml action.yml
 ///   moon run --target js cmd/main -- --type action action.yml
 ///   moon run --target js cmd/main -- --disable 'permissions-*' ci.yml
+///   moon run --target js cmd/main -- --format sarif ci.yml > karinto.sarif
 ///
 /// Output is the same JSON envelope the Worker returns (`{ok, result}` for
 /// stdin; `{ok, files: [...]}` for file arguments, where each entry is
 /// `{path, ok, result}` — or `{path, ok: false, error}` with no `result`
 /// when the file can't be read, like the Worker's repo mode. `ok` mirrors
 /// the Worker's "parse succeeded" semantics).
+///
+/// `--format sarif` swaps the envelope for a SARIF 2.1.0 document
+/// (`@karinto.sarif_report`) suitable for `codeql-action/upload-sarif`.
+/// File arguments become artifact URIs; stdin has no path, so its results
+/// carry logical (job/step) locations only. Unreadable files surface as
+/// `invocations[].toolExecutionNotifications` instead of `{path, ok:
+/// false, error}` entries. Exit codes are format-independent.
 ///
 /// Exit codes: 0 — clean; 1 — error-severity diagnostics or YAML parse
 /// errors (CI-friendly); 2 — usage / IO errors.
@@ -46,6 +54,16 @@ fn run() -> Int {
       return 2
     }
   }
+  let format_str = last_value(matches, "format")
+  let format = match parse_format(format_str) {
+    Some(f) => f
+    None => {
+      eprintln(
+        "error: invalid value '\{format_str}' for '--format': expected 'json' or 'sarif'",
+      )
+      return 2
+    }
+  }
   let disabled = collect_disabled(matches)
   let files = match matches.values.get("files") {
     Some(fs) => fs
@@ -61,9 +79,9 @@ fn run() -> Int {
       eprintln(build_command().render_help())
       return 2
     }
-    lint_stdin(kind, disabled)
+    lint_stdin(kind, disabled, format)
   } else {
-    lint_files(files, kind, disabled)
+    lint_files(files, kind, disabled, format)
   }
 }
 
@@ -85,6 +103,12 @@ fn build_command() -> @argparse.Command {
         long="disable",
         action=Append,
         about="Comma-separated rule ID globs to disable (repeatable)",
+      ),
+      @argparse.OptionArg::new(
+        "format",
+        short='f',
+        long="format",
+        about="Output format: 'json' (default) or 'sarif'",
       ),
     ],
     positionals=[
@@ -125,6 +149,23 @@ fn parse_kind(s : String) -> @karinto.FileKind? {
     "" => Some(@karinto.FileKind::Unknown)
     "workflow" => Some(@karinto.FileKind::Workflow)
     "action" => Some(@karinto.FileKind::Action)
+    _ => None
+  }
+}
+
+///|
+priv enum OutputFormat {
+  Envelope
+  Sarif
+}
+
+///|
+/// `""` (omitted) and `"json"` both mean the JSON envelope — the Worker's
+/// `format` parameter has the same contract.
+fn parse_format(s : String) -> OutputFormat? {
+  match s {
+    "" | "json" => Some(Envelope)
+    "sarif" => Some(Sarif)
     _ => None
   }
 }
@@ -199,7 +240,11 @@ fn has_blocking(result : @karinto.LintResult) -> Bool {
 }
 
 ///|
-fn lint_stdin(kind : @karinto.FileKind, disabled : Array[String]) -> Int {
+fn lint_stdin(
+  kind : @karinto.FileKind,
+  disabled : Array[String],
+  format : OutputFormat,
+) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
     None => {
@@ -208,11 +253,22 @@ fn lint_stdin(kind : @karinto.FileKind, disabled : Array[String]) -> Int {
     }
   }
   let result = @karinto.lint(content, kind~, disabled~)
-  let body : Map[String, Json] = {
-    "ok": (result.parse_error is None).to_json(),
-    "result": result.to_json(),
+  match format {
+    Envelope => {
+      let body : Map[String, Json] = {
+        "ok": (result.parse_error is None).to_json(),
+        "result": result.to_json(),
+      }
+      println(body.to_json().stringify(indent=2))
+    }
+    Sarif =>
+      // stdin has no path, so results keep logical locations only.
+      println(
+        @karinto.sarif_report([@karinto.SarifEntry::{ path: None, result }]).stringify(
+          indent=2,
+        ),
+      )
   }
-  println(body.to_json().stringify(indent=2))
   if has_blocking(result) {
     1
   } else {
@@ -225,25 +281,38 @@ fn lint_files(
   files : Array[String],
   kind : @karinto.FileKind,
   disabled : Array[String],
+  format : OutputFormat,
 ) -> Int {
   let entries : Array[Json] = []
+  let sarif_entries : Array[@karinto.SarifEntry] = []
+  let io_errors : Array[@karinto.SarifIoError] = []
   let mut all_ok = true
   let mut code = 0
   for path in files {
     match js_read_file(path) {
       // Mirror the Worker's repo mode: an unreadable file becomes a
-      // `{path, ok: false, error}` entry and the rest of the batch
-      // still gets linted. IO errors dominate the exit code.
+      // `{path, ok: false, error}` entry (a tool execution notification
+      // in SARIF) and the rest of the batch still gets linted. IO errors
+      // dominate the exit code.
       None => {
         eprintln("error: cannot read file '\{path}'")
         all_ok = false
         code = 2
-        let entry : Map[String, Json] = {
-          "path": path.to_json(),
-          "ok": false.to_json(),
-          "error": "cannot read file".to_json(),
+        match format {
+          Envelope => {
+            let entry : Map[String, Json] = {
+              "path": path.to_json(),
+              "ok": false.to_json(),
+              "error": "cannot read file".to_json(),
+            }
+            entries.push(entry.to_json())
+          }
+          Sarif =>
+            io_errors.push(@karinto.SarifIoError::{
+              path,
+              message: "cannot read file",
+            })
         }
-        entries.push(entry.to_json())
       }
       Some(content) => {
         let file_kind = match kind {
@@ -258,20 +327,34 @@ fn lint_files(
         if has_blocking(result) && code == 0 {
           code = 1
         }
-        let entry : Map[String, Json] = {
-          "path": path.to_json(),
-          "ok": ok.to_json(),
-          "result": result.to_json(),
+        match format {
+          Envelope => {
+            let entry : Map[String, Json] = {
+              "path": path.to_json(),
+              "ok": ok.to_json(),
+              "result": result.to_json(),
+            }
+            entries.push(entry.to_json())
+          }
+          Sarif =>
+            sarif_entries.push(@karinto.SarifEntry::{ path: Some(path), result })
         }
-        entries.push(entry.to_json())
       }
     }
   }
-  let body : Map[String, Json] = {
-    "ok": all_ok.to_json(),
-    "files": entries.to_json(),
+  match format {
+    Envelope => {
+      let body : Map[String, Json] = {
+        "ok": all_ok.to_json(),
+        "files": entries.to_json(),
+      }
+      println(body.to_json().stringify(indent=2))
+    }
+    Sarif =>
+      println(
+        @karinto.sarif_report(sarif_entries, io_errors~).stringify(indent=2),
+      )
   }
-  println(body.to_json().stringify(indent=2))
   code
 }
 
