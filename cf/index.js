@@ -14,7 +14,9 @@
 //               mode (this plus the `/owner/repo[/...]` path forms) is opt-in
 //               via the REPO_MODE_ENABLED deployment variable; off by default.
 //   - commit    commit SHA (7-64 hex chars); an immutable pin. Either this or
-//               `ref` is required whenever `repo` is set.
+//               `ref` is required in explicit-target mode (`targets=` or a
+//               URL-path target); whole-repo discovery (no targets) defaults to
+//               the repo's default branch when neither is given.
 //   - ref       branch / tag / `HEAD` / SHA to fetch at (mutable; resolves to
 //               that ref's latest commit). Use it to lint the default branch
 //               (`ref=HEAD`) or any branch by name. Takes precedence over
@@ -966,13 +968,29 @@ async function discoverWorkflows(repo, ref, env) {
       404,
     );
   }
-  // 403 (rate limit / secondary limit) and 429 both mean "back off"; surface a
-  // 429 with a hint pointing at the escape hatches.
-  if (res.status === 403 || res.status === 429) {
+  // 429, or a 403 carrying the rate-limit signal (`x-ratelimit-remaining: 0`
+  // or a `retry-after` header), means "back off" — surface a 429 with the
+  // escape hatches. GitHub also returns 403 for non-rate-limit cases (a private
+  // repo the token can't see, blocked/forbidden content), so a 403 *without*
+  // that signal is a real permission error and must not masquerade as a rate
+  // limit (that would send callers chasing the wrong fix).
+  const rateLimited =
+    res.status === 429 ||
+    (res.status === 403 &&
+      (res.headers.get("x-ratelimit-remaining") === "0" ||
+        res.headers.get("retry-after") != null));
+  if (rateLimited) {
     throw httpError(
       "GitHub API rate limit reached while listing workflows; retry later, " +
         "pass explicit `targets=`, or deploy with a GITHUB_PUBLIC_READ_TOKEN",
       429,
+    );
+  }
+  if (res.status === 403) {
+    throw httpError(
+      `GitHub contents API → 403 while listing workflows in ${repo}; the repo ` +
+        "may be private or the GITHUB_PUBLIC_READ_TOKEN lacks access to it",
+      403,
     );
   }
   if (!res.ok) {

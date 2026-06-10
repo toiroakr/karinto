@@ -701,9 +701,10 @@
       const content = await fetchFileContent(owner, name, target, sha);
 
       const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${sha}/${encodePath(target)}`;
-      showResult({ owner, name, shortSha, target, rawUrl, osv: osvEl.checked });
+      const opened = !!(popup && !popup.closed);
+      showResult({ owner, name, shortSha, target, rawUrl, osv: osvEl.checked, opened });
 
-      if (popup && !popup.closed) {
+      if (opened) {
         // POST the fetched YAML as `content` into the pre-opened tab. This goes
         // through the always-available content path, so it works even where the
         // Worker has repo mode disabled.
@@ -788,7 +789,7 @@
   // GitHub URLs) can't inject markup. The repo/url flows lint by POSTing the
   // fetched file as `content`, so the reproduction fetches the raw file and
   // pipes it to the linter — no dependency on the Worker's repo mode.
-  function showResult({ owner, name, shortSha, target, rawUrl, osv }) {
+  function showResult({ owner, name, shortSha, target, rawUrl, osv, opened }) {
     resultEl.hidden = false;
     resultEl.replaceChildren();
 
@@ -798,7 +799,7 @@
       makeEl("code", null, `${owner}/${name}@${shortSha}`),
       " · ",
       makeEl("code", null, target),
-      " in a new tab.",
+      opened ? " in a new tab." : " — run the curl command below to see the JSON.",
     );
 
     const postUrl = KARINTO + (osv ? "?osv=1" : "");
