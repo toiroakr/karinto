@@ -336,7 +336,7 @@
       </div>
       <div id="tab-content" class="tab-panel">
         <div class="field">
-          <label for="content">workflow / action YAML</label>
+          <label for="content">workflow / action / Dependabot YAML</label>
           <textarea id="content" name="content" spellcheck="false" autocapitalize="off" placeholder="name: CI&#10;on: push&#10;jobs:&#10;  build:&#10;    runs-on: ubuntu-latest&#10;    steps:&#10;      - uses: actions/checkout@v4"></textarea>
         </div>
         <div class="field" style="flex: 0 0 auto;">
@@ -345,6 +345,7 @@
             <option value="">auto-detect</option>
             <option value="workflow">workflow</option>
             <option value="action">action</option>
+            <option value="dependabot">dependabot</option>
           </select>
         </div>
       </div>
