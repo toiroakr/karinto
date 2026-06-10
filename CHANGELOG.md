@@ -1,5 +1,139 @@
 # karinto
 
+## 0.8.0
+
+### Minor Changes
+
+- [#43](https://github.com/toiroakr/karinto/pull/43) [`eb8df2f`](https://github.com/toiroakr/karinto/commit/eb8df2fedec30a0b981c3c0f3b2b58e47ae1fe45) Thanks [@toiroakr](https://github.com/toiroakr)! - Promote Dependabot config to a first-class file kind.
+
+  `.github/dependabot.yml` is neither a workflow nor an action, so it was
+  previously lumped into the `Unknown` kind and the Dependabot rules
+  (`dependabot-cooldown`, `dependabot-execution`) rode along on an
+  `unknown_only` predicate. It is now a proper `FileKind::Dependabot`:
+
+  - **Detection** — content-based auto-detect classifies a top-level `updates:`
+    key as Dependabot (it is unique to dependabot config; workflows/actions never
+    carry it), and the path-based hints (Worker repo mode, CLI, playground) map
+    `.github/dependabot.yml` / `.yaml` to it — mirroring how
+    `.github/workflows/*` and `action.yml` are recognised.
+  - **Explicit override** — `type=dependabot` (API) / `--type dependabot` (CLI)
+    force it.
+  - The Dependabot rules now run only when the kind is `Dependabot`, and a lint
+    of a dependabot config reports `"kind": "dependabot"`.
+
+  This also clears the way for a future "could not determine kind" hint on the
+  genuinely-`Unknown` case without false-positiving on dependabot config.
+
+- [#42](https://github.com/toiroakr/karinto/pull/42) [`a6cefd7`](https://github.com/toiroakr/karinto/commit/a6cefd721aaec9eadd3a99c782adc0667e141e20) Thanks [@toiroakr](https://github.com/toiroakr)! - Implement the expression type-inference rule family (#36).
+
+  A new in-tree `${{ … }}` expression parser (lexer + recursive-descent parser
+
+  - small type model in `expr.mbt`) backs four rules that were catalogued as
+    `Planned`:
+
+  * **`expression-needs-type`** — types the `needs` context from the job
+    dependency graph. Only direct dependencies are members (referencing a
+    transitive dependency is an error, matching actionlint), and
+    `needs.<job>.outputs` is strict over the dependency's declared `outputs:`
+    keys. Reusable-workflow dependencies keep loose outputs.
+  * **`expression-steps-type`** — tracks declared step `id`s per job (and per
+    composite action) honouring step order: references to unknown or
+    not-yet-run steps are errors, as is using `steps.<id>.outputs` as a scalar
+    (`steps.gen.outputs == 1`).
+  * **`expression-matrix-type`** — flags `matrix.<key>` references not declared
+    as a `strategy.matrix` dimension or introduced by an `include:` entry.
+    Expression-built matrices disable the check.
+  * **`expression-type-mismatch`** — flags arithmetic operators applied to
+    known non-number operands (e.g. `'foo' + 1`; the expression language has
+    no arithmetic at all).
+
+  Bare `if:` conditions (which GitHub evaluates as expressions even without
+  `${{ }}` delimiters) are type-checked the same way. Validated against
+  actionlint's real-world dataset (1503 workflows): every file karinto flags
+  is also flagged by actionlint's expression checker — zero false positives.
+
+  The model is deliberately conservative: contexts whose shape can't be read
+  from the file (`github`, `env`, dynamic ids/matrices, reusable-workflow
+  outputs) type as `any` and never fire, and unparseable expressions are
+  silently skipped rather than reported (the `expression-syntax` rule
+  separately covers `${{` / `}}` delimiter mismatches, not full expression
+  grammar). All four rules hold
+  zero hard divergences against actionlint's vendored fixtures in the
+  upstream-parity check.
+
+- [#39](https://github.com/toiroakr/karinto/pull/39) [`fa0573c`](https://github.com/toiroakr/karinto/commit/fa0573ce82d0e0d4755e298ce907e7f3e5f6d391) Thanks [@toiroakr](https://github.com/toiroakr)! - Turn `cmd/main` into a usable local CLI (#34).
+
+  `cmd/main` was a build sanity-check that linted a hard-coded workflow. It is
+  now a real CLI that runs locally with MoonBit's js backend (Node.js):
+
+  - Reads YAML from **stdin** (`cat workflow.yml | moon run --target js cmd/main`)
+    or from **file path arguments**
+    (`moon run --target js cmd/main -- .github/workflows/ci.yml action.yml`).
+  - Reuses the same `@karinto.lint` engine as the Worker, with the same knobs:
+    `--type workflow|action` (auto-detected when omitted — file paths also get a
+    filename hint: `action.yml` basenames and `.github/workflows/` paths) and
+    `--disable` comma-separated rule-ID globs (repeatable).
+  - Prints the same JSON envelope as the Worker (`{ok, result}` for stdin;
+    `{ok, files: [...]}` for file arguments — each entry is `{path, ok, result}`,
+    or `{path, ok: false, error}` without `result` when the file can't be read,
+    matching the Worker's repo mode).
+  - CI-friendly exit codes: `0` clean, `1` error-severity diagnostics or YAML
+    parse errors, `2` usage / IO errors. `moon run` swallows exit codes, so for
+    CI run the built bundle directly:
+    `moon build --target js --release && node _build/js/release/build/cmd/main/main.js <files>`.
+
+- Repo mode: accept GitHub URL shapes / branch refs, add whole-repo discovery, and gate it behind `REPO_MODE_ENABLED`.
+
+  The `repo`-mode endpoints now go beyond `/owner/repo/<sha>/<path>`:
+
+  - **Domain-swap a GitHub file URL.** `/owner/repo/{blob,tree,raw}/<ref>/<path>`
+    is accepted, so swapping `github.com` for the Worker host on a file URL lints
+    it. The `ref` can be a branch / tag / `HEAD` / SHA (new `ref=` parameter,
+    resolved to that ref's latest commit); `commit=` stays a SHA-only immutable
+    pin. The response echoes `ref`, and `commit` only for SHA pins.
+  - **Whole-repo discovery.** Bare `/owner/repo` (or `repo=` with no `targets`)
+    lints every `.github/workflows/*.{yml,yaml}` file on the default branch via
+    the GitHub contents API. This is the only request-path GitHub API call; it
+    returns `429` with an actionable message when rate-limited.
+  - **Opt-in.** Repo mode (all of the above plus the existing forms) is now
+    **disabled by default** and enabled per deployment via the `REPO_MODE_ENABLED`
+    variable — it fetches arbitrary public content and draws on GitHub's rate
+    limits. Posting the YAML as `content` is always available and is the
+    recommended input. Disabled deployments return `403` for repo-mode requests.
+  - **Optional auth.** A `GITHUB_PUBLIC_READ_TOKEN` secret, when set, is mirrored
+    into each Worker at deploy time and raises the contents-API ceiling from the
+    unauthenticated 60 req/hour/IP to 5000/hour (and reaches private repos).
+
+  The GitHub Pages playground now fetches files in the browser and POSTs their
+  content to the linter, so its Repo / GitHub URL tabs no longer depend on the
+  Worker's repo mode; the **Paste YAML** tab is the default.
+
+  Path-based kind detection (repo mode + playground) now matches the CLI and
+  ghalint's conventions: a file under `.github/workflows/` is always a workflow
+  (any basename), and only an exact `action.yml` / `action.yaml` basename is an
+  action — fixing a false positive where a workflow like `release-action.yml` was
+  hinted as an action.
+
+- [#41](https://github.com/toiroakr/karinto/pull/41) [`c64dc83`](https://github.com/toiroakr/karinto/commit/c64dc83b41d2bf40aa80bda8bfde50941a4cbb19) Thanks [@toiroakr](https://github.com/toiroakr)! - Add SARIF 2.1.0 output (#33) alongside the JSON envelope, so findings can be
+  uploaded to GitHub Code Scanning via `github/codeql-action/upload-sarif`.
+
+  - **Engine** — new `sarif_report(entries, io_errors?, version?)` builds a
+    complete SARIF document: `rule` → `result.ruleId` plus a
+    `tool.driver.rules[]` entry (catalogue title, default severity, upstream
+    origins), `severity` → `level` (`info` → `note`), `pos` →
+    `physicalLocation.region`, `job`/`step` → `logicalLocations[]`, YAML parse
+    errors → a synthetic `parse-error` rule, unreadable inputs →
+    `invocations[].toolExecutionNotifications`. `tool.driver.version` is
+    stamped from a new `ENGINE_VERSION` constant kept in lockstep with
+    `package.json` / `moon.mod` by `scripts/sync-moon-version.mjs`.
+  - **Worker** — new `format=sarif` parameter (`content` and `repo` modes;
+    response content type `application/sarif+json`). In `content` mode an
+    optional `path=` labels the artifact so results get a `physicalLocation`;
+    in `repo` mode targets already carry paths and the whole batch lands in
+    one SARIF run. JSON stays the default — existing callers are unaffected.
+  - **CLI** — new `--format json|sarif` (`-f`). File arguments become artifact
+    URIs; stdin yields pathless results. Exit codes are format-independent.
+
 ## 0.7.0
 
 ### Minor Changes
