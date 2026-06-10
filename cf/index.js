@@ -869,7 +869,7 @@ async function handleRepo(
     }
     // `spec.url` is the prebuilt raw URL (explicit targets) or the contents
     // API `download_url` (discovery); both are on raw.githubusercontent.com.
-    const res = await fetch(spec.url, { headers: { "user-agent": "karinto-worker" } });
+    const res = await fetch(spec.url, { headers: rawFetchHeaders(env, spec.url) });
     if (!res.ok) {
       pushFailure(path, `GET raw → ${res.status}`);
       continue;
@@ -1044,6 +1044,32 @@ function githubApiHeaders(env) {
   return headers;
 }
 
+// Headers for fetching file *contents* (`spec.url`). The directory-listing call
+// is authenticated via `githubApiHeaders`, so a private repo's `download_url`
+// already carries a short-lived `?token=`; but the raw fetch itself sent no
+// Authorization header, leaving explicit-target raw URLs anonymous. Attach the
+// configured token as a Bearer header too — harmless for public content,
+// belt-and-braces for private discovery. Gated on a GitHub-controlled host so
+// the token is never sent to a redirected / third-party origin.
+function rawFetchHeaders(env, url) {
+  const headers = { "user-agent": "karinto-worker" };
+  if (env?.GITHUB_PUBLIC_READ_TOKEN && isGitHubContentHost(url)) {
+    headers.authorization = `Bearer ${env.GITHUB_PUBLIC_READ_TOKEN}`;
+  }
+  return headers;
+}
+
+function isGitHubContentHost(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === "raw.githubusercontent.com" ||
+      host.endsWith(".githubusercontent.com") ||
+      host === "api.github.com";
+  } catch {
+    return false;
+  }
+}
+
 // Required-ref resolution for explicit-target mode. Delegates to
 // `refFromParams` and rejects the "neither supplied" case.
 function resolveRef(params) {
@@ -1091,9 +1117,12 @@ function refFromParams(params) {
 // Validate a git ref before it is interpolated into
 // `https://raw.githubusercontent.com/<repo>/<ref>/<path>`. Mirrors
 // `validateTargetPath`: reject anything that could escape the ref into a
-// different path (`..`, leading/trailing `/`, `\`, `%`) and restrict to the
-// characters git permits in ref names (the charset already rules out space /
-// `~^:?*[` and other delimiters).
+// different path (`..`, leading/trailing `/`, `\`, `%`) and restrict to a
+// deliberately conservative *subset* of the characters git permits in ref
+// names. The allowlist is stricter than git/GitHub on purpose — git also
+// allows e.g. `@`, `+`, `=`, but since the ref is interpolated straight into a
+// raw.githubusercontent.com URL we favour a small safe allowlist over full ref
+// fidelity (it already rules out space / `~^:?*[` and other URL delimiters).
 function validateRef(ref) {
   if (ref.length > 256) {
     throw httpError(`ref too long (max 256 chars): ${truncatePreview(ref)}`, 400);
