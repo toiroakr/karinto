@@ -938,10 +938,23 @@ function collectTargets(params, pathTarget) {
     if (typeof rawTargets !== "string") {
       throw httpError("`targets` must be a string", 400);
     }
-    return rawTargets
+    const parsed = rawTargets
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    // A present-but-empty `targets=` (blank, or only whitespace/commas) is
+    // almost always an un-filled template, not an intent to scan the whole
+    // repo. Treating it as discovery would silently spend the GitHub API /
+    // rate-limit budget, so reject it: whole-repo discovery is opted into by
+    // *omitting* `targets` entirely (see README *Whole-repo mode*).
+    if (parsed.length === 0) {
+      throw httpError(
+        "`targets=` is present but empty; supply at least one path, or omit " +
+          "`targets` entirely to lint the whole repo's workflows",
+        400,
+      );
+    }
+    return parsed;
   }
   return pathTarget ? [pathTarget] : [];
 }

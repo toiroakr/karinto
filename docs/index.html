@@ -628,7 +628,10 @@
     if (target.startsWith(".github/dependabot.") || target.includes("/.github/dependabot.")) {
       return "dependabot";
     }
-    const basename = target.slice(target.lastIndexOf("/") + 1).toLowerCase();
+    // Case-sensitive to match guessKindFromPath / kind_from_path: GitHub only
+    // recognizes an exact lowercase `action.yml` / `action.yaml`, so a
+    // differently-cased basename must fall through to content auto-detect too.
+    const basename = target.slice(target.lastIndexOf("/") + 1);
     if (basename === "action.yml" || basename === "action.yaml") return "action";
     return "";
   }
