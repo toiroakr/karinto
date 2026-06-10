@@ -414,9 +414,6 @@ async function readParams(request) {
   const url = new URL(request.url);
   const path = parsePath(url.pathname);
   const params = {};
-  if (path.repo) params.repo = path.repo;
-  if (path.commit) params.commit = path.commit;
-  if (path.ref) params.ref = path.ref;
   for (const [k, v] of url.searchParams) params[k] = v;
 
   const cl = Number(request.headers.get("content-length"));
@@ -433,6 +430,20 @@ async function readParams(request) {
     const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
+
+  // Path-derived `repo`/`commit`/`ref` are the LOWEST-precedence inputs
+  // (body > query > path), so apply them only after query + body and only as
+  // defaults that don't clobber a value those already supplied. Skip them
+  // entirely once explicit `content` is present: otherwise a content-mode
+  // request to a repo-shaped mount prefix (e.g. a YAML POST to `/api/karinto`)
+  // would be hijacked into repo mode and rejected at the repo-mode gate.
+  // `pathTarget` stays out of `params` (returned separately) so it can never be
+  // injected via query/body.
+  if (!params.content) {
+    if (path.repo && params.repo === undefined) params.repo = path.repo;
+    if (path.commit && params.commit === undefined) params.commit = path.commit;
+    if (path.ref && params.ref === undefined) params.ref = path.ref;
+  }
   return { params, pathTarget: path.pathTarget };
 }
 
@@ -440,9 +451,12 @@ async function readParams(request) {
 // domain-swapped GitHub file URL `/owner/repo/{blob,tree,raw}/<ref>/<target>`
 // → `{ repo, ref, pathTarget? }`. Segments after the commit/ref are joined as
 // a single target path (so nested paths like `.github/workflows/ci.yml` work).
-// Returned separately from the `params` map so a client cannot inject
-// `pathTarget`/`ref` via query / body. Multi-target requests still need to come
-// through `targets=` query/body.
+// `pathTarget` is the only value kept out of the `params` map (returned
+// separately by `readParams`) so a client cannot inject a path target via
+// query / body. `repo`/`commit`/`ref` ARE normal params: the path seeds them as
+// the lowest-precedence default, and an explicit query/body value overrides
+// them (body > query > path). Multi-target requests still need to come through
+// `targets=` query/body.
 //
 // Only paths that look like one of the repo-mode patterns are interpreted;
 // anything else (e.g. `/favicon.ico`, a deeper deploy prefix
@@ -1097,9 +1111,15 @@ function refFromParams(params) {
       throw httpError("`ref` must be a string", 400);
     }
     const ref = params.ref.trim();
-    if (!ref) return null; // `ref=` → default branch
-    validateRef(ref);
-    return { ref, isSha: /^[0-9a-fA-F]{7,64}$/.test(ref) };
+    if (ref) {
+      validateRef(ref);
+      return { ref, isSha: /^[0-9a-fA-F]{7,64}$/.test(ref) };
+    }
+    // A blank `ref=` means "no ref" — fall through to `commit` rather than
+    // short-circuiting to null, so a valid `commit` alongside it (e.g.
+    // `?commit=<sha>&ref=`) isn't silently ignored. With neither set the caller
+    // still gets null (default branch in discovery, error for explicit
+    // targets).
   }
   if (params.commit !== undefined && typeof params.commit !== "string") {
     throw httpError("`commit` must be a string", 400);
