@@ -400,7 +400,7 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
     #|    schedule:
     #|      interval: daily
   json_inspect(lint_json(yaml), content={
-    "kind": "unknown",
+    "kind": "dependabot",
     "stats": { "jobs": 0, "steps": 0, "lines": 6 },
     "diagnostics": [
       {

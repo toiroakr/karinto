@@ -24,22 +24,48 @@ mirror of the in-code source of truth at
 
 ## API
 
+> **Recommended: send the YAML directly.** `POST` the workflow / `action.yml`
+> as the request body (or pass it as the `content` parameter). It works on
+> every deployment, makes no GitHub round-trip, and is **not** subject to any
+> GitHub rate limit. This is the path to use in CI and other automated callers.
+
+The **repo-mode** endpoints (below) fetch files from GitHub *for* you instead
+of taking `content`. They are **opt-in** — disabled unless the deployment sets
+the `REPO_MODE_ENABLED` variable, so they may be off on a given endpoint
+(including the public `karinto.toiroakr.workers.dev`). When enabled they lean
+on GitHub's raw hosting and API, so they are **far more likely to hit GitHub
+rate limits**: whole-repo discovery in particular shares a single
+unauthenticated **60 req/hour/IP** budget across *all* callers (the requests
+egress from the Worker's shared Cloudflare IP). Reach for repo mode for
+one-off, interactive checks — not high-volume automation; send `content` there.
+
 `GET` or `POST`. Parameters can come from the URL path
-(`/<owner>/<repo>/<commit>[/<target/path/...>]` — segments after the
-commit are joined into a single nested target path), the query string,
-the request body (raw `key=value&...`, JSON, or a plain YAML blob), or
+(`/<owner>/<repo>` to lint **every workflow on the default branch**;
+`/<owner>/<repo>/<commit>[/<target/path/...>]`; or a domain-swapped GitHub
+file URL `/<owner>/<repo>/{blob,tree,raw}/<ref>/<target/path/...>` — segments
+after the commit/ref are joined into a single nested target path), the query
+string, the request body (raw `key=value&...`, JSON, or a plain YAML blob), or
 any mix — body beats query, query beats path on conflict. Paths that
 don't match the repo-mode shape are ignored so the Worker can be served
 under arbitrary path prefixes.
 
+When `repo` is set with **no** `targets` (and no path target), karinto
+discovers and lints every `*.yml` / `*.yaml` file under `.github/workflows`
+on the chosen ref — the default branch when no `commit`/`ref` is given. This
+is the only mode that calls the GitHub API on the request path (directory
+listing has no `raw.githubusercontent.com` equivalent), so it is subject to
+GitHub's unauthenticated rate limit (60 req/hour/IP) — see *Whole-repo mode*
+below.
+
 | Key | Type | Notes |
 | --- | --- | --- |
-| `type` | `workflow` \| `action` \| *(omit)* | Optional; auto-detected when blank |
-| `content` | string | The YAML source |
+| `type` | `workflow` \| `action` \| `dependabot` \| *(omit)* | Optional; auto-detected when blank (`jobs`/`on` → workflow, `runs` → action, `updates` → dependabot) |
+| `content` | string | The YAML source. **The recommended input** — always available, no GitHub round-trip, no rate limit. |
 | `disable` | string | Comma-separated glob patterns of rule IDs to skip. At most 64 patterns, 128 characters per pattern, and one `*` per pattern. |
-| `repo` | `owner/name` | Public-repo mode; mutually exclusive with `content` |
-| `commit` | hex SHA, 7–64 chars | **Required** whenever `repo` is set. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected. Hex-shaped refs are accepted at face value — a short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
-| `targets` | string | Comma-separated literal file paths. Required with `repo` unless a single target is supplied via the URL path (`/<owner>/<repo>/<commit>/<target/...>`). Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. |
+| `repo` | `owner/name` | Repo mode; mutually exclusive with `content`. **Opt-in** (`REPO_MODE_ENABLED`) and GitHub-rate-limit-prone — see the note above. Returns `403` when the deployment has repo mode disabled. |
+| `commit` | hex SHA, 7–64 chars | An **immutable pin**. Either this or `ref` is required in **explicit-target mode** (`targets=` or a URL-path target); whole-repo discovery (no targets) defaults to the repo's default branch when neither is given. Non-hex branch/tag names (e.g. `main`, `v1.2.3`) are rejected here — use `ref` for those. A short SHA can collide with an all-hex branch/tag (e.g. `deadbee`), so use the full 40-char SHA for guaranteed immutability. |
+| `ref` | branch \| tag \| `HEAD` \| SHA | **Mutable** ref; fetches that ref's *latest* commit. Use it to lint the default branch (`ref=HEAD`) or any branch/tag by name. Takes precedence over `commit`. A domain-swapped GitHub URL (`…/blob/<ref>/<path>`) fills this from the path. Slashy branch names (`release/1.x`) work via `ref=` but not the path form, which treats only the first post-`blob` segment as the ref. |
+| `targets` | string | Comma-separated literal file paths. Globs are not supported — list each file. At most 50 paths; requests over the cap are rejected with `400` rather than silently truncated. Omit it (with no path target either) to lint **all** `.github/workflows` files on the chosen ref — see *Whole-repo mode*. |
 | `osv` | `1` / `true` | Query OSV.dev for known-vulnerable actions (adds 50–300 ms) |
 | `forbidden` | string | Caller-supplied denylist for `forbidden-uses`. Comma-separated globs matched against `uses:` refs. |
 | `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
@@ -79,10 +105,37 @@ curl -G https://karinto.toiroakr.workers.dev \
      --data "type=workflow"
 ```
 
+The remaining examples use **repo mode**, which must be enabled on the
+deployment (`REPO_MODE_ENABLED`) — otherwise they return `403`. They are handy
+for one-off checks but draw on GitHub rate limits; prefer sending `content` for
+anything automated.
+
 `GET`/`POST` over a public repo (single target via path):
 
 ```sh
 curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml"
+```
+
+Lint the latest commit on a branch by **swapping the domain** of a GitHub file
+URL (`github.com` → `karinto.toiroakr.workers.dev`):
+
+```sh
+# https://github.com/actions/checkout/blob/main/action.yml
+curl "https://karinto.toiroakr.workers.dev/actions/checkout/blob/main/action.yml"
+```
+
+Lint **every workflow on the default branch** with just `owner/repo` (swap the
+domain of a repo's GitHub URL):
+
+```sh
+# https://github.com/actions/checkout
+curl "https://karinto.toiroakr.workers.dev/actions/checkout"
+```
+
+Or pin nothing and lint the default branch's latest commit via `ref`:
+
+```sh
+curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&ref=HEAD&targets=action.yml"
 ```
 
 Or with explicit query parameters and multiple targets:
@@ -90,6 +143,29 @@ Or with explicit query parameters and multiple targets:
 ```sh
 curl "https://karinto.toiroakr.workers.dev?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11&targets=action.yml,.github/workflows/test.yml"
 ```
+
+### Whole-repo mode
+
+`repo` with **no** `targets` (and no path target) lints every `*.yml` /
+`*.yaml` file under `.github/workflows`. The ref defaults to the repository's
+**default branch**; pass `ref=`/`commit=` to scan a specific branch, tag, or
+commit instead.
+
+Listing a directory has no `raw.githubusercontent.com` equivalent, so this is
+the one mode that calls the **GitHub contents API** on the request path:
+
+- It is subject to GitHub's **unauthenticated rate limit (60 req/hour/IP)**.
+  When that is hit the request fails with `429` and a message pointing you at
+  the escape hatches (retry later, pass explicit `targets=`, or self-host with
+  a token).
+- Set a `GITHUB_PUBLIC_READ_TOKEN` repo secret and the release / staging /
+  preview deploys mirror it into the Worker (as an encrypted secret), raising
+  the ceiling to 5000 req/hour and reaching private repos the token can see.
+  Unset → the deployment runs token-less and this mode stays anonymous.
+- At most 50 workflows are linted per request (the `targets` cap). When a repo
+  has more, the response sets `"truncated": true` and `"discovered": <count>`
+  so you know the result is partial; pass explicit `targets=` to pick the rest.
+- `404` means there is no `.github/workflows` directory on that ref.
 
 ### Limits
 
@@ -152,6 +228,7 @@ In `repo` mode the result is wrapped:
 {
   "ok": true,
   "repo": "actions/checkout",
+  "ref": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "commit": "b4ffde65f46336ab88eb53be808477a3936bae11",
   "targets": ["action.yml"],
   "files": [ { "path": "action.yml", "ok": true, "result": { ... } } ],
@@ -159,14 +236,28 @@ In `repo` mode the result is wrapped:
 }
 ```
 
+`ref` echoes the branch / tag / `HEAD` / SHA that was fetched (`"HEAD"` for the
+default-branch discovery case). `commit` is present **only** when `ref` is an
+immutable SHA pin (a branch/tag ref has no resolved SHA in the response — the
+Worker does not resolve content SHAs on the request path). A `ref=main` request
+therefore returns `"ref": "main"` and no `commit`. In whole-repo mode, `targets`
+lists the discovered files; if discovery found more than the 50-file cap, the
+response also carries `"truncated": true` and `"discovered": <count>`.
+
 ### SARIF output
 
 `format=sarif` swaps the envelope for a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
 document (content type `application/sarif+json`) that uploads directly to
 GitHub Code Scanning via
-[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action/tree/main/upload-sarif):
+[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action/tree/main/upload-sarif).
+It works in both `content` and `repo` mode:
 
 ```sh
+# content mode (always available) — pass `path=` so findings anchor to a file
+curl -X POST --data-binary @.github/workflows/ci.yml \
+     "https://karinto.toiroakr.workers.dev?format=sarif&path=.github/workflows/ci.yml"
+
+# repo mode (requires REPO_MODE_ENABLED on the deployment)
 curl "https://karinto.toiroakr.workers.dev/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml?format=sarif"
 ```
 
@@ -192,7 +283,9 @@ the dark-launch capture are envelope-mode-only.
 
 A complete workflow that surfaces findings in the repository **Security**
 tab (public repos — `repo` mode fetches the files from
-raw.githubusercontent.com):
+raw.githubusercontent.com). Note this uses **repo mode**, so it only works
+against an endpoint with `REPO_MODE_ENABLED` set; otherwise POST each file as
+`content` with `format=sarif&path=…`, or run the [Local CLI](#local-cli):
 
 ```yaml
 name: karinto
@@ -278,8 +371,11 @@ versions are listed under [GitHub Releases](https://github.com/toiroakr/karinto/
 
 ## Private repositories
 
-For private repos pass `content` directly. The Worker does not handle
-`GITHUB_TOKEN`-authenticated `repo`-mode fetches.
+For private repos pass `content` directly — a deployment without a token
+fetches `repo`-mode files anonymously and cannot read private repos. A
+deployment with a `GITHUB_PUBLIC_READ_TOKEN` secret (see
+[`DEVELOPMENT.md`](DEVELOPMENT.md#required-github-secrets)) can reach private
+repos the token can see in whole-repo discovery mode.
 
 ## Privacy
 

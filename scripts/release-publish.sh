@@ -21,6 +21,13 @@ if [ -n "${CAPTURE_CONTENT_LIMIT_KIB:-}" ]; then
   PROD_VAR_FLAGS+=(--var "CAPTURE_CONTENT_LIMIT_KIB:${CAPTURE_CONTENT_LIMIT_KIB}")
 fi
 
+# Repo-mode gate. Off by default (empty → "false"); a truthy REPO_MODE_ENABLED
+# repo variable turns on the GitHub-fetching `/owner/repo[/...]` endpoints.
+# Applied to every request-serving Worker (prod, pinned snapshot, and — in
+# manage-pinned-workers.mjs — the major alias). The maintenance Worker doesn't
+# serve repo mode, so it is left out.
+REPO_MODE_FLAG=(--var "REPO_MODE_ENABLED:${REPO_MODE_ENABLED:-false}")
+
 MAINT_VAR_FLAGS=()
 if [ -n "${CAPTURES_SIZE_LIMIT_MIB:-}" ]; then
   MAINT_VAR_FLAGS+=(--var "CAPTURES_SIZE_LIMIT_MIB:${CAPTURES_SIZE_LIMIT_MIB}")
@@ -38,9 +45,23 @@ fi
 # no-ops its archived sweep.
 node ../scripts/prepare-wrangler-d1.mjs
 
+# Mirror the optional GITHUB_PUBLIC_READ_TOKEN repo secret into a Worker as an
+# encrypted secret so whole-repo discovery mode authenticates its GitHub
+# contents-API calls (raising the unauthenticated 60-req/hour/IP ceiling to
+# 5000/hour). No-op when the secret is unset, so forks deploy fine and the path
+# stays anonymous. Piped via stdin so the value never lands in the process args.
+# Must run after the Worker is deployed (the secret attaches to an existing
+# script). Args select the target Worker (mirror the matching `deploy` flags).
+put_github_token() {
+  [ -n "${GITHUB_PUBLIC_READ_TOKEN:-}" ] || return 0
+  printf '%s' "$GITHUB_PUBLIC_READ_TOKEN" \
+    | npx wrangler secret put GITHUB_PUBLIC_READ_TOKEN "$@"
+}
+
 # `--env production` attaches the CAPTURES R2 binding; top-level deploys
 # (used by PR previews) deliberately have no binding so they can't write.
-npx wrangler deploy --config wrangler.deploy.jsonc --env production "${PROD_VAR_FLAGS[@]}"
+npx wrangler deploy --config wrangler.deploy.jsonc --env production "${PROD_VAR_FLAGS[@]}" "${REPO_MODE_FLAG[@]}"
+put_github_token --config wrangler.deploy.jsonc --env production
 npx wrangler deploy --config wrangler.maintenance.jsonc "${MAINT_VAR_FLAGS[@]}"
 bash smoke.sh
 
@@ -54,7 +75,8 @@ bash smoke.sh
 VERSION=$(node -p "require('../package.json').version")
 PINNED_NAME="karinto-v${VERSION//./-}"
 PINNED_URL="https://${PINNED_NAME}.toiroakr.workers.dev"
-npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME"
+npx wrangler deploy --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME" "${REPO_MODE_FLAG[@]}"
+put_github_token --config wrangler.deploy.jsonc --env="" --name "$PINNED_NAME"
 bash smoke.sh "$PINNED_URL"
 
 # Refresh the `karinto-vMAJOR` alias to this release if it's the new top in

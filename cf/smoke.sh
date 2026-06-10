@@ -62,36 +62,112 @@ else
   bad "empty body returned $code"
 fi
 
-# 4. repo without commit -> 400
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&targets=action.yml")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` is required"))' >/dev/null <<<"$res"; then
-  ok "repo without commit -> 400"
+# Repo mode (the GitHub-fetching `/owner/repo[/...]` endpoints) is opt-in via
+# the REPO_MODE_ENABLED deployment variable. Detect the deployment's setting
+# with a request that can't trigger any GitHub fetch — an invalid repo slug: a
+# disabled deployment 403s at the gate, an enabled one reaches validation (400).
+gate=$(curl -sS -o /dev/null -w '%{http_code}' "$URL?repo=not-a-slug")
+case "$gate" in
+  403) REPO_MODE=off ;;
+  400) REPO_MODE=on ;;
+  *)   REPO_MODE=unknown ;;
+esac
+printf '  repo mode: %s (gate probe -> %s)\n' "$REPO_MODE" "$gate"
+
+if [ "$REPO_MODE" = off ]; then
+  # 4. repo mode disabled -> 403 with an explanatory error.
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "403" ] && jq -e '.ok == false and (.error | test("repo mode is disabled"))' >/dev/null <<<"$res"; then
+    ok "repo mode disabled -> 403 at the gate"
+  else
+    bad "repo-mode gate (status=$code): $res"
+  fi
+elif [ "$REPO_MODE" = on ]; then
+  # 4. repo without commit -> 400
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&targets=action.yml")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` or `ref` is required"))' >/dev/null <<<"$res"; then
+    ok "repo without commit/ref -> 400"
+  else
+    bad "repo without commit/ref (status=$code): $res"
+  fi
+
+  # 5. repo + non-hex commit (branch name) -> 400
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=main&targets=action.yml")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
+    ok "repo + branch name commit -> 400"
+  else
+    bad "repo + branch name (status=$code): $res"
+  fi
+
+  # 6. path /<owner>/<repo>/<commit>/<target> resolves to a real lint
+  res=$(curl -fsS "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  if jq -e '.ok and .repo == "actions/checkout" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
+    ok "path /owner/repo/commit/target -> repo lint"
+  else
+    bad "path-based repo lint: $res"
+  fi
+
+  # 7. path-traversal in targets -> 400 (must not escape the pinned commit prefix)
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=../main/action.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
+    ok "targets with .. segment -> 400"
+  else
+    bad "targets with .. segment (status=$code): $res"
+  fi
+
+  # 8. percent-encoded path-traversal -> 400 (defense-in-depth)
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=%2e%2e%2fmain%2faction.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
+    ok "percent-encoded traversal -> 400"
+  else
+    bad "percent-encoded traversal (status=$code): $res"
+  fi
+
+  # 9. domain-swapped GitHub blob URL (`/owner/repo/blob/<ref>/<path>`) resolves
+  #    to a lint. Pinned to a SHA so the lint output is stable; response carries
+  #    both `ref` and the echoed `commit`.
+  res=$(curl -fsS "$URL/actions/checkout/blob/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  if jq -e '.ok and .ref == "b4ffde65f46336ab88eb53be808477a3936bae11" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
+    ok "blob URL form /owner/repo/blob/<sha>/target -> repo lint"
+  else
+    bad "blob URL form: $res"
+  fi
+
+  # 10. branch ref via `ref=` lints the branch's latest commit. The response
+  #     carries `ref` but no `commit` (no SHA resolved on the hot path).
+  res=$(curl -fsS "$URL?repo=actions/checkout&ref=main&targets=action.yml")
+  if jq -e '.ok and .ref == "main" and (has("commit") | not) and (.files | length) == 1' >/dev/null <<<"$res"; then
+    ok "ref=main -> latest-commit lint, no echoed commit"
+  else
+    bad "ref=main branch lint: $res"
+  fi
+
+  # 11. ref with a `..` traversal segment -> 400 (can't escape into another path).
+  res_body=$(mktemp)
+  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&ref=../main&targets=action.yml")
+  res=$(cat "$res_body"); rm -f "$res_body"
+  if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid ref"))' >/dev/null <<<"$res"; then
+    ok "ref with .. segment -> 400"
+  else
+    bad "ref with .. segment (status=$code): $res"
+  fi
 else
-  bad "repo without commit (status=$code): $res"
+  bad "repo-mode gate probe returned unexpected status $gate"
 fi
 
-# 5. repo + non-hex commit (branch name) -> 400
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=main&targets=action.yml")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
-  ok "repo + branch name commit -> 400"
-else
-  bad "repo + branch name (status=$code): $res"
-fi
-
-# 6. path /<owner>/<repo>/<commit>/<target> resolves to a real lint
-res=$(curl -fsS "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
-if jq -e '.ok and .repo == "actions/checkout" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
-  ok "path /owner/repo/commit/target -> repo lint"
-else
-  bad "path-based repo lint: $res"
-fi
-
-# 7. unrelated path (`/favicon.ico`) is ignored, so the body-less request
-#    falls through to the standard `missing content or repo` 400.
+# 12. unrelated path (`/favicon.ico`) is ignored, so the body-less request
+#     falls through to the standard `missing content or repo` 400 regardless
+#     of the repo-mode setting (a 1-segment path is never repo mode).
 res_body=$(mktemp)
 code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/favicon.ico")
 res=$(cat "$res_body"); rm -f "$res_body"
@@ -101,27 +177,15 @@ else
   bad "non-repo path (status=$code): $res"
 fi
 
-# 8. path-traversal in targets -> 400 (must not escape the pinned commit prefix)
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=../main/action.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
-  ok "targets with .. segment -> 400"
-else
-  bad "targets with .. segment (status=$code): $res"
-fi
+# NOTE: whole-repo discovery (`/owner/repo` with no targets) is deliberately
+# NOT smoke-tested here. It calls the GitHub contents API from the Worker's
+# (Cloudflare) egress IP, which shares the unauthenticated 60-req/hour/IP
+# budget with real user traffic — and smoke.sh runs on every deploy (twice in
+# release-publish.sh: prod + pinned snapshot). Burning that scarce quota on a
+# liveness probe is wasteful and could rate-limit genuine requests. The
+# discovery path is covered by the mocked unit tests instead.
 
-# 9. percent-encoded path-traversal -> 400 (defense-in-depth)
-res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=%2e%2e%2fmain%2faction.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
-res=$(cat "$res_body"); rm -f "$res_body"
-if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
-  ok "percent-encoded traversal -> 400"
-else
-  bad "percent-encoded traversal (status=$code): $res"
-fi
-
-# 10. every response carries a non-empty `engine_version` so CI can pin /
+# 13. every response carries a non-empty `engine_version` so CI can pin /
 #     assert the deployed engine (present on both success and error paths).
 res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
 if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then

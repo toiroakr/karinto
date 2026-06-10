@@ -48,6 +48,7 @@ pub impl ToJson for Diagnostic
 pub(all) enum FileKind {
   Workflow
   Action
+  Dependabot
   Unknown
 } derive(Eq, @debug.Debug)
 pub impl ToJson for FileKind

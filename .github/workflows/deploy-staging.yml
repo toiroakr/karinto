@@ -58,7 +58,27 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cf
-          command: deploy --config wrangler.deploy.jsonc --env staging
+          # `--var REPO_MODE_ENABLED:...` gates the GitHub-fetching repo-mode
+          # endpoints (off unless the repo variable is set truthy).
+          command: deploy --config wrangler.deploy.jsonc --env staging --var REPO_MODE_ENABLED:${{ vars.REPO_MODE_ENABLED || 'false' }}
+
+      # Mirror the optional public-read PAT into the staging Worker so
+      # whole-repo discovery authenticates its GitHub API calls (60 → 5000
+      # req/hour/IP). No-op when the repo secret is unset.
+      - name: Sync GitHub read token (if configured)
+        working-directory: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_PUBLIC_READ_TOKEN: ${{ secrets.GITHUB_PUBLIC_READ_TOKEN }}
+        run: |
+          if [ -z "${GITHUB_PUBLIC_READ_TOKEN:-}" ]; then
+            echo "GITHUB_PUBLIC_READ_TOKEN not set; whole-repo mode stays anonymous."
+            exit 0
+          fi
+          printf '%s' "$GITHUB_PUBLIC_READ_TOKEN" \
+            | npx wrangler secret put GITHUB_PUBLIC_READ_TOKEN \
+                --config wrangler.deploy.jsonc --env staging
 
       - name: Smoke check
         working-directory: cf

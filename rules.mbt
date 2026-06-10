@@ -307,8 +307,8 @@ fn action_only(kind : FileKind) -> Bool {
 }
 
 ///|
-fn unknown_only(kind : FileKind) -> Bool {
-  kind == FileKind::Unknown
+fn dependabot_only(kind : FileKind) -> Bool {
+  kind == FileKind::Dependabot
 }
 
 ///|
@@ -477,7 +477,7 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "dependabot-cooldown",
       title: "Dependabot updates should configure `cooldown`",
-      applies: unknown_only,
+      applies: dependabot_only,
       on_doc: Some(check_dependabot_cooldown),
       on_job: no_job(),
       on_step: no_step(),
@@ -485,7 +485,7 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "dependabot-execution",
       title: "Dependabot enables `insecure-external-code-execution`",
-      applies: unknown_only,
+      applies: dependabot_only,
       on_doc: Some(check_dependabot_execution),
       on_job: no_job(),
       on_step: no_step(),

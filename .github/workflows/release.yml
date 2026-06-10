@@ -49,6 +49,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Optional public-read PAT, mirrored into each deployed Worker as a
+          # secret so whole-repo discovery mode authenticates its GitHub
+          # contents-API calls (60 → 5000 req/hour/IP). Unset → the path stays
+          # anonymous. Consumed by release-publish.sh / manage-pinned-workers.mjs.
+          GITHUB_PUBLIC_READ_TOKEN: ${{ secrets.GITHUB_PUBLIC_READ_TOKEN }}
+          # Gates repo mode (fetching files from GitHub by owner/repo). Off
+          # unless set truthy. Overlaid onto every Worker deploy via `--var`.
+          REPO_MODE_ENABLED: ${{ vars.REPO_MODE_ENABLED }}
           # D1 database id for the archived-uses worklist, injected into the
           # deploy config by scripts/prepare-wrangler-d1.mjs. Unset → the
           # binding is dropped and the Worker no-ops its sweep (cf/index.js).

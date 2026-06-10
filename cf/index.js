@@ -1,16 +1,26 @@
 // Cloudflare Workers entry point for karinto.
 //
 // Accepts GET or POST. Parameters can come from the URL path
-// (`/owner/repo/commit[/target]`), the URL query string, the request body
-// (raw `key=value&...`, JSON, or a YAML blob as the whole body), or a mix
-// of all three. Body > query > path on conflicts.
+// (`/owner/repo/commit[/target]`, or a domain-swapped GitHub file URL
+// `/owner/repo/{blob,tree,raw}/<ref>/<target>`), the URL query string, the
+// request body (raw `key=value&...`, JSON, or a YAML blob as the whole body),
+// or a mix of all three. Body > query > path on conflicts.
 //
 // Keys:
 //   - type      "workflow" | "action" | "" (auto-detect, default)
 //   - content   YAML source
 //   - disable   comma-separated rule-ID glob patterns to skip
-//   - repo      "owner/name" — fetch files from a public GitHub repo
-//   - commit    commit SHA (7-64 hex chars); required whenever `repo` is set
+//   - repo      "owner/name" — fetch files from a public GitHub repo. Repo
+//               mode (this plus the `/owner/repo[/...]` path forms) is opt-in
+//               via the REPO_MODE_ENABLED deployment variable; off by default.
+//   - commit    commit SHA (7-64 hex chars); an immutable pin. Either this or
+//               `ref` is required in explicit-target mode (`targets=` or a
+//               URL-path target); whole-repo discovery (no targets) defaults to
+//               the repo's default branch when neither is given.
+//   - ref       branch / tag / `HEAD` / SHA to fetch at (mutable; resolves to
+//               that ref's latest commit). Use it to lint the default branch
+//               (`ref=HEAD`) or any branch by name. Takes precedence over
+//               `commit`. A domain-swapped GitHub URL fills this from the path.
 //   - targets   comma-separated literal paths. With `repo`, either
 //               `targets=` or a single target via the URL path
 //               (`/owner/repo/commit/target/...`) must be supplied
@@ -103,6 +113,7 @@ export default {
         disable: params.disable || "",
         repo: params.repo || "",
         commit: params.commit || "",
+        ref: params.ref || "",
         targets: targetsStr,
         content_lines: params.content ? params.content.split("\n").length : 0,
         // SARIF responses carry no `files` array, so fall back to the request
@@ -403,8 +414,6 @@ async function readParams(request) {
   const url = new URL(request.url);
   const path = parsePath(url.pathname);
   const params = {};
-  if (path.repo) params.repo = path.repo;
-  if (path.commit) params.commit = path.commit;
   for (const [k, v] of url.searchParams) params[k] = v;
 
   const cl = Number(request.headers.get("content-length"));
@@ -421,33 +430,85 @@ async function readParams(request) {
     const raw = await readBoundedText(request);
     if (raw) mergeBody(params, raw, request.headers.get("content-type") || "");
   }
+
+  // Path-derived `repo`/`commit`/`ref` are the LOWEST-precedence inputs
+  // (body > query > path), so apply them only after query + body and only as
+  // defaults that don't clobber a value those already supplied. Skip them
+  // entirely once explicit `content` is present: otherwise a content-mode
+  // request to a repo-shaped mount prefix (e.g. a YAML POST to `/api/karinto`)
+  // would be hijacked into repo mode and rejected at the repo-mode gate.
+  // `pathTarget` stays out of `params` (returned separately) so it can never be
+  // injected via query/body.
+  if (!params.content) {
+    if (path.repo && params.repo === undefined) params.repo = path.repo;
+    if (path.commit && params.commit === undefined) params.commit = path.commit;
+    if (path.ref && params.ref === undefined) params.ref = path.ref;
+  }
   return { params, pathTarget: path.pathTarget };
 }
 
-// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`.
-// Segments after the commit are joined as a single target path (so nested
-// paths like `.github/workflows/ci.yml` work). Returned separately from the
-// `params` map so a client cannot inject `pathTarget` via query / body.
-// Multi-target requests still need to come through `targets=` query/body.
+// `/owner/repo/commit[/target/...]` → `{ repo, commit, pathTarget? }`, or a
+// domain-swapped GitHub file URL `/owner/repo/{blob,tree,raw}/<ref>/<target>`
+// → `{ repo, ref, pathTarget? }`. Segments after the commit/ref are joined as
+// a single target path (so nested paths like `.github/workflows/ci.yml` work).
+// `pathTarget` is the only value kept out of the `params` map (returned
+// separately by `readParams`) so a client cannot inject a path target via
+// query / body. `repo`/`commit`/`ref` ARE normal params: the path seeds them as
+// the lowest-precedence default, and an explicit query/body value overrides
+// them (body > query > path). Multi-target requests still need to come through
+// `targets=` query/body.
 //
-// Only paths that look like the repo-mode pattern are interpreted; anything
-// else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`, malformed
-// percent-encoding) returns `{}` so the request falls through to the
-// regular content/repo body parameters. This keeps the Worker mountable
-// under arbitrary path prefixes without bricking unrelated requests.
+// Only paths that look like one of the repo-mode patterns are interpreted;
+// anything else (e.g. `/favicon.ico`, a deeper deploy prefix
+// `/api/karinto/...`, malformed percent-encoding) returns `{}` so the request
+// falls through to the regular content/repo body parameters. This keeps the
+// Worker mountable under arbitrary path prefixes without bricking unrelated
+// requests — with one caveat introduced by the bare `/owner/repo` whole-repo
+// route below: a *2-segment* prefix whose segments match the owner/repo
+// charset (e.g. `/api/karinto`) is now read as `repo=api/karinto`, not a
+// pass-through. Mount such deployments under a 1-segment or 3+-segment prefix,
+// or one containing characters outside `[A-Za-z0-9_.-]`, to avoid the clash.
 function parsePath(pathname) {
   const rawSegments = pathname.split("/").filter(Boolean);
-  if (rawSegments.length < 3) return {};
+  if (rawSegments.length < 2) return {};
   let segments;
   try {
     segments = rawSegments.map((s) => decodeURIComponent(s));
   } catch {
     return {};
   }
-  const [owner, repo, commit, ...rest] = segments;
+  const [owner, repo, marker, ...rest] = segments;
   if (!/^[A-Za-z0-9_.\-]+$/.test(owner) || !/^[A-Za-z0-9_.\-]+$/.test(repo)) return {};
-  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) return {};
-  const out = { repo: `${owner}/${repo}`, commit };
+  const base = { repo: `${owner}/${repo}` };
+
+  // Bare `/owner/repo` — no ref, no target. Lints every workflow on the default
+  // branch (whole-repo discovery in `handleRepo`). This widens the set of paths
+  // the Worker claims (a 2-segment path under a mount prefix now reads as a
+  // repo), but the owner/repo charset still gates it and an unrelated path just
+  // yields a clean "repo / workflows not found" error rather than bricking.
+  if (rest.length === 0 && marker === undefined) return base;
+
+  // GitHub web / raw file URL shape: `/owner/repo/{blob,tree,raw}/<ref>/<path>`.
+  // Domain-swapping a `github.com/.../blob/<branch>/<file>` URL lands here, so
+  // a bare domain swap can lint a branch's latest commit. Only the first
+  // post-marker segment is taken as the ref — a multi-segment branch name
+  // (e.g. `release/1.x`) is ambiguous against the file path without a GitHub
+  // API probe, so those callers must use `?ref=` + `targets=`. The ref is
+  // validated downstream in `resolveRef`.
+  if (/^(blob|tree|raw)$/.test(marker) && rest.length >= 1) {
+    const [ref, ...pathRest] = rest;
+    const out = { ...base, ref };
+    if (pathRest.length > 0) out.pathTarget = pathRest.join("/");
+    return out;
+  }
+
+  // Bare shape: `/owner/repo/<commit>/<path...>`. The 3rd segment must be a hex
+  // SHA — a non-hex value falls through to `{}` so the Worker stays mountable
+  // under arbitrary path prefixes. Branch/tag refs in the bare shape come
+  // through `?ref=` instead (the raw.githubusercontent.com URL has no marker
+  // segment, so a domain-swapped raw URL only auto-works for SHA refs).
+  if (!/^[0-9a-fA-F]{7,64}$/.test(marker)) return {};
+  const out = { ...base, commit: marker };
   if (rest.length > 0) out.pathTarget = rest.join("/");
   return out;
 }
@@ -488,6 +549,7 @@ const KNOWN_KEYS = new Set([
   "disable",
   "repo",
   "commit",
+  "ref",
   "targets",
   "osv",
   "no_capture",
@@ -530,7 +592,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|targets|osv|no_capture|forbidden|archived|format|path)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -549,8 +611,21 @@ async function handle(params, env, pathTarget) {
     .join(",");
 
   if (params.repo) {
+    // Repo mode — fetching workflow / action files from GitHub by `owner/repo`
+    // (+ optional commit/ref/path, or whole-repo discovery) — is opt-in. It
+    // makes the Worker fetch arbitrary public content and, in discovery mode,
+    // spend the shared GitHub API budget, so it stays off unless the deployment
+    // sets the `REPO_MODE_ENABLED` variable (see DEVELOPMENT.md). Posting the
+    // YAML as `content` is always available.
+    if (!isTrue(env?.REPO_MODE_ENABLED)) {
+      throw httpError(
+        "repo mode is disabled on this deployment; POST the workflow `content` " +
+          "directly, or enable it by setting the REPO_MODE_ENABLED variable",
+        403,
+      );
+    }
     return await handleRepo(
-      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format,
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
     );
   }
   if (!params.content) {
@@ -732,52 +807,64 @@ function validateTargetPath(path) {
 }
 
 async function handleRepo(
-  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format,
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
 ) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
     throw httpError(`invalid repo: ${repo}`, 400);
   }
-  if (params.commit !== undefined && typeof params.commit !== "string") {
-    throw httpError("`commit` must be a string", 400);
-  }
-  const commit = params.commit || "";
-  if (!commit) {
-    throw new Error("`commit` is required with `repo` (commit SHA, full or abbreviated)");
-  }
-  // Accept the same range Git itself uses for abbreviated SHAs (7-64 hex).
-  // An all-hex value of this shape could technically collide with a branch
-  // or tag of the same name (e.g. `deadbee`); we accept that trade-off for
-  // ergonomics. Callers who need ironclad immutability should pass the full
-  // 40-char SHA.
-  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
-    throw new Error(`invalid commit: ${commit} (expected 7-64 hex characters)`);
-  }
-  let targets;
-  if (Object.prototype.hasOwnProperty.call(params, "targets")) {
-    const rawTargets = params.targets ?? "";
-    if (typeof rawTargets !== "string") {
-      throw httpError("`targets` must be a string", 400);
+
+  const explicitTargets = collectTargets(params, pathTarget);
+  // The ref the response echoes back; the fetch URL itself comes from `spec.url`
+  // below. `isSha` gates whether we also echo `commit`. In discovery mode with
+  // no ref supplied, `reportedRef` is "HEAD" (the default branch).
+  let reportedRef;
+  let isSha;
+  let specs; // [{ path, url, size? }]
+  let discoveredCount = 0;
+
+  if (explicitTargets.length === 0) {
+    // Whole-repo mode: no targets named, so discover every workflow under
+    // `.github/workflows` on the chosen ref (default branch when none given).
+    // This is the only code path that calls the GitHub API on the request hot
+    // path — directory listing has no raw.githubusercontent equivalent.
+    const resolved = refFromParams(params);
+    const ref = resolved?.ref;
+    isSha = resolved?.isSha ?? false;
+    reportedRef = ref || "HEAD";
+    const discovered = await discoverWorkflows(repo, ref, env);
+    if (discovered.length === 0) {
+      throw httpError(
+        `no workflow files under \`${WORKFLOW_DIR}\` in ${repo}${ref ? ` @ ${ref}` : ""}`,
+        404,
+      );
     }
-    targets = rawTargets
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } else if (pathTarget) {
-    targets = [pathTarget];
+    discoveredCount = discovered.length;
+    specs = discovered.slice(0, MAX_TARGETS);
   } else {
-    targets = [];
+    // Explicit-target mode keeps the pin contract: a ref/commit is required.
+    const resolved = resolveRef(params);
+    reportedRef = resolved.ref;
+    isSha = resolved.isSha;
+    if (explicitTargets.length > MAX_TARGETS) {
+      throw httpError(
+        `too many targets (max ${MAX_TARGETS}, got ${explicitTargets.length})`,
+        400,
+      );
+    }
+    for (const path of explicitTargets) validateTargetPath(path);
+    // Encode each segment so a `?` / `#` / `%` / space in a filename (or a
+    // branch name) cannot be reinterpreted as a URL delimiter by fetch; keep
+    // `/` as the segment separator so nested paths / slashy refs still resolve.
+    const encodedRef = reportedRef.split("/").map(encodeURIComponent).join("/");
+    specs = explicitTargets.map((path) => {
+      const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+      return {
+        path,
+        url: `https://raw.githubusercontent.com/${repo}/${encodedRef}/${encodedPath}`,
+      };
+    });
   }
-  if (targets.length === 0) {
-    throw new Error("`targets` is required with `repo` (comma-separated literal paths)");
-  }
-  if (targets.length > MAX_TARGETS) {
-    throw httpError(
-      `too many targets (max ${MAX_TARGETS}, got ${targets.length})`,
-      400,
-    );
-  }
-  for (const path of targets) validateTargetPath(path);
 
   // In SARIF mode the per-file lint runs inside `lint_files_sarif` so the
   // whole batch lands in one SARIF run; this loop only gathers inputs.
@@ -791,13 +878,17 @@ async function handleRepo(
     if (sarif) sarifFiles.push({ path, error });
     else files.push({ path, ok: false, error });
   };
-  for (const path of targets) {
-    // Encode each segment so a `?` / `#` / `%` / space in a filename cannot
-    // be reinterpreted as a URL delimiter by fetch; keep `/` as the segment
-    // separator so nested paths still address one file.
-    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-    const url = `https://raw.githubusercontent.com/${repo}/${commit}/${encodedPath}`;
-    const res = await fetch(url, { headers: { "user-agent": "karinto-worker" } });
+  for (const spec of specs) {
+    const { path } = spec;
+    // `spec.size` is set in discovery mode (from the contents API listing);
+    // short-circuit oversized files before fetching.
+    if (Number.isFinite(spec.size) && spec.size > MAX_BODY_BYTES) {
+      pushFailure(path, `file too large (${spec.size} > ${MAX_BODY_BYTES} bytes)`);
+      continue;
+    }
+    // `spec.url` is the prebuilt raw URL (explicit targets) or the contents
+    // API `download_url` (discovery); both are on raw.githubusercontent.com.
+    const res = await fetch(spec.url, { headers: rawFetchHeaders(env, spec.url) });
     if (!res.ok) {
       pushFailure(path, `GET raw → ${res.status}`);
       continue;
@@ -838,10 +929,244 @@ async function handleRepo(
   return {
     ok: files.every((f) => f.ok !== false),
     repo,
-    commit,
-    targets,
+    ref: reportedRef,
+    // Echo `commit` only for an immutable SHA pin, so callers can keep keying
+    // off it; for a mutable branch/tag/HEAD ref there is no resolved SHA on the
+    // hot path (the Worker never calls the GitHub API for content), so `ref` is
+    // the only handle.
+    ...(isSha ? { commit: reportedRef } : {}),
+    targets: specs.map((s) => s.path),
+    // Signal when discovery found more workflows than the per-request cap so a
+    // caller knows the result is partial rather than the whole default branch.
+    ...(discoveredCount > specs.length
+      ? { truncated: true, discovered: discoveredCount }
+      : {}),
     files,
   };
+}
+
+// The directory karinto enumerates in whole-repo (discovery) mode. GitHub only
+// runs workflows defined directly here, so this is the complete set.
+const WORKFLOW_DIR = ".github/workflows";
+
+// Build the working set of literal target paths from `targets=` or the URL
+// path. Returns `[]` when none are supplied (→ whole-repo discovery mode).
+function collectTargets(params, pathTarget) {
+  if (Object.prototype.hasOwnProperty.call(params, "targets")) {
+    const rawTargets = params.targets ?? "";
+    if (typeof rawTargets !== "string") {
+      throw httpError("`targets` must be a string", 400);
+    }
+    const parsed = rawTargets
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // A present-but-empty `targets=` (blank, or only whitespace/commas) is
+    // almost always an un-filled template, not an intent to scan the whole
+    // repo. Treating it as discovery would silently spend the GitHub API /
+    // rate-limit budget, so reject it: whole-repo discovery is opted into by
+    // *omitting* `targets` entirely (see README *Whole-repo mode*).
+    if (parsed.length === 0) {
+      throw httpError(
+        "`targets=` is present but empty; supply at least one path, or omit " +
+          "`targets` entirely to lint the whole repo's workflows",
+        400,
+      );
+    }
+    return parsed;
+  }
+  return pathTarget ? [pathTarget] : [];
+}
+
+// List every `*.yml` / `*.yaml` workflow under `.github/workflows` at `ref`
+// (the repo's default branch when `ref` is undefined) via the GitHub contents
+// API. This is the one place the Worker calls the GitHub API on the request
+// path; it fails loudly (with an actionable message) on rate-limit / outage so
+// the caller can fall back to explicit `targets=`. A `GITHUB_PUBLIC_READ_TOKEN`
+// binding, when present, raises the unauthenticated 60 req/hour/IP ceiling to
+// 5000/hour.
+async function discoverWorkflows(repo, ref, env) {
+  const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const url = `https://api.github.com/repos/${repo}/contents/${WORKFLOW_DIR}${refQuery}`;
+  let res;
+  try {
+    res = await fetch(url, { headers: githubApiHeaders(env) });
+  } catch (e) {
+    throw httpError(`GitHub API request failed: ${String(e?.message ?? e)}`, 502);
+  }
+  if (res.status === 404) {
+    throw httpError(
+      `no \`${WORKFLOW_DIR}\` directory in ${repo}${ref ? ` @ ${ref}` : ""}`,
+      404,
+    );
+  }
+  // 429, or a 403 carrying the rate-limit signal (`x-ratelimit-remaining: 0`
+  // or a `retry-after` header), means "back off" — surface a 429 with the
+  // escape hatches. GitHub also returns 403 for non-rate-limit cases (a private
+  // repo the token can't see, blocked/forbidden content), so a 403 *without*
+  // that signal is a real permission error and must not masquerade as a rate
+  // limit (that would send callers chasing the wrong fix).
+  const rateLimited =
+    res.status === 429 ||
+    (res.status === 403 &&
+      (res.headers.get("x-ratelimit-remaining") === "0" ||
+        res.headers.get("retry-after") != null));
+  if (rateLimited) {
+    throw httpError(
+      "GitHub API rate limit reached while listing workflows; retry later, " +
+        "pass explicit `targets=`, or deploy with a GITHUB_PUBLIC_READ_TOKEN",
+      429,
+    );
+  }
+  if (res.status === 403) {
+    throw httpError(
+      `GitHub contents API → 403 while listing workflows in ${repo}; the repo ` +
+        "may be private or the GITHUB_PUBLIC_READ_TOKEN lacks access to it",
+      403,
+    );
+  }
+  if (!res.ok) {
+    throw httpError(`GitHub contents API → ${res.status}`, 502);
+  }
+  let list;
+  try {
+    list = await res.json();
+  } catch {
+    throw httpError("GitHub contents API returned non-JSON", 502);
+  }
+  if (!Array.isArray(list)) {
+    // A path that resolves to a file (not a directory) comes back as an object.
+    throw httpError(`\`${WORKFLOW_DIR}\` is not a directory in ${repo}`, 422);
+  }
+  return list
+    .filter(
+      (e) =>
+        e &&
+        e.type === "file" &&
+        typeof e.download_url === "string" &&
+        typeof e.path === "string" &&
+        /\.ya?ml$/i.test(e.name || ""),
+    )
+    .map((e) => ({ path: e.path, url: e.download_url, size: Number(e.size) }))
+    // Deterministic order so the response (and any downstream diffing) is stable.
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function githubApiHeaders(env) {
+  const headers = {
+    "user-agent": "karinto-worker",
+    accept: "application/vnd.github+json",
+  };
+  if (env?.GITHUB_PUBLIC_READ_TOKEN) {
+    headers.authorization = `Bearer ${env.GITHUB_PUBLIC_READ_TOKEN}`;
+  }
+  return headers;
+}
+
+// Headers for fetching file *contents* (`spec.url`). The directory-listing call
+// is authenticated via `githubApiHeaders`, so a private repo's `download_url`
+// already carries a short-lived `?token=`; but the raw fetch itself sent no
+// Authorization header, leaving explicit-target raw URLs anonymous. Attach the
+// configured token as a Bearer header too — harmless for public content,
+// belt-and-braces for private discovery. Gated on a GitHub-controlled host so
+// the token is never sent to a redirected / third-party origin.
+function rawFetchHeaders(env, url) {
+  const headers = { "user-agent": "karinto-worker" };
+  if (env?.GITHUB_PUBLIC_READ_TOKEN && isGitHubContentHost(url)) {
+    headers.authorization = `Bearer ${env.GITHUB_PUBLIC_READ_TOKEN}`;
+  }
+  return headers;
+}
+
+function isGitHubContentHost(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === "raw.githubusercontent.com" ||
+      host.endsWith(".githubusercontent.com") ||
+      host === "api.github.com";
+  } catch {
+    return false;
+  }
+}
+
+// Required-ref resolution for explicit-target mode. Delegates to
+// `refFromParams` and rejects the "neither supplied" case.
+function resolveRef(params) {
+  const resolved = refFromParams(params);
+  if (!resolved) {
+    throw new Error(
+      "`commit` or `ref` is required with `repo` (commit SHA, or `ref=` for a branch/tag/HEAD)",
+    );
+  }
+  return resolved;
+}
+
+// Resolve the git ref to fetch from. `ref` (branch / tag / `HEAD` / SHA) takes
+// precedence over `commit` (SHA-only pin). Returns `{ ref, isSha }`, or `null`
+// when neither is supplied (or both are blank) — the caller decides whether
+// that is an error (explicit targets) or the default-branch case (discovery).
+function refFromParams(params) {
+  if (params.ref !== undefined) {
+    if (typeof params.ref !== "string") {
+      throw httpError("`ref` must be a string", 400);
+    }
+    const ref = params.ref.trim();
+    if (ref) {
+      validateRef(ref);
+      return { ref, isSha: /^[0-9a-fA-F]{7,64}$/.test(ref) };
+    }
+    // A blank `ref=` means "no ref" — fall through to `commit` rather than
+    // short-circuiting to null, so a valid `commit` alongside it (e.g.
+    // `?commit=<sha>&ref=`) isn't silently ignored. With neither set the caller
+    // still gets null (default branch in discovery, error for explicit
+    // targets).
+  }
+  if (params.commit !== undefined && typeof params.commit !== "string") {
+    throw httpError("`commit` must be a string", 400);
+  }
+  const commit = (params.commit || "").trim();
+  if (!commit) return null;
+  // `commit` is SHA-only by contract (an immutable pin). Accept the same range
+  // Git uses for abbreviated SHAs (7-64 hex). An all-hex value of this shape
+  // could technically collide with a branch/tag of the same name (e.g.
+  // `deadbee`); we accept that trade-off for ergonomics. Branch/tag refs go
+  // through `ref=` so the SHA-pin guarantee here stays unambiguous.
+  if (!/^[0-9a-fA-F]{7,64}$/.test(commit)) {
+    throw new Error(
+      `invalid commit: ${commit} (expected 7-64 hex characters; use \`ref=\` for a branch/tag name)`,
+    );
+  }
+  return { ref: commit, isSha: true };
+}
+
+// Validate a git ref before it is interpolated into
+// `https://raw.githubusercontent.com/<repo>/<ref>/<path>`. Mirrors
+// `validateTargetPath`: reject anything that could escape the ref into a
+// different path (`..`, leading/trailing `/`, `\`, `%`) and restrict to a
+// deliberately conservative *subset* of the characters git permits in ref
+// names. The allowlist is stricter than git/GitHub on purpose — git also
+// allows e.g. `@`, `+`, `=`, but since the ref is interpolated straight into a
+// raw.githubusercontent.com URL we favour a small safe allowlist over full ref
+// fidelity (it already rules out space / `~^:?*[` and other URL delimiters).
+function validateRef(ref) {
+  if (ref.length > 256) {
+    throw httpError(`ref too long (max 256 chars): ${truncatePreview(ref)}`, 400);
+  }
+  if (
+    ref.startsWith("/") ||
+    ref.endsWith("/") ||
+    ref.includes("..") ||
+    ref.includes("\\") ||
+    ref.includes("%") ||
+    !/^[A-Za-z0-9._/-]+$/.test(ref)
+  ) {
+    throw httpError(`invalid ref: ${truncatePreview(ref)}`, 400);
+  }
+  for (const seg of ref.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") {
+      throw httpError(`invalid ref: ${truncatePreview(ref)}`, 400);
+    }
+  }
 }
 
 function isTrue(v) {
@@ -979,8 +1304,20 @@ function collectOnlineAuditCandidates(yaml) {
 }
 
 function guessKindFromPath(path) {
-  if (path.endsWith("action.yml") || path.endsWith("action.yaml")) return "action";
-  if (path.startsWith(".github/workflows/")) return "workflow";
+  // GitHub runs every YAML under `.github/workflows/` as a workflow whatever
+  // its basename (even `action.yml`), so match that path segment first — then
+  // treat only an exact `action.yml`/`action.yaml` basename as an action, not
+  // any `*action.yml` (e.g. a `release-action.yml` workflow). Mirrors the CLI's
+  // `kind_from_path` and ghalint's path globs (`^\.github/workflows/.*\.ya?ml$`
+  // for workflows, `action.ya?ml` basenames for actions).
+  if (path.startsWith(".github/workflows/") || path.includes("/.github/workflows/")) {
+    return "workflow";
+  }
+  if (path.startsWith(".github/dependabot.") || path.includes("/.github/dependabot.")) {
+    return "dependabot";
+  }
+  const basename = path.slice(path.lastIndexOf("/") + 1);
+  if (basename === "action.yml" || basename === "action.yaml") return "action";
   return "";
 }
 

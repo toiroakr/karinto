@@ -49,7 +49,7 @@ fn run() -> Int {
     Some(k) => k
     None => {
       eprintln(
-        "error: invalid value '\{type_str}' for '--type': expected 'workflow' or 'action'",
+        "error: invalid value '\{type_str}' for '--type': expected 'workflow', 'action', or 'dependabot'",
       )
       return 2
     }
@@ -95,7 +95,7 @@ fn build_command() -> @argparse.Command {
         "type",
         short='t',
         long="type",
-        about="File kind: 'workflow' or 'action' (auto-detected when omitted)",
+        about="File kind: 'workflow', 'action', or 'dependabot' (auto-detected when omitted)",
       ),
       @argparse.OptionArg::new(
         "disable",
@@ -149,6 +149,7 @@ fn parse_kind(s : String) -> @karinto.FileKind? {
     "" => Some(@karinto.FileKind::Unknown)
     "workflow" => Some(@karinto.FileKind::Workflow)
     "action" => Some(@karinto.FileKind::Action)
+    "dependabot" => Some(@karinto.FileKind::Dependabot)
     _ => None
   }
 }
@@ -203,7 +204,8 @@ fn split_csv(s : String) -> Array[String] {
 /// Filename hint used when `--type` is omitted: `.github/workflows/`
 /// paths are workflows (GitHub runs every YAML there as a workflow,
 /// whatever its basename — even `action.yml`), `action.yml` /
-/// `action.yaml` basenames are actions; anything else falls back to the
+/// `action.yaml` basenames are actions, `.github/dependabot.yml` /
+/// `.yaml` is a Dependabot config; anything else falls back to the
 /// engine's content-based auto-detection.
 fn kind_from_path(path : String) -> @karinto.FileKind {
   // Windows callers pass `\`-separated paths — normalize so the hints
@@ -214,6 +216,10 @@ fn kind_from_path(path : String) -> @karinto.FileKind {
   if path.has_prefix(".github/workflows/") ||
     path.contains("/.github/workflows/") {
     return @karinto.FileKind::Workflow
+  }
+  if path.has_prefix(".github/dependabot.") ||
+    path.contains("/.github/dependabot.") {
+    return @karinto.FileKind::Dependabot
   }
   let basename = match path.rev_find("/") {
     Some(i) => path[i + 1:].to_owned()

@@ -32,6 +32,11 @@
 //   The Cloudflare free tier caps at 100 Worker scripts; 50 leaves
 //   comfortable headroom for prod/staging/maintenance + per-PR previews +
 //   major aliases.
+//   GITHUB_PUBLIC_READ_TOKEN — public-read PAT mirrored into the alias Worker
+//   as a secret so whole-repo discovery authenticates its GitHub API calls.
+//   Unset → the alias serves whole-repo mode anonymously (60 req/hour/IP).
+//   REPO_MODE_ENABLED — truthy turns on repo mode on the alias Worker (the
+//   GitHub-fetching `/owner/repo[/...]` endpoints). Unset/empty → off.
 //
 // Failure semantics: alias deploy/smoke failures exit non-zero (CI users
 // pinned to `karinto-vX` would otherwise see a stale alias). Individual
@@ -131,6 +136,20 @@ function shell(cmd, args) {
   execFileSync(cmd, args, { stdio: "inherit" });
 }
 
+// Mirror the optional GITHUB_PUBLIC_READ_TOKEN repo secret into a Worker as an
+// encrypted secret so whole-repo discovery mode authenticates its GitHub
+// contents-API calls (60 → 5000 req/hour/IP). No-op when the env var is unset.
+// Piped via stdin so the value never lands in argv (`ps`).
+function putGithubToken(targetArgs) {
+  const token = process.env.GITHUB_PUBLIC_READ_TOKEN;
+  if (!token) return;
+  execFileSync(
+    "npx",
+    ["wrangler", "secret", "put", "GITHUB_PUBLIC_READ_TOKEN", ...targetArgs],
+    { input: token, stdio: ["pipe", "inherit", "inherit"] },
+  );
+}
+
 const scripts = await listScripts();
 const versioned = [];
 for (const name of scripts) {
@@ -171,7 +190,10 @@ const releaseMajorTop = latestPerMajor.get(release.major);
 if (releaseMajorTop && cmpVersion(releaseMajorTop, release) === 0) {
   const alias = aliasName(release.major);
   console.log(`Deploying alias ${alias} -> ${release.raw}`);
-  shell("npx", ["wrangler", "deploy", "--env=", "--name", alias]);
+  // Mirror release-publish.sh's repo-mode gate onto the alias (off by default).
+  const repoModeFlag = ["--var", `REPO_MODE_ENABLED:${process.env.REPO_MODE_ENABLED || "false"}`];
+  shell("npx", ["wrangler", "deploy", "--env=", "--name", alias, ...repoModeFlag]);
+  putGithubToken(["--env=", "--name", alias]);
   shell("bash", ["smoke.sh", aliasUrl(release.major)]);
 } else {
   console.log(
