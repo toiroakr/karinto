@@ -445,10 +445,15 @@ async function readParams(request) {
 // through `targets=` query/body.
 //
 // Only paths that look like one of the repo-mode patterns are interpreted;
-// anything else (e.g. `/favicon.ico`, a deploy prefix `/api/karinto/...`,
-// malformed percent-encoding) returns `{}` so the request falls through to the
-// regular content/repo body parameters. This keeps the Worker mountable
-// under arbitrary path prefixes without bricking unrelated requests.
+// anything else (e.g. `/favicon.ico`, a deeper deploy prefix
+// `/api/karinto/...`, malformed percent-encoding) returns `{}` so the request
+// falls through to the regular content/repo body parameters. This keeps the
+// Worker mountable under arbitrary path prefixes without bricking unrelated
+// requests — with one caveat introduced by the bare `/owner/repo` whole-repo
+// route below: a *2-segment* prefix whose segments match the owner/repo
+// charset (e.g. `/api/karinto`) is now read as `repo=api/karinto`, not a
+// pass-through. Mount such deployments under a 1-segment or 3+-segment prefix,
+// or one containing characters outside `[A-Za-z0-9_.-]`, to avoid the clash.
 function parsePath(pathname) {
   const rawSegments = pathname.split("/").filter(Boolean);
   if (rawSegments.length < 2) return {};
