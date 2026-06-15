@@ -7,13 +7,15 @@ import {
 }
 
 // Values
-pub const ENGINE_VERSION : String = "0.7.0"
+pub const ENGINE_VERSION : String = "0.8.0"
 
 pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
 
-pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String]) -> LintResult
+pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona) -> LintResult
+
+pub fn persona_from_string(String) -> Persona
 
 pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
 
@@ -42,6 +44,7 @@ pub(all) struct Diagnostic {
   pos : Position?
   job : String?
   step : StepRef?
+  persona : Persona
 } derive(Eq, @debug.Debug)
 pub impl ToJson for Diagnostic
 
@@ -70,6 +73,12 @@ pub(all) struct LintResult {
   parse_error : String?
 }
 pub impl ToJson for LintResult
+
+pub(all) enum Persona {
+  Regular
+  Pedantic
+  Auditor
+} derive(Eq, @debug.Debug)
 
 pub(all) struct Position {
   line : Int

@@ -931,6 +931,7 @@ fn add_diag(
   rule : String,
   severity : Severity,
   message : String,
+  persona? : Persona = Regular,
 ) -> Unit {
   out.push(Diagnostic::{
     rule,
@@ -939,6 +940,7 @@ fn add_diag(
     pos: None,
     job: None,
     step: None,
+    persona,
   })
 }
 
@@ -952,6 +954,7 @@ fn add_diag_job(
   severity : Severity,
   message : String,
   job : String,
+  persona? : Persona = Regular,
 ) -> Unit {
   out.push(Diagnostic::{
     rule,
@@ -960,6 +963,7 @@ fn add_diag_job(
     pos: None,
     job: Some(job),
     step: None,
+    persona,
   })
 }
 
@@ -973,6 +977,7 @@ fn add_diag_step(
   severity : Severity,
   message : String,
   step : StepInfo,
+  persona? : Persona = Regular,
 ) -> Unit {
   out.push(Diagnostic::{
     rule,
@@ -981,6 +986,7 @@ fn add_diag_step(
     pos: None,
     job: step.job,
     step: Some(StepRef::{ index: step.step_index, id: step.id }),
+    persona,
   })
 }
 
@@ -1028,6 +1034,7 @@ fn add_diag_step_field(
   message : String,
   step : StepInfo,
   key : String,
+  persona? : Persona = Regular,
 ) -> Unit {
   let pos = match step_field_pos(ctx, step.job, step.step_index, key) {
     Some(p) => Some(p)
@@ -1040,6 +1047,7 @@ fn add_diag_step_field(
     pos,
     job: step.job,
     step: Some(StepRef::{ index: step.step_index, id: step.id }),
+    persona,
   })
 }
 
@@ -1055,6 +1063,7 @@ fn add_diag_job_field(
   message : String,
   job : String,
   key : String,
+  persona? : Persona = Regular,
 ) -> Unit {
   let pos = match job_field_pos(ctx, job, key) {
     Some(p) => Some(p)
@@ -1067,6 +1076,7 @@ fn add_diag_job_field(
     pos,
     job: Some(job),
     step: None,
+    persona,
   })
 }
 
@@ -2263,6 +2273,7 @@ fn check_self_hosted_runner(
           "self-hosted-runner",
           Warning,
           "job `\{job.name}` runs on a self-hosted runner",
+          persona=Pedantic,
         )
       }
     None => ()
@@ -2373,6 +2384,7 @@ fn check_misfeature_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           "misfeature",
           Info,
           "workflow `defaults.run.shell: cmd` makes inline `run:` blocks swallow exit codes; prefer `pwsh`",
+          persona=Auditor,
         )
       }
     None => ()
@@ -2401,6 +2413,7 @@ fn check_misfeature(
       "misfeature",
       Info,
       "job `\{job.name}` has `defaults.run.shell: cmd`, which swallows inline `run:` exit codes; prefer `pwsh`",
+      persona=Auditor,
     )
   }
 }
@@ -3456,6 +3469,7 @@ fn template_injection_emit(
           "code injection via template expansion in \{scope_label}",
           step,
           field,
+          persona=Pedantic,
         )
       }
   }
@@ -3592,6 +3606,7 @@ fn check_secrets_outside_env(
         "secrets-outside-env",
         Warning,
         "job `\{job.name}` uses `secrets.*` without protecting it with `environment:`",
+        persona=Auditor,
       )
       return
     }
@@ -6151,7 +6166,13 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           Action => "action"
           _ => "workflow"
         }
-        add_diag(out, "anonymous-definition", Info, "\{what} has no `name:`")
+        add_diag(
+          out,
+          "anonymous-definition",
+          Info,
+          "\{what} has no `name:`",
+          persona=Pedantic,
+        )
       }
       if ctx.kind != FileKind::Action {
         for j in ctx.jobs {
@@ -6165,6 +6186,7 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
               Info,
               "job `\{j.name}` has no `name:`",
               j.name,
+              persona=Pedantic,
             )
           }
         }
@@ -6270,6 +6292,7 @@ fn check_undocumented_permissions(
             "undocumented-permissions",
             Info,
             "permissions block has \{uncommented} entry/entries without explanatory comments",
+            persona=Pedantic,
           )
         }
       }
@@ -6784,6 +6807,7 @@ fn check_yaml_anchor_issues(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         pos: Some(Position::{ line: lineno, col: col0 + 1 }),
         job: None,
         step: None,
+        persona: Regular,
       })
     }
   }

@@ -64,6 +64,16 @@ fn run() -> Int {
       return 2
     }
   }
+  let persona_str = last_value(matches, "persona")
+  let persona = match parse_persona(persona_str) {
+    Some(p) => p
+    None => {
+      eprintln(
+        "error: invalid value '\{persona_str}' for '--persona': expected 'regular', 'pedantic', or 'auditor'",
+      )
+      return 2
+    }
+  }
   let disabled = collect_disabled(matches)
   let files = match matches.values.get("files") {
     Some(fs) => fs
@@ -79,9 +89,9 @@ fn run() -> Int {
       eprintln(build_command().render_help())
       return 2
     }
-    lint_stdin(kind, disabled, format)
+    lint_stdin(kind, disabled, format, persona)
   } else {
-    lint_files(files, kind, disabled, format)
+    lint_files(files, kind, disabled, format, persona)
   }
 }
 
@@ -109,6 +119,12 @@ fn build_command() -> @argparse.Command {
         short='f',
         long="format",
         about="Output format: 'json' (default) or 'sarif'",
+      ),
+      @argparse.OptionArg::new(
+        "persona",
+        short='p',
+        long="persona",
+        about="Analysis profile: 'regular', 'pedantic', or 'auditor' (default; shows every finding)",
       ),
     ],
     positionals=[
@@ -138,6 +154,21 @@ fn last_value(matches : @argparse.Matches, name : String) -> String {
   match matches.values.get(name) {
     Some(vs) if vs.length() > 0 => vs[vs.length() - 1]
     _ => ""
+  }
+}
+
+///|
+/// `""` (omitted) maps to `Auditor` — the engine's default, which shows every
+/// finding (matching the Worker's `persona` parameter contract). Unlike the
+/// bare `persona_from_string` helper (which coerces unknown values to
+/// `Auditor`), the CLI rejects an unrecognized value — as does the HTTP layer
+/// (`cf/index.js`), which returns `400`.
+fn parse_persona(s : String) -> @karinto.Persona? {
+  match s {
+    "" | "auditor" => Some(@karinto.Persona::Auditor)
+    "regular" => Some(@karinto.Persona::Regular)
+    "pedantic" => Some(@karinto.Persona::Pedantic)
+    _ => None
   }
 }
 
@@ -250,6 +281,7 @@ fn lint_stdin(
   kind : @karinto.FileKind,
   disabled : Array[String],
   format : OutputFormat,
+  persona : @karinto.Persona,
 ) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
@@ -258,7 +290,7 @@ fn lint_stdin(
       return 2
     }
   }
-  let result = @karinto.lint(content, kind~, disabled~)
+  let result = @karinto.lint(content, kind~, disabled~, persona~)
   match format {
     Envelope => {
       let body : Map[String, Json] = {
@@ -288,6 +320,7 @@ fn lint_files(
   kind : @karinto.FileKind,
   disabled : Array[String],
   format : OutputFormat,
+  persona : @karinto.Persona,
 ) -> Int {
   let entries : Array[Json] = []
   let sarif_entries : Array[@karinto.SarifEntry] = []
@@ -325,7 +358,7 @@ fn lint_files(
           Unknown => kind_from_path(path)
           _ => kind
         }
-        let result = @karinto.lint(content, kind=file_kind, disabled~)
+        let result = @karinto.lint(content, kind=file_kind, disabled~, persona~)
         let ok = result.parse_error is None
         if !ok {
           all_ok = false

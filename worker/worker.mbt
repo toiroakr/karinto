@@ -16,6 +16,10 @@
 ///   * `forbidden_uses_str` — denylist globs for `forbidden-uses`
 ///   * `archived_uses_str`  — refs whose repo is archived (`archived-uses`)
 ///
+/// `persona_str` is separate from those CSVs: it selects the analysis profile
+/// (`"regular"` / `"pedantic"` / `"auditor"`; `""` → `auditor`, every finding)
+/// via `persona_from_string`.
+///
 /// The Cloudflare Worker HTTP handler (`cf/index.js`) wires every input.
 /// `vuln_uses_str` is populated from OSV.dev when the request sets `osv=1`;
 /// `archived_uses_str` is merged from a KV-cached baseline plus the request's
@@ -34,6 +38,7 @@ pub fn lint_string(
   vuln_uses_str : String,
   forbidden_uses_str? : String = "",
   archived_uses_str? : String = "",
+  persona_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -52,6 +57,7 @@ pub fn lint_string(
     vuln_uses~,
     forbidden_uses~,
     archived_uses~,
+    persona=@karinto.persona_from_string(persona_str),
   )
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),
@@ -78,6 +84,7 @@ pub fn lint_string_sarif(
   forbidden_uses_str? : String = "",
   archived_uses_str? : String = "",
   path? : String = "",
+  persona_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -92,6 +99,7 @@ pub fn lint_string_sarif(
     vuln_uses=split_csv(vuln_uses_str),
     forbidden_uses=split_csv(forbidden_uses_str),
     archived_uses=split_csv(archived_uses_str),
+    persona=@karinto.persona_from_string(persona_str),
   )
   let entry_path = if path == "" { None } else { Some(path) }
   @karinto.sarif_report([@karinto.SarifEntry::{ path: entry_path, result }]).stringify(
@@ -117,10 +125,12 @@ pub fn lint_files_sarif(
   disable_str : String,
   forbidden_uses_str? : String = "",
   archived_uses_str? : String = "",
+  persona_str? : String = "",
 ) -> String {
   let disabled = split_csv(disable_str)
   let forbidden_uses = split_csv(forbidden_uses_str)
   let archived_uses = split_csv(archived_uses_str)
+  let persona = @karinto.persona_from_string(persona_str)
   let entries : Array[@karinto.SarifEntry] = []
   let io_errors : Array[@karinto.SarifIoError] = []
   let parsed : Json = @json.parse(files_json) catch { _ => Json::null() }
@@ -165,6 +175,7 @@ pub fn lint_files_sarif(
       vuln_uses~,
       forbidden_uses~,
       archived_uses~,
+      persona~,
     )
     entries.push(@karinto.SarifEntry::{ path: Some(path), result })
   }

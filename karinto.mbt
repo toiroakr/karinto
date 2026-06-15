@@ -20,6 +20,49 @@ pub(all) enum Severity {
 } derive(Eq, Debug)
 
 ///|
+/// Analysis profile, mirroring zizmor's persona model. A finding declares the
+/// *minimum* persona at which it surfaces; a request shows every finding whose
+/// minimum is at or below the requested persona (`Regular ⊂ Pedantic ⊂
+/// Auditor`).
+///
+/// - `Regular`: high-confidence, real problems (zizmor's default).
+/// - `Pedantic`: also code smells and likely-safe-but-noisy findings (e.g. the
+///   template-injection backstop on every `${{ … }}`).
+/// - `Auditor`: also low-confidence / defense-in-depth findings (e.g.
+///   `secrets-outside-env`).
+///
+/// Findings default to `Regular`; only rules that mirror zizmor's
+/// pedantic/auditor-gated behaviour tag themselves higher.
+pub(all) enum Persona {
+  Regular
+  Pedantic
+  Auditor
+} derive(Eq, Debug)
+
+///|
+/// Inclusion order: a request at `want` shows a finding tagged `have` iff
+/// `persona_rank(have) <= persona_rank(want)`.
+fn persona_rank(p : Persona) -> Int {
+  match p {
+    Regular => 0
+    Pedantic => 1
+    Auditor => 2
+  }
+}
+
+///|
+/// Parse a persona string (`"regular"` / `"pedantic"` / `"auditor"`). Anything
+/// else — including `""` — resolves to `Auditor`, the default that preserves
+/// karinto's historical "report everything" behaviour.
+pub fn persona_from_string(s : String) -> Persona {
+  match s {
+    "regular" => Regular
+    "pedantic" => Pedantic
+    _ => Auditor
+  }
+}
+
+///|
 pub(all) struct Position {
   line : Int
   col : Int
@@ -48,6 +91,9 @@ pub(all) struct Diagnostic {
   job : String?
   // The step a finding is about, when the finding is step-scoped.
   step : StepRef?
+  // Minimum persona at which this finding surfaces. Internal gating attribute;
+  // intentionally absent from `to_json` so the response schema is unchanged.
+  persona : Persona
 } derive(Eq, Debug)
 
 ///|
@@ -150,6 +196,7 @@ pub fn lint(
   vuln_uses? : Array[String] = [],
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
+  persona? : Persona = Auditor,
 ) -> LintResult {
   let lines = count_lines(content)
   let merged_disabled = merge_inline_ignores(content, disabled)
@@ -189,7 +236,16 @@ pub fn lint(
       // Stamp line/column positions onto job- and step-scoped findings from the
       // position node tree. Best-effort: absent positions leave `pos = None`.
       fill_positions(diagnostics, lp.position_root, lp.line_counter)
-      LintResult::{ kind: resolved_kind, stats, diagnostics, parse_error: None }
+      // Persona gate: keep findings whose minimum persona is at or below the
+      // requested one. `Auditor` (the default) keeps everything.
+      let want = persona_rank(persona)
+      let visible = diagnostics.filter(fn(d) { persona_rank(d.persona) <= want })
+      LintResult::{
+        kind: resolved_kind,
+        stats,
+        diagnostics: visible,
+        parse_error: None,
+      }
     }
   }
 }
