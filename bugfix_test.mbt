@@ -1,9 +1,13 @@
-// Regression tests for two false positives found while auditing
-// tailor-platform/sdk workflows:
+// Regression tests for four false positives found while auditing real
+// workflows:
 //   1. `concurrency:` as a plain string (valid GitHub Actions) was wrongly
 //      flagged by `invalid-mapping-values`.
 //   2. `needs.<hyphenated-job-id>.result` was wrongly flagged by
 //      `unknown-context-or-function` (the scanner split the id on `-`).
+//   3. `create-github-app-token` scoped via granular `permission-*` inputs was
+//      wrongly flagged by `github-app-limit-permissions`.
+//   4. `ubuntu-slim` (an official GitHub-hosted runner) was wrongly flagged by
+//      `unknown-runner-label`.
 
 ///|
 test "invalid-mapping-values: string `concurrency` is valid (not a mapping error)" {
