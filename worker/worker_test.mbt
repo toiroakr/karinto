@@ -26,6 +26,42 @@ test "cmp_ver: lexicographic with shorter operand zero-padded" {
 }
 
 ///|
+test "lint_string: persona param gates pedantic findings" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: self-hosted
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  // Default (no persona) is auditor — self-hosted-runner (a pedantic finding)
+  // surfaces.
+  let auditor = @worker.lint_string(yaml, "workflow", "", "")
+  inspect(auditor.contains("self-hosted-runner"), content="true")
+  // persona=regular drops it.
+  let regular = @worker.lint_string(
+    yaml,
+    "workflow",
+    "",
+    "",
+    persona_str="regular",
+  )
+  inspect(regular.contains("self-hosted-runner"), content="false")
+  // persona=pedantic brings it back.
+  let pedantic = @worker.lint_string(
+    yaml,
+    "workflow",
+    "",
+    "",
+    persona_str="pedantic",
+  )
+  inspect(pedantic.contains("self-hosted-runner"), content="true")
+}
+
+///|
 test "osv_match: introduced/fixed range" {
   let advisories =
     #|{"tj-actions/changed-files":[{"events":[{"introduced":"0"},{"fixed":"41"}]}]}

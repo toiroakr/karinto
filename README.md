@@ -72,6 +72,7 @@ below.
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 | `format` | `json` \| `sarif` | Output format; defaults to the JSON envelope. `sarif` returns a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) document — see [*SARIF output*](#sarif-output). |
 | `path` | string | Optional artifact label for `format=sarif` with `content` — becomes the SARIF `artifactLocation.uri` (e.g. `.github/workflows/ci.yml`). Same shape rules as `targets` paths. Ignored in envelope mode; unnecessary in `repo` mode, where targets already carry paths. |
+| `persona` | `regular` \| `pedantic` \| `auditor` | Analysis profile (see [*Personas*](#personas)). Defaults to `auditor` (every finding). An unrecognized value is a `400`. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -79,6 +80,35 @@ external `uses:` refs that need a live GitHub API lookup (`impostor-commit`,
 `ref-version-mismatch`). karinto does not resolve those; a companion action
 ([`companion-action/`](companion-action/)) checks them and reports directly.
 See [*Action-side context*](docs/action-context.md) for the full flow.
+
+### Personas
+
+`persona` mirrors [zizmor's persona model](https://docs.zizmor.sh/usage/#using-personas):
+each finding declares the *minimum* persona at which it surfaces, and a request
+shows every finding at or below the requested level (`regular ⊂ pedantic ⊂
+auditor`).
+
+| Persona | Shows |
+| --- | --- |
+| `regular` | High-confidence, real problems only — the equivalent of a default `zizmor` run. |
+| `pedantic` | The above **plus** code smells / likely-safe-but-noisy findings. |
+| `auditor` (**default**) | Everything, including low-confidence / defense-in-depth findings. |
+
+The default is `auditor` so the bare endpoint and CLI keep reporting every
+finding. Pass `persona=regular` to match what a stock `zizmor` invocation
+(no `--pedantic` / `--persona`) would flag.
+
+Findings that are **not** `regular` (hidden unless you opt up):
+
+- **Pedantic** — `anonymous-definition`, `self-hosted-runner`,
+  `undocumented-permissions`, and the `template-injection` *Info backstop*
+  (the per-`${{ … }}` finding; the high-cap `Error` stays `regular`).
+- **Auditor** — `secrets-outside-env`, and `misfeature`'s
+  `defaults.run.shell: cmd` finding.
+
+Everything else (including `excessive-permissions` and `concurrency-limits`)
+fires under `regular`. The mapping follows each upstream audit's documented
+persona gating.
 
 ### Examples
 
@@ -328,6 +358,9 @@ moon run --target js cmd/main -- .github/workflows/ci.yml action.yml
 
 # the same knobs as the Worker's `type` / `disable` parameters
 moon run --target js cmd/main -- --type action --disable 'permissions-*' action.yml
+
+# pick an analysis profile (see *Personas*); default is auditor (every finding)
+moon run --target js cmd/main -- --persona regular .github/workflows/ci.yml
 
 # SARIF 2.1.0 for GitHub Code Scanning (same as the Worker's `format=sarif`);
 # file arguments become artifact URIs, stdin yields pathless results

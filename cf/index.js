@@ -592,7 +592,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path|persona)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -600,6 +600,7 @@ async function handle(params, env, pathTarget) {
   const callerArchived = sanitizeUsesList(params.archived, "archived");
   const type = params.type || "";
   const format = parseFormat(params.format);
+  const persona = parsePersona(params.persona);
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
   // Merge the caller's `archived` list with the live KV baseline and the
@@ -625,7 +626,7 @@ async function handle(params, env, pathTarget) {
       );
     }
     return await handleRepo(
-      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona,
     );
   }
   if (!params.content) {
@@ -639,16 +640,31 @@ async function handle(params, env, pathTarget) {
     return {
       sarif: worker.lint_string_sarif(
         params.content, type, disable, vuln, forbidden, archived,
-        sanitizePathLabel(params.path),
+        sanitizePathLabel(params.path), persona,
       ),
     };
   }
   return {
     ...JSON.parse(
-      worker.lint_string(params.content, type, disable, vuln, forbidden, archived),
+      worker.lint_string(params.content, type, disable, vuln, forbidden, archived, persona),
     ),
     online_audit_candidates: collectOnlineAuditCandidates(params.content),
   };
+}
+
+// `persona` selects zizmor's analysis profile. Absent / "" keeps the engine
+// default (auditor — every finding). Invalid values are rejected rather than
+// silently coerced, mirroring `parseFormat`.
+function parsePersona(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`persona` must be a string", 400);
+  }
+  if (raw === "regular" || raw === "pedantic" || raw === "auditor") return raw;
+  throw httpError(
+    `invalid persona: ${truncatePreview(raw)} (expected 'regular', 'pedantic', or 'auditor')`,
+    400,
+  );
 }
 
 // `format=sarif` swaps the JSON envelope for a SARIF 2.1.0 document (#33).
@@ -807,7 +823,7 @@ function validateTargetPath(path) {
 }
 
 async function handleRepo(
-  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env,
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona,
 ) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
@@ -914,7 +930,7 @@ async function handleRepo(
     files.push({
       path,
       ...JSON.parse(
-        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived),
+        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived, persona),
       ),
       online_audit_candidates: collectOnlineAuditCandidates(raw),
     });
@@ -922,7 +938,7 @@ async function handleRepo(
   if (sarif) {
     return {
       sarif: worker.lint_files_sarif(
-        JSON.stringify(sarifFiles), disable, forbidden, archived,
+        JSON.stringify(sarifFiles), disable, forbidden, archived, persona,
       ),
     };
   }
