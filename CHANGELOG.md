@@ -1,5 +1,33 @@
 # karinto
 
+## 0.8.1
+
+### Patch Changes
+
+- [#46](https://github.com/toiroakr/karinto/pull/46) [`31260d6`](https://github.com/toiroakr/karinto/commit/31260d604955878aef97635b393010c90f0109c7) Thanks [@toiroakr](https://github.com/toiroakr)! - Fix four false positives in workflow linting:
+
+  - `invalid-mapping-values`: accept the string form of `concurrency` (valid
+    GitHub Actions), not only the mapping form.
+  - `unknown-context-or-function`: scan identifiers with hyphen support so a
+    `needs.<hyphenated-job-id>` reference is no longer split (the trailing
+    segment was misread as an unknown context).
+  - `github-app-limit-permissions`: recognize the granular `permission-*` inputs
+    of `create-github-app-token`, matching the zizmor `github-app` rule.
+  - `unknown-runner-label`: add `ubuntu-slim` to the known GitHub-hosted runner
+    labels.
+
+- [#45](https://github.com/toiroakr/karinto/pull/45) [`0c423c7`](https://github.com/toiroakr/karinto/commit/0c423c78d05e59aee299acb78babbab4b73c1699) Thanks [@toiroakr](https://github.com/toiroakr)! - Add `persona` analysis profiles (`regular` / `pedantic` / `auditor`), mirroring
+  zizmor's persona model. Each finding declares the minimum persona at which it
+  surfaces and the linter filters to the requested level (`regular ⊂ pedantic ⊂
+auditor`). The default is `auditor`, so the bare endpoint and CLI keep reporting
+  every finding; pass `persona=regular` to match a stock zizmor run.
+
+  Pedantic findings: `anonymous-definition`, `self-hosted-runner`,
+  `undocumented-permissions`, and the `template-injection` Info backstop. Auditor
+  findings: `secrets-outside-env` and `misfeature`'s `defaults.run.shell: cmd`.
+  Available as the `persona` HTTP parameter (invalid values return `400`) and the
+  CLI `--persona` flag. The response schema is unchanged.
+
 ## 0.8.0
 
 ### Minor Changes
