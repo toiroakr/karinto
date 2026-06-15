@@ -37,8 +37,8 @@ let persona_fixture : String =
 ///|
 test "persona=regular hides pedantic and auditor findings" {
   json_inspect(persona_keys(persona_fixture, @karinto.Persona::Regular), content=[
-    "info concurrency-limits", "error template-injection", "warning excessive-permissions",
-    "warning excessive-permissions", "warning job-permissions-required", "warning job-timeout-minutes-required",
+    "error template-injection", "warning excessive-permissions", "warning excessive-permissions",
+    "warning job-permissions-required", "warning job-timeout-minutes-required",
   ])
 }
 

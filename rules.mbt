@@ -1516,11 +1516,15 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       perms.each(fn(name, value) {
         match value {
           String("write") =>
+            // Per-key over-scope is zizmor pedantic-only; the blanket
+            // write-all/read-all and "default permissions used" findings above
+            // stay Regular (zizmor fires those at the default persona).
             add_diag(
               out,
               "excessive-permissions",
               Warning,
               "\{name}: write is overly broad at the workflow level",
+              persona=Pedantic,
             )
           _ => ()
         }
@@ -6086,6 +6090,7 @@ fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             "concurrency-limits",
             Info,
             "workflow `concurrency:` is bare; missing `cancel-in-progress`",
+            persona=Pedantic,
           )
           return
         }
@@ -6115,6 +6120,7 @@ fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           "concurrency-limits",
           Info,
           "workflow has no `concurrency:` block",
+          persona=Pedantic,
         )
       }
     }

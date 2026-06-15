@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub const ENGINE_VERSION : String = "0.8.0"
+pub const ENGINE_VERSION : String = "0.8.1"
 
 pub fn all_rule_specs() -> Array[RuleSpec]
 
