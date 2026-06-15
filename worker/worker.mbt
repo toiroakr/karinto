@@ -16,6 +16,10 @@
 ///   * `forbidden_uses_str` — denylist globs for `forbidden-uses`
 ///   * `archived_uses_str`  — refs whose repo is archived (`archived-uses`)
 ///
+/// `persona_str` is separate from those CSVs: it selects the analysis profile
+/// (`"regular"` / `"pedantic"` / `"auditor"`; `""` → `auditor`, every finding)
+/// via `persona_from_string`.
+///
 /// The Cloudflare Worker HTTP handler (`cf/index.js`) wires every input.
 /// `vuln_uses_str` is populated from OSV.dev when the request sets `osv=1`;
 /// `archived_uses_str` is merged from a KV-cached baseline plus the request's

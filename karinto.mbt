@@ -29,7 +29,7 @@ pub(all) enum Severity {
 /// - `Pedantic`: also code smells and likely-safe-but-noisy findings (e.g. the
 ///   template-injection backstop on every `${{ … }}`).
 /// - `Auditor`: also low-confidence / defense-in-depth findings (e.g.
-///   `self-hosted-runner`).
+///   `secrets-outside-env`).
 ///
 /// Findings default to `Regular`; only rules that mirror zizmor's
 /// pedantic/auditor-gated behaviour tag themselves higher.

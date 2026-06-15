@@ -160,7 +160,9 @@ fn last_value(matches : @argparse.Matches, name : String) -> String {
 ///|
 /// `""` (omitted) maps to `Auditor` — the engine's default, which shows every
 /// finding (matching the Worker's `persona` parameter contract). Unlike the
-/// Worker (which silently falls back), the CLI rejects an unrecognized value.
+/// bare `persona_from_string` helper (which coerces unknown values to
+/// `Auditor`), the CLI rejects an unrecognized value — as does the HTTP layer
+/// (`cf/index.js`), which returns `400`.
 fn parse_persona(s : String) -> @karinto.Persona? {
   match s {
     "" | "auditor" => Some(@karinto.Persona::Auditor)
