@@ -719,6 +719,13 @@
       "reason": "PR #42 ships the expression typing family; karinto now fires this rule at the same sites actionlint flags. Pinned so a regression (rule going silent on this fixture) fails parity hard."
     },
     {
+      "file": "fixtures/upstream/actionlint/testdata/examples/reusable_workflow_outputs.yaml",
+      "expect": [
+        "upstream-only"
+      ],
+      "reason": "actionlint flags the typo'd reusable-workflow output reference (`jobs.gen-image-version.outputs.imagetag`); karinto does not validate workflow_call output `value` references against declared job outputs. Previously masked by an unknown-context-or-function false positive that split the hyphenated `gen-image-version` id and fired on the trailing `version` segment; that FP is fixed in this PR, exposing the genuine (pre-existing) coverage gap."
+    },
+    {
       "file": "fixtures/upstream/actionlint/testdata/examples/runner_label_conflict.yaml",
       "expect": [
         "upstream-only"
