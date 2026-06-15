@@ -2718,8 +2718,16 @@ fn check_github_app_limit_perms(
   if !is_github_app_token_step(step) {
     return
   }
+  // `tibdex/github-app-token` scopes via a single `permissions:` JSON input,
+  // while `actions/create-github-app-token` uses granular `permission-<scope>`
+  // inputs (`permission-contents`, `permission-pull-requests`, …). Either form
+  // satisfies the limit — match the zizmor `github-app` rule's detection.
   let has = match step.with_ {
-    Some(w) => w.contains("permissions")
+    Some(w) => {
+      let mut found = w.contains("permissions")
+      w.each(fn(k, _v) { if k.has_prefix("permission-") { found = true } })
+      found
+    }
     None => false
   }
   if !has {
@@ -4822,7 +4830,11 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             i = i + 1
           } else if is_ident_start(c) {
             let start = i
-            while i < n && is_ident_cont(chars[i]) {
+            // `is_id_cont` (not `is_ident_cont`) so hyphenated property names
+            // like `needs.my-cross-platform` are scanned as one identifier,
+            // matching the expression lexer in `expr.mbt`. Splitting on `-`
+            // would misread the trailing segment (`platform`) as a context.
+            while i < n && is_id_cont(chars[i]) {
               i = i + 1
             }
             if !prev_dot {
@@ -5772,6 +5784,30 @@ fn expect_mapping(
 }
 
 ///|
+/// `concurrency` accepts either a bare group string (`concurrency: my-group`,
+/// expressions included) or the `{ group, cancel-in-progress }` mapping — both
+/// are valid GitHub Actions. Only other scalar/array types are an error.
+fn expect_mapping_or_string(
+  m : Map[String, @yaml.Yaml],
+  key : String,
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get(key) {
+    Some(Map(_)) => ()
+    Some(String(_)) => ()
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `\{key}` must be a string or mapping (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
 fn expect_array(
   m : Map[String, @yaml.Yaml],
   key : String,
@@ -5883,7 +5919,7 @@ fn check_invalid_mapping_values_doc(
     Some(m) => {
       expect_mapping(m, "env", "workflow", out)
       expect_mapping(m, "defaults", "workflow", out)
-      expect_mapping(m, "concurrency", "workflow", out)
+      expect_mapping_or_string(m, "concurrency", "workflow", out)
       expect_permissions(m, "workflow", out)
       expect_mapping(m, "jobs", "workflow", out)
     }
@@ -5946,7 +5982,7 @@ fn check_invalid_mapping_values_step(
 fn known_runner_labels() -> Array[String] {
   [
     // GitHub-hosted x64 Linux
-    "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04",
+    "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04", "ubuntu-slim",
     // Arm Linux (preview)
      "ubuntu-22.04-arm", "ubuntu-24.04-arm",
     // macOS
