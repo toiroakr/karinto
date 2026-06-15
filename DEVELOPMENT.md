@@ -516,6 +516,13 @@ node scripts/upstream-parity/compare.mjs \
   --ghalint    "$(mise which ghalint)"
 ```
 
+Always resolve the binaries through `mise which` (as above) — don't invoke a
+bare `zizmor` from `PATH`. If `zizmor` is also installed via an aqua proxy
+shim, that shim can hang on analysis runs in sandboxed / non-interactive
+shells (version/help still work, so it looks installed). `mise which zizmor`
+points at the real `ubi:`-installed binary. Also note the analysis flag is
+`--no-online-audits` (what `run-zizmor.mjs` passes), not `--offline`.
+
 ### How diffs are classified
 
 For each fixture file, the script runs both karinto and the matching
