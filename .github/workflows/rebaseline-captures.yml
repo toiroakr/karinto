@@ -46,7 +46,11 @@ permissions: {}
 jobs:
   rebaseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A signal run rewrites the WHOLE bucket sequentially; a timeout mid-flight
+    # leaves the baseline partially rewritten (the very thing this workflow
+    # exists to avoid). Size the budget generously above any realistic
+    # full-bucket pass rather than the default 6h ceiling.
+    timeout-minutes: 60
     permissions:
       contents: read
     env:

@@ -222,9 +222,14 @@ async function fetchCaptures(env, limit) {
   }
 
   // Most recently modified first, then cap. Selection is on the R2 object's
-  // LastModified (not first_seen) — same ordering as replay.mjs, so a `--limit`
-  // run covers the same freshest surface area replay does. (Default is no cap,
-  // so ordering only matters for partial `--limit` runs.)
+  // LastModified — the only freshness signal the list response carries
+  // (first_seen lives inside each object body, so sorting on it would require
+  // fetching every object up front and defeat the point of `--limit`). Caveat:
+  // once this script has overwritten objects, their LastModified reflects the
+  // last rebaseline write, not capture freshness — so on an already-rebaselined
+  // bucket `--limit` is a coarse "some subset" knob, not a freshest-captures
+  // selection. The default is no cap (whole bucket), so this ordering only
+  // matters for emergency `--limit` runs.
   all.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
   const slice = all.slice(0, limit);
 
