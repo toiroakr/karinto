@@ -518,6 +518,33 @@ test "inline ignore: karinto alias and trailing explanation" {
 }
 
 ///|
+test "inline ignore: position-less workflow finding honoured file-wide" {
+  // `cache-poisoning` is a workflow-scoped finding emitted without a source
+  // position. zizmor attributes it to the cache-restoring step, so authors
+  // place the opt-out there. Because the finding has no resolvable line, a
+  // strictly line-scoped match would never honour it; position-less findings
+  // fall back to a file-wide inline ignore.
+  let yaml =
+    #|on:
+    #|  push:
+    #|    tags: ["v*"]
+    #|jobs:
+    #|  release:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: write
+    #|    steps:
+    #|      - uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2 # zizmor: ignore[cache-poisoning]
+    #|        with:
+    #|          path: dist
+    #|          key: build
+    #|      - run: ./publish.sh
+  let res = @karinto.lint(yaml)
+  let cp = res.diagnostics.filter(fn(d) { d.rule == "cache-poisoning" })
+  assert_eq(cp.length(), 0)
+}
+
+///|
 test "positions: merge key column tolerates extra spaces after dash" {
   let yaml =
     #|defaults: &d

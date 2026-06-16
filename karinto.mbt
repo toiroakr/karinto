@@ -185,7 +185,10 @@ pub impl ToJson for LintResult with fn to_json(self) {
 ///
 /// Inline comments of the form `# karinto: ignore[a, b]` or
 /// `# zizmor: ignore[a]` suppress findings *on the same line* as the comment,
-/// line-scoped rather than file-global. A trailing explanation is allowed
+/// line-scoped rather than file-global — except workflow-scoped findings that
+/// carry no source position (e.g. `cache-poisoning`), which fall back to a
+/// file-wide match against any inline ignore in the file that names the rule.
+/// A trailing explanation is allowed
 /// (`# zizmor: ignore[a] reason here`) and several rules may be listed with
 /// commas. Of the upstreams Karinto consolidates, only zizmor ships an inline
 /// ignore syntax — actionlint and ghalint opt out via config files, so they
@@ -213,9 +216,9 @@ pub fn lint(
   ghalint_config? : String = "",
 ) -> LintResult {
   let lines = count_lines(content)
-  // Inline ignores are line-scoped: parsed up front, applied as a post-pass
-  // over positioned findings (below) rather than folded into the file-global
-  // `disabled` set.
+  // Inline ignores: parsed up front, applied as a post-pass (below) rather than
+  // folded into the file-global `disabled` set. Positioned findings match
+  // line-scoped; position-less findings fall back to a file-wide match.
   let inline_ignores = parse_inline_ignores(content)
   // ghalint config excludes (if any): parsed up front, applied as a post-pass
   // (below) scoped by file path / job / step / action.
@@ -267,8 +270,9 @@ pub fn lint(
       fill_positions(diagnostics, lp.position_root, lp.line_counter)
       // Inline ignores: drop a positioned finding when its line carries a
       // `# <tool>: ignore[...]` directive matching the rule. Findings without a
-      // resolved line cannot be line-scoped, so they survive. ghalint excludes
-      // drop findings by policy/file/job/step/action scope (line-independent).
+      // resolved line fall back to a file-wide match — any inline ignore in the
+      // file that names the rule suppresses them. ghalint excludes drop findings
+      // by policy/file/job/step/action scope (line-independent).
       let kept = diagnostics.filter(fn(d) {
         if is_inline_ignored(d, inline_ignores) {
           return false
@@ -409,13 +413,27 @@ fn comment_start(s : String) -> Int? {
 }
 
 ///|
-/// Whether `d` is suppressed by an inline ignore comment on its own line. A
-/// finding with no resolved position cannot be line-scoped, so it is kept.
+/// Whether `d` is suppressed by an inline ignore comment. Positioned findings
+/// are line-scoped: only an ignore on the finding's own line counts. A finding
+/// with no resolved position cannot be line-scoped, so it falls back to a
+/// file-wide match — any inline ignore in the file that names the rule
+/// suppresses it. This keeps workflow-scoped findings (e.g. `cache-poisoning`,
+/// emitted once per workflow without a step/job anchor) honourable, instead of
+/// silently dropping the opt-out because the finding carries no line.
 fn is_inline_ignored(
   d : Diagnostic,
   inline_ignores : Map[Int, Array[String]],
 ) -> Bool {
-  guard d.pos is Some(p) else { return false }
+  guard d.pos is Some(p) else {
+    for _, pats in inline_ignores {
+      for pat in pats {
+        if glob_match(pat, d.rule) {
+          return true
+        }
+      }
+    }
+    return false
+  }
   guard inline_ignores.get(p.line) is Some(pats) else { return false }
   for pat in pats {
     if glob_match(pat, d.rule) {
