@@ -423,6 +423,101 @@ test "positions: multi-line field values point at the key" {
 }
 
 ///|
+test "inline ignore: line-scoped, not file-global" {
+  // Two steps trip `template-injection`; only the first carries an inline
+  // ignore. A line-scoped ignore must suppress that one finding while the
+  // second (uncommented) step still reports — a file-global ignore would
+  // wrongly silence both.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ github.event.issue.title }}" # zizmor: ignore[template-injection]
+    #|      - run: echo "${{ github.event.issue.body }}"
+  let res = @karinto.lint(yaml)
+  let ti = res.diagnostics.filter(fn(d) { d.rule == "template-injection" })
+  // Exactly the second step survives, on line 7.
+  assert_eq(ti.length(), 1)
+  assert_true(ti[0].pos is Some({ line: 7, .. }))
+}
+
+///|
+test "ghalint config: policy excluded by name maps to karinto rule" {
+  // `deny_inherit_secrets` maps (via the catalogue's origins) to the karinto
+  // rule that absorbed it; a matching exclude drops that finding.
+  let yaml =
+    #|on: workflow_call
+    #|jobs:
+    #|  build:
+    #|    uses: ./.github/workflows/reusable.yml
+    #|    secrets: inherit
+  let cfg =
+    #|excludes:
+    #|  - policy_name: deny_inherit_secrets
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length() >
+    0,
+  )
+  let res = @karinto.lint(yaml, ghalint_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length(),
+    0,
+  )
+}
+
+///|
+test "ghalint config: workflow_file_path scopes the exclude" {
+  let yaml =
+    #|on: workflow_call
+    #|jobs:
+    #|  build:
+    #|    uses: ./.github/workflows/reusable.yml
+    #|    secrets: inherit
+  let cfg =
+    #|excludes:
+    #|  - policy_name: deny_inherit_secrets
+    #|    workflow_file_path: .github/workflows/release.yml
+  // The path does not match the file under lint, so the finding survives.
+  let other = @karinto.lint(
+    yaml,
+    ghalint_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_true(
+    other.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length() > 0,
+  )
+  // The matching path drops it.
+  let hit = @karinto.lint(
+    yaml,
+    ghalint_config=cfg,
+    file_path=".github/workflows/release.yml",
+  )
+  assert_eq(
+    hit.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length(),
+    0,
+  )
+}
+
+///|
+test "inline ignore: karinto alias and trailing explanation" {
+  // The `karinto` alias and a free-form note after the bracket are both
+  // honoured; comma-separated ids opt out of several rules at once.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ github.event.issue.title }}" # karinto: ignore[template-injection] safe, sanitised upstream
+  let res = @karinto.lint(yaml)
+  let ti = res.diagnostics.filter(fn(d) { d.rule == "template-injection" })
+  assert_eq(ti.length(), 0)
+}
+
+///|
 test "positions: merge key column tolerates extra spaces after dash" {
   let yaml =
     #|defaults: &d

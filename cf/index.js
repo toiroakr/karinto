@@ -29,6 +29,10 @@
 //   - forbidden comma-separated globs for the `forbidden-uses` denylist
 //   - archived  comma-separated `owner/repo` for `archived-uses` (merged with
 //               the KV-cached baseline refreshed by the daily cron)
+//   - ghalint   verbatim ghalint config (`ghalint.yaml`) text; its `excludes`
+//               list suppresses the matching findings. `path` (content mode) or
+//               each file's repo-relative path (repo mode) resolves an exclude's
+//               `workflow_file_path` scope.
 //
 // The response also carries `online_audit_candidates`: the external `uses:`
 // refs that need a live GitHub API lookup (`impostor-commit`,
@@ -81,6 +85,10 @@ const MAX_TARGETS = 50;
 // few in practice.
 const MAX_USES_ENTRIES = 200;
 const MAX_USES_ENTRY_LEN = 256;
+// A ghalint config (`ghalint.yaml`) passed via the `ghalint` param. Real configs
+// are tiny (a handful of `excludes` entries); cap well below the body limit so a
+// pathological blob can't bloat a request.
+const MAX_GHALINT_CONFIG_BYTES = 64 * 1024;
 // KV-published baseline of archived `owner/repo` slugs (the `archived-uses`
 // rule reads this on the request path). It is maintained out-of-band by the
 // .github/workflows/refresh-archived.yml CI job, which drains the D1 `pending`
@@ -557,6 +565,8 @@ const KNOWN_KEYS = new Set([
   "archived",
   "format",
   "path",
+  "persona",
+  "ghalint",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -592,7 +602,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path|persona)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path|persona|ghalint)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -601,6 +611,7 @@ async function handle(params, env, pathTarget) {
   const type = params.type || "";
   const format = parseFormat(params.format);
   const persona = parsePersona(params.persona);
+  const ghalint = sanitizeGhalintConfig(params.ghalint);
   const useOsv = isTrue(params.osv);
   const worker = await getWorker();
   // Merge the caller's `archived` list with the live KV baseline and the
@@ -626,7 +637,7 @@ async function handle(params, env, pathTarget) {
       );
     }
     return await handleRepo(
-      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona,
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint,
     );
   }
   if (!params.content) {
@@ -636,17 +647,20 @@ async function handle(params, env, pathTarget) {
     throw httpError(`content too large (max ${MAX_BODY_BYTES} bytes)`, 413);
   }
   const vuln = useOsv ? await fetchVulnUses(params.content, worker) : "";
+  const pathLabel = sanitizePathLabel(params.path);
   if (format === "sarif") {
     return {
       sarif: worker.lint_string_sarif(
         params.content, type, disable, vuln, forbidden, archived,
-        sanitizePathLabel(params.path), persona,
+        pathLabel, persona, ghalint,
       ),
     };
   }
   return {
     ...JSON.parse(
-      worker.lint_string(params.content, type, disable, vuln, forbidden, archived, persona),
+      worker.lint_string(
+        params.content, type, disable, vuln, forbidden, archived, persona, ghalint, pathLabel,
+      ),
     ),
     online_audit_candidates: collectOnlineAuditCandidates(params.content),
   };
@@ -692,6 +706,24 @@ function sanitizePathLabel(raw) {
     throw httpError("`path` must be a string", 400);
   }
   validateTargetPath(raw);
+  return raw;
+}
+
+// Verbatim ghalint config text (`ghalint.yaml`). The MoonBit engine parses it
+// and applies its `excludes` list; a malformed config yields no excludes rather
+// than erroring, so we only enforce type and a size ceiling here.
+function sanitizeGhalintConfig(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`ghalint` must be a string", 400);
+  }
+  const byteLen = new TextEncoder().encode(raw).byteLength;
+  if (byteLen > MAX_GHALINT_CONFIG_BYTES) {
+    throw httpError(
+      `ghalint config too large (max ${MAX_GHALINT_CONFIG_BYTES} bytes, got ${byteLen})`,
+      413,
+    );
+  }
   return raw;
 }
 
@@ -823,7 +855,7 @@ function validateTargetPath(path) {
 }
 
 async function handleRepo(
-  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona,
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint,
 ) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
@@ -930,7 +962,7 @@ async function handleRepo(
     files.push({
       path,
       ...JSON.parse(
-        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived, persona),
+        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived, persona, ghalint, path),
       ),
       online_audit_candidates: collectOnlineAuditCandidates(raw),
     });
@@ -938,7 +970,7 @@ async function handleRepo(
   if (sarif) {
     return {
       sarif: worker.lint_files_sarif(
-        JSON.stringify(sarifFiles), disable, forbidden, archived, persona,
+        JSON.stringify(sarifFiles), disable, forbidden, archived, persona, ghalint,
       ),
     };
   }
@@ -1425,6 +1457,13 @@ function normalizeRequest(params) {
   // not part of the request.)
   if (params.forbidden) out.forbidden = normalizeCsvField(params.forbidden);
   if (params.archived) out.archived = normalizeCsvField(params.archived);
+  // `ghalint` and `path` change which findings survive, so a replay must key on
+  // them too. They are opaque text (not CSV), captured verbatim.
+  if (params.ghalint) out.ghalint = params.ghalint;
+  if (params.path) out.path = params.path;
+  // `persona` gates which findings survive, so it too is part of the verdict
+  // and must be captured (single token, verbatim).
+  if (params.persona) out.persona = params.persona;
   return out;
 }
 

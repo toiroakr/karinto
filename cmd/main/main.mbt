@@ -75,6 +75,20 @@ fn run() -> Int {
     }
   }
   let disabled = collect_disabled(matches)
+  // A `--ghalint-config <path>` reads the file once; an unreadable path is a
+  // usage error (the user asked for it explicitly). Omitted means no excludes.
+  let ghalint_config_path = last_value(matches, "ghalint-config")
+  let ghalint_config = if ghalint_config_path == "" {
+    ""
+  } else {
+    match js_read_file(ghalint_config_path) {
+      Some(c) => c
+      None => {
+        eprintln("error: cannot read ghalint config '\{ghalint_config_path}'")
+        return 2
+      }
+    }
+  }
   let files = match matches.values.get("files") {
     Some(fs) => fs
     None => []
@@ -89,9 +103,9 @@ fn run() -> Int {
       eprintln(build_command().render_help())
       return 2
     }
-    lint_stdin(kind, disabled, format, persona)
+    lint_stdin(kind, disabled, format, persona, ghalint_config)
   } else {
-    lint_files(files, kind, disabled, format, persona)
+    lint_files(files, kind, disabled, format, persona, ghalint_config)
   }
 }
 
@@ -125,6 +139,11 @@ fn build_command() -> @argparse.Command {
         short='p',
         long="persona",
         about="Analysis profile: 'regular', 'pedantic', or 'auditor' (default; shows every finding)",
+      ),
+      @argparse.OptionArg::new(
+        "ghalint-config",
+        long="ghalint-config",
+        about="Path to a ghalint config (ghalint.yaml); its `excludes` are honoured",
       ),
     ],
     positionals=[
@@ -282,6 +301,7 @@ fn lint_stdin(
   disabled : Array[String],
   format : OutputFormat,
   persona : @karinto.Persona,
+  ghalint_config : String,
 ) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
@@ -290,7 +310,15 @@ fn lint_stdin(
       return 2
     }
   }
-  let result = @karinto.lint(content, kind~, disabled~, persona~)
+  // stdin has no path, so path-scoped ghalint excludes can't match; path-less
+  // ones still apply.
+  let result = @karinto.lint(
+    content,
+    kind~,
+    disabled~,
+    persona~,
+    ghalint_config~,
+  )
   match format {
     Envelope => {
       let body : Map[String, Json] = {
@@ -321,6 +349,7 @@ fn lint_files(
   disabled : Array[String],
   format : OutputFormat,
   persona : @karinto.Persona,
+  ghalint_config : String,
 ) -> Int {
   let entries : Array[Json] = []
   let sarif_entries : Array[@karinto.SarifEntry] = []
@@ -358,7 +387,14 @@ fn lint_files(
           Unknown => kind_from_path(path)
           _ => kind
         }
-        let result = @karinto.lint(content, kind=file_kind, disabled~, persona~)
+        let result = @karinto.lint(
+          content,
+          kind=file_kind,
+          disabled~,
+          persona~,
+          file_path=path,
+          ghalint_config~,
+        )
         let ok = result.parse_error is None
         if !ok {
           all_ok = false

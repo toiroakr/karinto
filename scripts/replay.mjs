@@ -252,6 +252,14 @@ async function replayOne(targetUrl, request) {
   if (request.type) body.set("type", request.type);
   if (request.disable) body.set("disable", request.disable);
   if (request.content) body.set("content", request.content);
+  // Forward every verdict-changing input captured by `normalizeRequest`
+  // (cf/index.js). Omitting any of these replays the request without it, so
+  // the PR worker computes a different verdict and the diff is spurious.
+  if (request.forbidden) body.set("forbidden", request.forbidden);
+  if (request.archived) body.set("archived", request.archived);
+  if (request.ghalint) body.set("ghalint", request.ghalint);
+  if (request.path) body.set("path", request.path);
+  if (request.persona) body.set("persona", request.persona);
   // Opt out of capture on the replay target so PR-side requests don't
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");

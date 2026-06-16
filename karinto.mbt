@@ -183,12 +183,24 @@ pub impl ToJson for LintResult with fn to_json(self) {
 /// - `kind`: explicit file kind. `Unknown` triggers heuristic detection.
 /// - `disabled`: glob patterns of rule IDs to skip.
 ///
-/// Inline comments of the form `# karinto: ignore[a, b]`,
-/// `# zizmor: ignore[a]`, `# ghalint: ignore[a]`, or `# actionlint: ignore[a]`
-/// found anywhere in `content` extend `disabled` for the file. Karinto
-/// honours every upstream's syntax so vendored workflows lint cleanly when
-/// the author already opted out of a specific finding with the tool that
-/// originally fired it.
+/// Inline comments of the form `# karinto: ignore[a, b]` or
+/// `# zizmor: ignore[a]` suppress findings *on the same line* as the comment,
+/// line-scoped rather than file-global. A trailing explanation is allowed
+/// (`# zizmor: ignore[a] reason here`) and several rules may be listed with
+/// commas. Of the upstreams Karinto consolidates, only zizmor ships an inline
+/// ignore syntax — actionlint and ghalint opt out via config files, so they
+/// have no comment form to honour. Karinto matches zizmor's so vendored
+/// workflows lint cleanly when the author already opted out of a finding
+/// where it fires.
+///
+/// - `file_path`: the path of the file under lint, relative to the repo root.
+///   Used only to scope `ghalint_config` excludes by `workflow_file_path`;
+///   leave empty to apply path-less excludes only.
+/// - `ghalint_config`: the raw text of a ghalint config (`ghalint.yaml`). Its
+///   `excludes` are mapped onto karinto rules via the catalogue's `origins`
+///   and applied with their `workflow_file_path` / `job_name` / `action_name`
+///   / `step_id` scoping. actionlint configs are not honoured: they ignore by
+///   regex against tool-specific messages, which do not map onto karinto.
 pub fn lint(
   content : String,
   kind? : FileKind = Unknown,
@@ -197,9 +209,26 @@ pub fn lint(
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
   persona? : Persona = Auditor,
+  file_path? : String = "",
+  ghalint_config? : String = "",
 ) -> LintResult {
   let lines = count_lines(content)
-  let merged_disabled = merge_inline_ignores(content, disabled)
+  // Inline ignores are line-scoped: parsed up front, applied as a post-pass
+  // over positioned findings (below) rather than folded into the file-global
+  // `disabled` set.
+  let inline_ignores = parse_inline_ignores(content)
+  // ghalint config excludes (if any): parsed up front, applied as a post-pass
+  // (below) scoped by file path / job / step / action.
+  let ghalint_excludes = if ghalint_config == "" {
+    []
+  } else {
+    parse_ghalint_excludes(ghalint_config)
+  }
+  let ghalint_policies = if ghalint_excludes.length() > 0 {
+    ghalint_policy_map()
+  } else {
+    {}
+  }
   // Single parse pass: the value tree (for rules), the position node tree, and
   // the line counter all come from one lex+parse of `content`.
   let parsed = try? @yaml.parse_for_lint(content)
@@ -225,7 +254,7 @@ pub fn lint(
       let diagnostics = run_rules(
         doc,
         resolved_kind,
-        merged_disabled,
+        disabled,
         vuln_uses,
         content,
         forbidden_uses,
@@ -236,10 +265,26 @@ pub fn lint(
       // Stamp line/column positions onto job- and step-scoped findings from the
       // position node tree. Best-effort: absent positions leave `pos = None`.
       fill_positions(diagnostics, lp.position_root, lp.line_counter)
+      // Inline ignores: drop a positioned finding when its line carries a
+      // `# <tool>: ignore[...]` directive matching the rule. Findings without a
+      // resolved line cannot be line-scoped, so they survive. ghalint excludes
+      // drop findings by policy/file/job/step/action scope (line-independent).
+      let kept = diagnostics.filter(fn(d) {
+        if is_inline_ignored(d, inline_ignores) {
+          return false
+        }
+        if ghalint_excludes.length() > 0 &&
+          ghalint_excluded(
+            d, ghalint_excludes, ghalint_policies, file_path, doc,
+          ) {
+          return false
+        }
+        true
+      })
       // Persona gate: keep findings whose minimum persona is at or below the
       // requested one. `Auditor` (the default) keeps everything.
       let want = persona_rank(persona)
-      let visible = diagnostics.filter(fn(d) { persona_rank(d.persona) <= want })
+      let visible = kept.filter(fn(d) { persona_rank(d.persona) <= want })
       LintResult::{
         kind: resolved_kind,
         stats,
@@ -251,30 +296,48 @@ pub fn lint(
 }
 
 ///|
-/// Scans `content` for `# <tool>: ignore[a, b]` directives and returns the
-/// union of `disabled` with the collected rule IDs. Tool names accepted:
-/// karinto, zizmor, ghalint, actionlint. Rule IDs are trimmed; empty
-/// brackets and missing comments are no-ops.
-fn merge_inline_ignores(
-  content : String,
-  disabled : Array[String],
-) -> Array[String] {
-  let extra : Array[String] = []
-  let tools = ["karinto", "zizmor", "ghalint", "actionlint"]
+/// Maps a 1-based source line number to the rule-id patterns an inline
+/// `# <tool>: ignore[...]` comment opts out on that line.
+fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
+  let by_line : Map[Int, Array[String]] = {}
+  // Only zizmor ships an inline ignore syntax among the upstreams Karinto
+  // consolidates; `karinto` is our own alias. actionlint and ghalint opt out
+  // via config files, so they have no comment form to scan for.
+  let tools = ["karinto", "zizmor"]
+  let mut lineno = 1
   for line in content.split("\n") {
     let s = line.to_owned()
+    // The directive is only honoured inside a real YAML line comment. A `#`
+    // that sits in a quoted scalar (e.g. `run: echo "# zizmor: ignore[x]"`)
+    // is data, not a comment, so we scan only the comment body — not the whole
+    // line — to keep such scalars from suppressing findings.
+    guard comment_start(s) is Some(cs) else {
+      lineno = lineno + 1
+      continue
+    }
+    let comment = s[cs:].to_owned()
     for tool in tools {
       let needle = tool + ": ignore["
-      match index_of(s, needle) {
+      match index_of(comment, needle) {
         Some(i) => {
-          let after = s[i + needle.length():].to_owned()
+          let after = comment[i + needle.length():].to_owned()
+          // Stop at the closing bracket; anything after `]` (e.g. a trailing
+          // `# zizmor: ignore[rule] explanation`) is a free-form note.
           match index_of(after, "]") {
             Some(j) => {
               let inner = after[0:j].to_owned()
+              let pats = match by_line.get(lineno) {
+                Some(existing) => existing
+                None => {
+                  let fresh : Array[String] = []
+                  by_line[lineno] = fresh
+                  fresh
+                }
+              }
               for part in inner.split(",") {
                 let trimmed = trim_ws(part.to_owned())
                 if trimmed.length() > 0 {
-                  extra.push(trimmed)
+                  pats.push(trimmed)
                 }
               }
             }
@@ -284,18 +347,82 @@ fn merge_inline_ignores(
         None => ()
       }
     }
+    lineno = lineno + 1
   }
-  if extra.length() == 0 {
-    return disabled
+  by_line
+}
+
+///|
+/// Returns the code-unit index just past the `#` that opens a YAML line
+/// comment on `s`, or `None` when the line has no comment. A `#` starts a
+/// comment only when it is at the start of the line or preceded by whitespace
+/// AND it sits outside any quoted scalar; a `#` inside a quoted string is
+/// data. Scanning is done in UTF-16 code units — `#`, the quote characters,
+/// and ASCII whitespace are all single code units, and surrogate halves never
+/// collide with them, so the returned index always lands on a char boundary.
+fn comment_start(s : String) -> Int? {
+  let len = s.length()
+  let mut i = 0
+  // Start-of-line counts as "preceded by whitespace" for the leading `#`.
+  let mut prev_ws = true
+  while i < len {
+    let c = s.unsafe_get(i).to_int()
+    if c == '\'' {
+      // Single-quoted scalar: `''` is a literal quote, a lone `'` closes it.
+      i = i + 1
+      while i < len {
+        if s.unsafe_get(i).to_int() == '\'' {
+          if i + 1 < len && s.unsafe_get(i + 1).to_int() == '\'' {
+            i = i + 2
+          } else {
+            i = i + 1
+            break
+          }
+        } else {
+          i = i + 1
+        }
+      }
+      prev_ws = false
+    } else if c == '"' {
+      // Double-quoted scalar: `\` escapes the next code unit.
+      i = i + 1
+      while i < len {
+        let d = s.unsafe_get(i).to_int()
+        if d == '\\' {
+          i = i + 2
+        } else if d == '"' {
+          i = i + 1
+          break
+        } else {
+          i = i + 1
+        }
+      }
+      prev_ws = false
+    } else if c == '#' && prev_ws {
+      return Some(i + 1)
+    } else {
+      prev_ws = c == ' ' || c == '\t'
+      i = i + 1
+    }
   }
-  let merged : Array[String] = []
-  for d in disabled {
-    merged.push(d)
+  None
+}
+
+///|
+/// Whether `d` is suppressed by an inline ignore comment on its own line. A
+/// finding with no resolved position cannot be line-scoped, so it is kept.
+fn is_inline_ignored(
+  d : Diagnostic,
+  inline_ignores : Map[Int, Array[String]],
+) -> Bool {
+  guard d.pos is Some(p) else { return false }
+  guard inline_ignores.get(p.line) is Some(pats) else { return false }
+  for pat in pats {
+    if glob_match(pat, d.rule) {
+      return true
+    }
   }
-  for d in extra {
-    merged.push(d)
-  }
-  merged
+  false
 }
 
 ///|

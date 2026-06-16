@@ -1708,6 +1708,154 @@
         "fires:template-injection"
       ],
       "reason": "template-injection Info backstop fires on every ${{ ... }} (zizmor consolidates actionlint:script-injection at broader scope; see rules_catalog.md). Source=actionlint. Required-fire keeps regression detection."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/caching-enabled-by-default.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/caching-not-configurable.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/caching-opt-in-boolean-toggle.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/caching-opt-in-expression.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/caching-opt-out.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/no-cache-aware-steps.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/publisher-step.yml",
+      "expect": [
+        "extra:superfluous-actions"
+      ],
+      "reason": "Fixture carries a `# zizmor: ignore[...]` directive on a leaf step line. karinto resolves no source line for superfluous-actions (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/workflow-release-branch-trigger.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/workflow-release-trigger-object.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/workflow-tag-trigger.yml",
+      "expect": [
+        "extra:use-trusted-publishing"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[use-trusted-publishing]` on a step `name:` line. karinto resolves no source line for use-trusted-publishing (workflow/job-level finding, pos=None), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/github_env.yml",
+      "expect": [
+        "extra:dangerous-triggers"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[dangerous-triggers]` on the trigger key (`pull_request_target:`). karinto reports dangerous-triggers at the `on:` block (or with no leaf line), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the trigger leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/github-env/github-path.yml",
+      "expect": [
+        "extra:dangerous-triggers"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[dangerous-triggers]` on the trigger key. karinto reports dangerous-triggers at the `on:` block (or with no leaf line), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the trigger leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/github-env/issue-397-repro.yml",
+      "expect": [
+        "extra:dangerous-triggers"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[dangerous-triggers]` on the trigger key. karinto reports dangerous-triggers at the `on:` block (or with no leaf line), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the trigger leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/inlined-ignores.yml",
+      "expect": [
+        "extra:unpinned-images",
+        "extra:hardcoded-container-credentials"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[unpinned-images]` on the `image:` leaf and `# zizmor: ignore[hardcoded-container-credentials]` on the `password:` leaf. karinto reports both findings at the `container:`/`credentials:` parent block (no leaf line), so its line-scoped inline-ignore cannot match the comment lines; zizmor anchors node-scoped ignores at the leaves. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/issue-612-repro/action.yml",
+      "expect": [
+        "extra:template-injection"
+      ],
+      "reason": "Fixture carries a `# zizmor: ignore[template-injection]` directive whose line differs from where karinto resolves the finding, so its line-scoped inline-ignore cannot match; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/template-injection/patterns.yml",
+      "expect": [
+        "extra:dangerous-triggers"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[dangerous-triggers]` on the trigger key (`on: workflow_run`). karinto reports dangerous-triggers at the `on:` block (or with no leaf line), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the trigger leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/undocumented-permissions.yml",
+      "expect": [
+        "extra:excessive-permissions"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[excessive-permissions]` on a `contents: write` entry. karinto reports excessive-permissions at the `permissions:` block (pos=None at the leaf), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/undocumented-permissions/documented.yml",
+      "expect": [
+        "extra:excessive-permissions"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[excessive-permissions]` on a `permissions:` entry. karinto reports excessive-permissions at the `permissions:` block (pos=None at the leaf), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/undocumented-permissions/partially-documented.yml",
+      "expect": [
+        "extra:excessive-permissions"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[excessive-permissions]` on a `permissions:` entry. karinto reports excessive-permissions at the `permissions:` block (pos=None at the leaf), so its line-scoped inline-ignore cannot match the comment line; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/unsound-condition.yml",
+      "expect": [
+        "extra:obfuscation"
+      ],
+      "reason": "Fixture carries `# zizmor: ignore[obfuscation]` trailing several `if:` expressions. karinto reports obfuscation at a line that differs from the comment line, so its line-scoped inline-ignore cannot match; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
     }
   ]
 }

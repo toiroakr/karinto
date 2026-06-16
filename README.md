@@ -71,8 +71,9 @@ below.
 | `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 | `format` | `json` \| `sarif` | Output format; defaults to the JSON envelope. `sarif` returns a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) document — see [*SARIF output*](#sarif-output). |
-| `path` | string | Optional artifact label for `format=sarif` with `content` — becomes the SARIF `artifactLocation.uri` (e.g. `.github/workflows/ci.yml`). Same shape rules as `targets` paths. Ignored in envelope mode; unnecessary in `repo` mode, where targets already carry paths. |
+| `path` | string | Repo-relative path of the `content` (e.g. `.github/workflows/ci.yml`). In `format=sarif` it becomes the SARIF `artifactLocation.uri`; in either format it also resolves a `ghalint` exclude's `workflow_file_path` scope. Same shape rules as `targets` paths. Unnecessary in `repo` mode, where targets already carry paths. |
 | `persona` | `regular` \| `pedantic` \| `auditor` | Analysis profile (see [*Personas*](#personas)). Defaults to `auditor` (every finding). An unrecognized value is a `400`. |
+| `ghalint` | string | Verbatim ghalint config (`ghalint.yaml`) text; its `excludes:` list suppresses matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -122,6 +123,31 @@ finding, pinned against `zizmor`'s actual per-persona behaviour (see
 - `superfluous-actions` — `regular` for most of the catalogue; `pedantic` for
   the subset `zizmor` gates there (e.g. `peter-evans/create-pull-request`,
   `dtolnay/rust-toolchain`).
+
+### Ignoring findings
+
+Beyond the `disable` glob list (which skips a rule everywhere), karinto honours
+the opt-outs authors already wrote for the upstream tools:
+
+- **Inline comments** — `# karinto: ignore[rule-id]` or
+  `# zizmor: ignore[rule-id]` on a line suppresses findings **on that same
+  line** (line-scoped, not file-global). List several rules with commas
+  (`# zizmor: ignore[a, b]`) and add a free-form note after the bracket
+  (`# zizmor: ignore[a] handled upstream`). This matches
+  [zizmor's inline-ignore syntax](https://docs.zizmor.sh/usage/#inline-ignores);
+  it reads straight from `content`, so it works on every entry point.
+  actionlint and ghalint have no inline-comment form, so karinto recognises
+  only the `karinto` and `zizmor` prefixes.
+- **ghalint config** — a `ghalint.yaml` `excludes:` list is honoured. Each
+  entry's `policy_name` is mapped onto the karinto rule(s) that absorbed it
+  (via the catalogue's `origins`), and the `workflow_file_path` / `job_name` /
+  `action_name` / `step_id` scope fields are applied. Pass it through the
+  [local CLI](#local-cli)'s `--ghalint-config`, or over HTTP via the `ghalint`
+  parameter (the config's verbatim text); the `workflow_file_path` scope then
+  resolves against `path` in content mode or each file's repo-relative path in
+  repo mode. actionlint configs are **not** honoured — they ignore by regex
+  against actionlint's own error messages, which do not map onto karinto's
+  findings.
 
 ### Examples
 
@@ -374,6 +400,10 @@ moon run --target js cmd/main -- --type action --disable 'permissions-*' action.
 
 # pick an analysis profile (see *Personas*); default is auditor (every finding)
 moon run --target js cmd/main -- --persona regular .github/workflows/ci.yml
+
+# honour a ghalint config's `excludes` (see *Ignoring findings*); the file
+# path is matched against each exclude's `workflow_file_path`
+moon run --target js cmd/main -- --ghalint-config ghalint.yaml .github/workflows/ci.yml
 
 # SARIF 2.1.0 for GitHub Code Scanning (same as the Worker's `format=sarif`);
 # file arguments become artifact URIs, stdin yields pathless results
