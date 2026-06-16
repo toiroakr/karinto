@@ -221,17 +221,20 @@ async function fetchCaptures(env, limit) {
     );
   }
 
-  // Most recently modified first, then cap. Selection is on the R2 object's
+  // Selection (matters only for `--limit`): newest first by the R2 object's
   // LastModified — the only freshness signal the list response carries
   // (first_seen lives inside each object body, so sorting on it would require
-  // fetching every object up front and defeat the point of `--limit`). Caveat:
-  // once this script has overwritten objects, their LastModified reflects the
-  // last rebaseline write, not capture freshness — so on an already-rebaselined
-  // bucket `--limit` is a coarse "some subset" knob, not a freshest-captures
-  // selection. The default is no cap (whole bucket), so this ordering only
-  // matters for emergency `--limit` runs.
+  // fetching every object up front and defeat the point of `--limit`). So
+  // `--limit N` processes the N most recently modified captures.
   all.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
   const slice = all.slice(0, limit);
+
+  // Write order: oldest first. Each rebaseline put bumps LastModified to "now",
+  // so processing ascending-by-age makes the genuinely most-recent captures end
+  // up with the newest LastModified — preserving the freshness ordering
+  // replay.mjs relies on (it, too, selects by LastModified). Writing newest
+  // first would invert that ordering after a full run.
+  slice.reverse();
 
   const captures = [];
   for (const obj of slice) {
@@ -488,9 +491,11 @@ async function main() {
       // Plain put (no `onlyIf`): the whole point is to overwrite the frozen
       // response. Preserve `first_seen` — the timestamp diff-rule cutoffs
       // compare against (e.g. FIX_CUTOFF) and the original-capture record — and
-      // stamp `rebaselined_at`. Note replay.mjs orders by the R2 object's
-      // LastModified, which this overwrite necessarily bumps; first_seen does
-      // not drive that ordering.
+      // stamp `rebaselined_at`. This overwrite bumps the object's LastModified
+      // (which replay.mjs orders by) to now; the loop processes captures
+      // oldest-first (see fetchCaptures) so that ordering stays monotonic with
+      // capture age. first_seen is preserved in the body but does not drive
+      // replay ordering.
       const payload = JSON.stringify({
         request: cap.request,
         response: replayed,

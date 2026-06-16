@@ -48,8 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     # A signal run rewrites the WHOLE bucket sequentially; a timeout mid-flight
     # leaves the baseline partially rewritten (the very thing this workflow
-    # exists to avoid). Size the budget generously above any realistic
-    # full-bucket pass rather than the default 6h ceiling.
+    # exists to avoid). 60 min is a deliberate explicit budget: comfortably
+    # above a realistic full-bucket pass, while still failing fast instead of
+    # hanging up to GitHub's 6h default if prod or R2 stalls.
     timeout-minutes: 60
     permissions:
       contents: read
