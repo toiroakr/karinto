@@ -307,18 +307,20 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
   let mut lineno = 1
   for line in content.split("\n") {
     let s = line.to_owned()
+    // The directive is only honoured inside a real YAML line comment. A `#`
+    // that sits in a quoted scalar (e.g. `run: echo "# zizmor: ignore[x]"`)
+    // is data, not a comment, so we scan only the comment body — not the whole
+    // line — to keep such scalars from suppressing findings.
+    guard comment_start(s) is Some(cs) else {
+      lineno = lineno + 1
+      continue
+    }
+    let comment = s[cs:].to_owned()
     for tool in tools {
       let needle = tool + ": ignore["
-      match index_of(s, needle) {
+      match index_of(comment, needle) {
         Some(i) => {
-          // Only honour the directive when it sits inside a `#` comment, i.e.
-          // the text before it is `#` followed by optional whitespace. This
-          // keeps YAML keys/values that merely contain `<tool>: ignore[...]`
-          // (e.g. a quoted string) from suppressing findings — the documented
-          // form is `# <tool>: ignore[...]`.
-          let prefix = trim_ws(s[0:i].to_owned())
-          guard ends_with(prefix, "#") else { continue }
-          let after = s[i + needle.length():].to_owned()
+          let after = comment[i + needle.length():].to_owned()
           // Stop at the closing bracket; anything after `]` (e.g. a trailing
           // `# zizmor: ignore[rule] explanation`) is a free-form note.
           match index_of(after, "]") {
@@ -348,6 +350,62 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
     lineno = lineno + 1
   }
   by_line
+}
+
+///|
+/// Returns the code-unit index just past the `#` that opens a YAML line
+/// comment on `s`, or `None` when the line has no comment. A `#` starts a
+/// comment only when it is at the start of the line or preceded by whitespace
+/// AND it sits outside any quoted scalar; a `#` inside a quoted string is
+/// data. Scanning is done in UTF-16 code units — `#`, the quote characters,
+/// and ASCII whitespace are all single code units, and surrogate halves never
+/// collide with them, so the returned index always lands on a char boundary.
+fn comment_start(s : String) -> Int? {
+  let len = s.length()
+  let mut i = 0
+  // Start-of-line counts as "preceded by whitespace" for the leading `#`.
+  let mut prev_ws = true
+  while i < len {
+    let c = s.unsafe_get(i).to_int()
+    if c == '\'' {
+      // Single-quoted scalar: `''` is a literal quote, a lone `'` closes it.
+      i = i + 1
+      while i < len {
+        if s.unsafe_get(i).to_int() == '\'' {
+          if i + 1 < len && s.unsafe_get(i + 1).to_int() == '\'' {
+            i = i + 2
+          } else {
+            i = i + 1
+            break
+          }
+        } else {
+          i = i + 1
+        }
+      }
+      prev_ws = false
+    } else if c == '"' {
+      // Double-quoted scalar: `\` escapes the next code unit.
+      i = i + 1
+      while i < len {
+        let d = s.unsafe_get(i).to_int()
+        if d == '\\' {
+          i = i + 2
+        } else if d == '"' {
+          i = i + 1
+          break
+        } else {
+          i = i + 1
+        }
+      }
+      prev_ws = false
+    } else if c == '#' && prev_ws {
+      return Some(i + 1)
+    } else {
+      prev_ws = c == ' ' || c == '\t'
+      i = i + 1
+    }
+  }
+  None
 }
 
 ///|

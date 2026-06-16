@@ -70,4 +70,15 @@ test "parse_inline_ignores requires a `#` comment marker" {
     #|    env: { X: 1 } # karinto: ignore[a, b]
   let m3 = parse_inline_ignores(trailing)
   assert_true(m3.get(1) is Some(["a", "b"]))
+  // A `#` *inside* a quoted scalar is data, not a comment marker — it must not
+  // be treated as a directive even though the text reads like one.
+  let hash_in_quotes =
+    #|      - run: echo "# zizmor: ignore[unpinned-uses]"
+  let m4 = parse_inline_ignores(hash_in_quotes)
+  assert_true(m4.get(1) is None)
+  // …but a real trailing comment after a quoted scalar is still honoured.
+  let quote_then_comment =
+    #|      - run: echo "hi" # zizmor: ignore[unpinned-uses]
+  let m5 = parse_inline_ignores(quote_then_comment)
+  assert_true(m5.get(1) is Some(["unpinned-uses"]))
 }
