@@ -565,6 +565,7 @@ const KNOWN_KEYS = new Set([
   "archived",
   "format",
   "path",
+  "persona",
   "ghalint",
 ]);
 
