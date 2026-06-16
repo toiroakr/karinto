@@ -409,13 +409,27 @@ fn comment_start(s : String) -> Int? {
 }
 
 ///|
-/// Whether `d` is suppressed by an inline ignore comment on its own line. A
-/// finding with no resolved position cannot be line-scoped, so it is kept.
+/// Whether `d` is suppressed by an inline ignore comment. Positioned findings
+/// are line-scoped: only an ignore on the finding's own line counts. A finding
+/// with no resolved position cannot be line-scoped, so it falls back to a
+/// file-wide match — any inline ignore in the file that names the rule
+/// suppresses it. This keeps workflow-scoped findings (e.g. `cache-poisoning`,
+/// emitted once per workflow without a step/job anchor) honourable, instead of
+/// silently dropping the opt-out because the finding carries no line.
 fn is_inline_ignored(
   d : Diagnostic,
   inline_ignores : Map[Int, Array[String]],
 ) -> Bool {
-  guard d.pos is Some(p) else { return false }
+  guard d.pos is Some(p) else {
+    for _, pats in inline_ignores {
+      for pat in pats {
+        if glob_match(pat, d.rule) {
+          return true
+        }
+      }
+    }
+    return false
+  }
   guard inline_ignores.get(p.line) is Some(pats) else { return false }
   for pat in pats {
     if glob_match(pat, d.rule) {
