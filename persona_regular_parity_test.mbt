@@ -128,6 +128,31 @@ test "template-injection: a regular-tier substring outside an expression does no
 }
 
 ///|
+test "template-injection: a context-like string literal does not promote" {
+  // `'vars.FOO'` is a string literal, not a context reference — must stay on
+  // the pedantic backstop.
+  let yaml =
+    #|name: t
+    #|on: push
+    #|jobs:
+    #|  b:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo "${{ 'vars.FOO' }}"
+  inspect(
+    fires(yaml, @karinto.Persona::Regular, "template-injection"),
+    content="false",
+  )
+  inspect(
+    fires(yaml, @karinto.Persona::Pedantic, "template-injection"),
+    content="true",
+  )
+}
+
+///|
 test "template-injection: a static context stays the pedantic backstop" {
   let yaml =
     #|name: t
