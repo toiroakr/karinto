@@ -1469,14 +1469,18 @@ fn check_bot_conditions(
 // ---------------------------------------------------------------------------
 // Rule: excessive-permissions (zizmor)
 //
-// Mirrors upstream's pedantic-mode behaviour: emit one finding per offending
-// `permissions:` shape at the workflow level (`read-all`, `write-all`, each
-// `write` entry of an Explicit map, or the *absence* of any `permissions:`
-// block) and additionally at each job's level when the job either picks
-// `read-all` / `write-all` or inherits the default token because no
-// parent-level `permissions:` block exists. Jobs that supply their own
-// Explicit map are not flagged — zizmor explicitly punts on per-key
+// Emits one finding per offending `permissions:` shape at the workflow level
+// (`read-all`, `write-all`, each `write` entry of an Explicit map, or the
+// *absence* of any `permissions:` block) and additionally at each job's level
+// when the job either picks `read-all` / `write-all` or inherits the default
+// token because no parent-level `permissions:` block exists. Jobs that supply
+// their own Explicit map are not flagged — zizmor explicitly punts on per-key
 // over-scoping analysis there.
+//
+// Persona-split to match zizmor's per-finding gating: the blanket
+// `read-all` / `write-all` and "default permissions used" findings are
+// Regular; the per-key `<x>: write is overly broad` finding is Pedantic (zizmor
+// only flags per-key over-scope under `--pedantic`).
 // ---------------------------------------------------------------------------
 
 ///|

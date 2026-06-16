@@ -7,7 +7,10 @@
 //   - anonymous-definition → Pedantic (workflow + job, no `name:`)
 //   - template-injection   → Error (untrusted, Regular) + Info backstop (Pedantic)
 //   - secrets-outside-env  → Auditor
-//   - excessive-permissions, concurrency-limits → Regular
+//   - excessive-permissions → Regular here (the "default permissions used"
+//     finding; the per-key `write` finding is Pedantic, see
+//     persona_gating_test.mbt)
+//   - concurrency-limits   → Pedantic (hidden at regular)
 
 ///|
 fn persona_keys(content : String, persona : @karinto.Persona) -> Array[String] {
