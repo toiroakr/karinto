@@ -3306,6 +3306,23 @@ fn step_repo_prefix(s : StepInfo) -> String? {
 }
 
 ///|
+/// zizmor gates a subset of the SUPERFLUOUS_ACTIONS catalogue behind
+/// `--pedantic`; the rest fire at the regular persona. Empirically pinned
+/// against zizmor 1.25.2 (the prefixes below are the pedantic-only ones; every
+/// other catalogued action is Regular).
+fn superfluous_action_persona(prefix : String) -> Persona {
+  let pedantic_only = [
+    "dtolnay/rust-toolchain", "EndBug/add-and-commit", "peter-evans/create-or-update-comment",
+    "peter-evans/create-pull-request", "stefanzweifel/git-auto-commit-action",
+  ]
+  if array_contains_string(pedantic_only, prefix) {
+    Pedantic
+  } else {
+    Regular
+  }
+}
+
+///|
 fn superfluous_action_replacement(name : String) -> String? {
   // Mirror upstream zizmor SUPERFLUOUS_ACTIONS catalogue (v1.25.2).
   if name == "ncipollo/release-action" ||
@@ -3359,6 +3376,7 @@ fn check_superfluous_actions(
               Info,
               "step uses `\{prefix}` — \{hint}",
               s,
+              persona=superfluous_action_persona(prefix),
             )
           None => ()
         }
@@ -3384,6 +3402,7 @@ fn check_superfluous_actions_doc(
               Info,
               "step uses `\{prefix}` — \{hint}",
               s,
+              persona=superfluous_action_persona(prefix),
             )
           None => ()
         }
@@ -3443,6 +3462,77 @@ fn text_has_template_expression(t : String) -> Bool {
 }
 
 ///|
+/// Contexts that zizmor flags as a *regular*-persona template-injection even
+/// though they are not in the high-cap (Error) set above — externally
+/// influenceable values that aren't provably static. Empirically pinned
+/// against zizmor 1.25.2. Truly-static contexts (`github.run_id`, `github.sha`,
+/// `matrix.*`, `github.repository`, `github.event_name`, `runner.os`,
+/// `github.token`) are deliberately absent: they stay the pedantic backstop.
+///
+/// `env.*` is also deliberately absent: zizmor only flags it when the variable
+/// is set from a dynamic source, but karinto does not track `env:` definitions,
+/// so matching `env.` blanketly over-fires on the common statically-defined
+/// case. Leaving it on the pedantic backstop avoids that false positive.
+fn regular_context_patterns() -> Array[String] {
+  [
+    "vars.", "inputs.", ".outputs.", "github.ref", "github.actor", "github.workflow",
+  ]
+}
+
+///|
+/// Drop single-quoted string literals from a GitHub Actions expression body
+/// (the only string form the expression language has; `''` is an escaped
+/// quote). Lets the context scan ignore literal text like `${{ 'vars.FOO' }}`.
+fn strip_expr_string_literals(body : String) -> String {
+  let chars = body.to_array()
+  let n = chars.length()
+  let buf = StringBuilder::new()
+  let mut i = 0
+  let mut in_str = false
+  while i < n {
+    let c = chars[i]
+    if in_str {
+      if c == '\'' {
+        if i + 1 < n && chars[i + 1] == '\'' {
+          i = i + 2
+        } else {
+          in_str = false
+          i = i + 1
+        }
+      } else {
+        i = i + 1
+      }
+    } else if c == '\'' {
+      in_str = true
+      i = i + 1
+    } else {
+      buf.write_char(c)
+      i = i + 1
+    }
+  }
+  buf.to_string()
+}
+
+///|
+fn text_references_regular_context(t : String) -> Bool {
+  // Scan only the `${{ … }}` expression bodies, not the whole script: a bare
+  // `vars.` / `github.ref` substring in a quoted string or comment must not
+  // promote a static-only expression's backstop from Pedantic to Regular.
+  // String literals inside the body are stripped first so e.g. a literal
+  // `'vars.FOO'` is not mistaken for a context reference.
+  let patterns = regular_context_patterns()
+  for body in extract_expr_bodies(t) {
+    let scan = strip_expr_string_literals(body)
+    for p in patterns {
+      if scan.contains(p) {
+        return true
+      }
+    }
+  }
+  false
+}
+
+///|
 /// Emit the appropriate template-injection finding(s) for one piece of
 /// script-bearing text. Returns once per call site:
 ///
@@ -3469,6 +3559,15 @@ fn template_injection_emit(
       )
     None =>
       if text_has_template_expression(text) {
+        // zizmor flags interpolation of non-static, externally influenceable
+        // contexts (vars / inputs / *.outputs / github.ref* / actor / workflow)
+        // at the regular persona; truly-static contexts — and `env.*`, which we
+        // can't prove static — stay on the pedantic backstop.
+        let persona = if text_references_regular_context(text) {
+          Regular
+        } else {
+          Pedantic
+        }
         add_diag_step_field(
           out,
           ctx,
@@ -3477,7 +3576,7 @@ fn template_injection_emit(
           "code injection via template expansion in \{scope_label}",
           step,
           field,
-          persona=Pedantic,
+          persona~,
         )
       }
   }
