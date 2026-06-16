@@ -23,6 +23,8 @@
 // Optional env:
 //   R2_BUCKET             defaults to "karinto-captures"
 //   REPLAY_SUMMARY_PATH   if set, writes a markdown summary for sticky-comment
+//   REPLAY_REPORT_PATH    if set, writes JSON per-rule match attribution
+//                         (consumed by prune-diff-rules.yml)
 
 import { createHash, createHmac } from "node:crypto";
 import { readdir, writeFile } from "node:fs/promises";
@@ -240,6 +242,7 @@ async function loadRules(dir) {
     if (typeof mod.matches !== "function") continue;
     rules.push({
       id: mod.id || f.replace(/\.mjs$/, ""),
+      file: f,
       reason: mod.reason || "",
       matches: mod.matches,
     });
@@ -558,6 +561,27 @@ async function main() {
 
   if (process.env.REPLAY_SUMMARY_PATH) {
     await writeSummary(process.env.REPLAY_SUMMARY_PATH, summary);
+  }
+
+  // Machine-readable per-rule attribution for prune-diff-rules.yml. A rule with
+  // matchCount > 0 actively suppressed a real prod-vs-capture diff this run — so
+  // when the target is prod, that rule's fix has shipped and it can be removed.
+  // Written regardless of exit code so the pruner can act on the matched rules
+  // even when there are also unmatched (drift) diffs.
+  if (process.env.REPLAY_REPORT_PATH) {
+    const byRule = new Map(rules.map((r) => [r.id, 0]));
+    for (const e of summary.ignoredEntries) {
+      byRule.set(e.ruleId, (byRule.get(e.ruleId) || 0) + 1);
+    }
+    const report = {
+      target: summary.target,
+      replayed: summary.replayed,
+      matched: summary.matched,
+      ignored: summary.ignored,
+      unexpected: summary.unexpected.length,
+      rules: rules.map((r) => ({ id: r.id, file: r.file, matchCount: byRule.get(r.id) || 0 })),
+    };
+    await writeFile(process.env.REPLAY_REPORT_PATH, JSON.stringify(report, null, 2));
   }
 
   process.exit(summary.unexpected.length > 0 ? 1 : 0);

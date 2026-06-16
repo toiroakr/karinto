@@ -1,0 +1,145 @@
+name: prune-diff-rules
+
+# After a release ships a behaviour change to prod, the `scripts/diff-rules/*.mjs`
+# ignore rule that masked the resulting prod-vs-capture diff has done its job:
+# prod now serves the new behaviour while the frozen captures still carry the
+# old one, so the rule is actively suppressing a *real* diff. This job replays
+# the stored captures against prod, detects which rules are in that "fix has
+# shipped" state (matchCount > 0 in the replay report), and opens a PR removing
+# exactly those.
+#
+# Merging that PR is the human "bake this in" signal that rebaseline-captures.yml
+# keys off at the next release: it overwrites the captures with the current prod
+# responses and clears the diffs for good. The removal PR is review-gated on
+# purpose — a human decides when to bake each change in.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Prod URL to replay against"
+        type: string
+        default: "https://karinto.toiroakr.workers.dev"
+      dry_run:
+        description: "Detect and log removable rules without opening a PR"
+        type: boolean
+        default: false
+
+concurrency:
+  # Serialise with itself so two releases can't open competing PRs on the same
+  # branch. Never cancel a run mid-flight.
+  group: prune-diff-rules
+  cancel-in-progress: false
+
+# Default to no privileges; the job opts into exactly what it needs.
+permissions: {}
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # create-pull-request commits the rule deletions to a branch
+      pull-requests: write # ...and opens the PR
+    env:
+      TARGET: ${{ github.event.inputs.target || 'https://karinto.toiroakr.workers.dev' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # No `cache:` input, and this job builds/publishes nothing — it only runs
+      # replay.mjs and opens a PR — so there is no runtime cache surface to poison.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning]
+        with:
+          node-version: '22'
+
+      # Replay the stored captures against prod. The per-rule report is written
+      # to REPLAY_REPORT_PATH regardless of exit code (replay exits 1 when there
+      # are unmatched/drift diffs); we only act on cleanly-matched rules, so
+      # tolerate a non-zero exit here and let the next step read the report.
+      - name: Replay prod captures
+        id: replay
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REPLAY_REPORT_PATH: ${{ github.workspace }}/replay-report.json
+          REPLAY_LIMIT: ${{ vars.REPLAY_LIMIT || '200' }}
+        run: |
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
+            echo "::error::R2 credentials not fully set (need R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID — the last is sourced from the CLOUDFLARE_ACCOUNT_ID secret). See DEVELOPMENT.md for setup."
+            exit 1
+          fi
+          node scripts/replay.mjs --target "$TARGET" --limit "$REPLAY_LIMIT" || true
+          if [ ! -f "$REPLAY_REPORT_PATH" ]; then
+            echo "::error::replay produced no report at $REPLAY_REPORT_PATH (it likely failed before completing)."
+            exit 1
+          fi
+
+      # Select the rules whose fix has shipped (matchCount > 0), git rm them, and
+      # build the PR body. Sets removed=<count> so the PR step is skipped when
+      # nothing is removable.
+      - name: Select shipped rules
+        id: select
+        env:
+          REPORT: ${{ github.workspace }}/replay-report.json
+          BODY: ${{ github.workspace }}/pr-body.md
+        run: |
+          set -euo pipefail
+          REMOVED=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
+          echo "removed=$REMOVED" >> "$GITHUB_OUTPUT"
+          if [ "$REMOVED" -eq 0 ]; then
+            echo "No diff-rules are in the shipped state; nothing to prune."
+            exit 0
+          fi
+
+          jq -r '.rules[] | select(.matchCount > 0) | "scripts/diff-rules/\(.file)"' "$REPORT" \
+            | while IFS= read -r f; do
+                echo "removing $f"
+                git rm --quiet "$f"
+              done
+
+          UNEXPECTED=$(jq '.unexpected' "$REPORT")
+          {
+            echo "## Automated diff-rule pruning"
+            echo
+            echo "\`prune-diff-rules.yml\` replayed the stored prod captures against prod and"
+            echo "found the rules below are in the \"fix has shipped\" state: prod now serves"
+            echo "the new behaviour while the frozen captures still carry the old one, so each"
+            echo "rule is actively suppressing a real prod-vs-capture diff. They have done their"
+            echo "job and can be removed."
+            echo
+            echo "Removed:"
+            jq -r '.rules[] | select(.matchCount > 0) | "- `scripts/diff-rules/\(.file)` (id `\(.id)`) — suppressing \(.matchCount) capture diff(s)"' "$REPORT"
+            echo
+            echo "After this merges, the next \`release: published\` triggers"
+            echo "\`rebaseline-captures.yml\`, which overwrites the stored captures with the"
+            echo "current prod responses and clears the diffs for good."
+            echo
+            echo "> The dark-launch \`replay\` check is *expected* to go red for these captures"
+            echo "> until that rebaseline runs — they still carry the pre-fix findings the rule"
+            echo "> was suppressing. That red is the signal the rule was still doing real work,"
+            echo "> not a regression."
+            if [ "$UNEXPECTED" -gt 0 ]; then
+              echo
+              echo "> ⚠️ The detection replay also saw $UNEXPECTED unmatched diff(s) against prod"
+              echo "> that no rule explains. Those are unrelated drift — investigate separately;"
+              echo "> they do not affect the removals above."
+            fi
+          } > "$BODY"
+
+      - name: Open PR removing shipped rules
+        if: ${{ steps.select.outputs.removed != '0' && env.DRY_RUN != 'true' }}
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+        with:
+          add-paths: scripts/diff-rules
+          branch: chore/prune-diff-rules
+          base: main
+          title: 'chore: prune shipped diff-rules'
+          commit-message: 'chore: prune shipped diff-rules'
+          labels: skip-changeset
+          body-path: ${{ github.workspace }}/pr-body.md
