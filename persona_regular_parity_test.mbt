@@ -1,17 +1,19 @@
 // More persona-gating regressions found validating karinto against real
 // zizmor-using OSS (golangci-lint, LibCST, nautilus_trader). Empirical zizmor
 // 1.25.2 gating (oracle):
-//   - superfluous-actions  → pedantic only
-//   - template-injection   → Regular for vars.* / env.* / inputs.* /
-//     *.outputs.* / github.ref* / github.actor / github.workflow (not just the
-//     high-cap event contexts); only truly-static contexts (run_id, sha,
-//     matrix, repository, event_name, runner.os, token) are the pedantic
-//     backstop.
+//   - superfluous-actions  → per-action: most fire at regular, a subset
+//     (create-pull-request, rust-toolchain, add-and-commit, git-auto-commit,
+//     create-or-update-comment) is pedantic-only.
+//   - template-injection   → Regular for vars.* / inputs.* / *.outputs.* /
+//     github.ref* / github.actor / github.workflow (not just the high-cap
+//     event contexts). Truly-static contexts (run_id, sha, matrix, repository,
+//     event_name, runner.os, token) AND env.* (can't prove static) are the
+//     pedantic backstop.
 //
 // Reuses `fires(content, persona, rule)` from persona_gating_test.mbt.
 
 ///|
-test "superfluous-actions is pedantic, not regular" {
+test "superfluous-actions: create-pull-request is pedantic-only" {
   let yaml =
     #|name: t
     #|on: push

@@ -3517,9 +3517,9 @@ fn template_injection_emit(
     None =>
       if text_has_template_expression(text) {
         // zizmor flags interpolation of non-static, externally influenceable
-        // contexts (vars / env / inputs / *.outputs / github.ref* / actor /
-        // workflow) at the regular persona; only truly-static contexts are the
-        // pedantic backstop.
+        // contexts (vars / inputs / *.outputs / github.ref* / actor / workflow)
+        // at the regular persona; truly-static contexts — and `env.*`, which we
+        // can't prove static — stay on the pedantic backstop.
         let persona = if text_references_regular_context(text) {
           Regular
         } else {
