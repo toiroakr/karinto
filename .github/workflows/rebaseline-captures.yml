@@ -1,0 +1,141 @@
+name: rebaseline-captures
+
+# Bake-in step of the dark-launch replay system. Captures are create-only and
+# freeze the prod response of each first-seen request, which is what makes
+# replay a stable regression baseline — but after a release ships an intended
+# behaviour change, every frozen capture keeps the OLD response, so PR replays
+# diff against already-shipped behaviour until the capture ages out (~30 days).
+# The interim cost is a self-expiring `scripts/diff-rules/*.mjs` ignore rule.
+#
+# Re-baselining the whole bucket is exactly what replay exists to guard
+# against, so it must only happen when a human has signalled that the shipped
+# change is intentional. The signal is the DELETION of the matching
+# expected-diff ignore rule (`scripts/diff-rules/*.mjs`) in the release range:
+# removing the opt-out is the explicit "bake this in" gesture. Absent that
+# signal the job is a no-op, so an ordinary release never silently rewrites the
+# baseline. `workflow_dispatch` with `force: true` bypasses the gate for manual
+# recovery.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebaseline even without a removed diff-rule signal"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Report what would change without writing to R2"
+        type: boolean
+        default: false
+      target:
+        description: "Prod URL to replay against"
+        type: string
+        default: "https://karinto.toiroakr.workers.dev"
+
+concurrency:
+  # Serialise with itself: overlapping runs would race on R2 writes. Never
+  # cancel a run mid-flight — a half-written rebaseline is worse than a delay.
+  group: rebaseline-captures
+  cancel-in-progress: false
+
+# Default to no privileges; the job opts into exactly what it needs.
+permissions: {}
+
+jobs:
+  rebaseline:
+    runs-on: ubuntu-latest
+    # A signal run rewrites the WHOLE bucket sequentially; a timeout mid-flight
+    # leaves the baseline partially rewritten (the very thing this workflow
+    # exists to avoid). 60 min is a deliberate explicit budget: comfortably
+    # above a realistic full-bucket pass, while still failing fast instead of
+    # hanging up to GitHub's 6h default if prod or R2 stalls.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ github.event.inputs.target || 'https://karinto.toiroakr.workers.dev' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+    steps:
+      # fetch-depth: 0 brings every tag so the signal step can diff across the
+      # release range. persist-credentials: false — the job only reads the repo
+      # and talks to prod / R2 over their own credentials.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Signal gate: a `scripts/diff-rules/*.mjs` file was REMOVED between the
+      # previous canonical tag and this release. That deletion is the human
+      # "bake this in" signal. workflow_dispatch with force=true skips the gate.
+      - name: Detect rebaseline signal
+        id: signal
+        env:
+          # Pass GitHub-context values through env (never interpolate them into
+          # the shell directly) to avoid script injection — see the workflow
+          # injection guidance. tag_name / force come from our own release flow
+          # and dispatchers with write access, but defence in depth is cheap.
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE: ${{ github.event.inputs.force }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE" = "true" ]; then
+            echo "Manual force dispatch — bypassing the diff-rule signal gate."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT_TAG="$RELEASE_TAG"
+          if [ -z "$CURRENT_TAG" ]; then
+            CURRENT_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          fi
+          # Previous canonical (dotted) tag; dashed pointer tags (v0-8-4) are
+          # excluded by the glob so they don't break the ordering.
+          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V \
+            | awk -v cur="$CURRENT_TAG" '$0==cur{print prev; exit} {prev=$0}')
+          echo "current tag: ${CURRENT_TAG:-<none>}"
+          echo "previous tag: ${PREV_TAG:-<none>}"
+
+          if [ -z "$PREV_TAG" ] || [ -z "$CURRENT_TAG" ]; then
+            echo "No tag range to diff; nothing to bake in."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REMOVED=$(git diff --diff-filter=D --name-only "$PREV_TAG".."$CURRENT_TAG" -- scripts/diff-rules/ \
+            | grep -E '\.mjs$' || true)
+          if [ -n "$REMOVED" ]; then
+            echo "Removed diff-rule(s) in ${PREV_TAG}..${CURRENT_TAG}:"
+            echo "$REMOVED"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No diff-rule removed in ${PREV_TAG}..${CURRENT_TAG}; skipping rebaseline."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No `cache:` input, so setup-node restores and writes no cache; the job
+      # builds nothing and only runs a node script against prod / R2. There is
+      # no runtime-artifact cache surface for a privileged-trigger run to
+      # poison, so zizmor's default setup-node caching heuristic is a non-issue.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning]
+        if: steps.signal.outputs.run == 'true'
+        with:
+          node-version: '22'
+
+      - name: Rebaseline captures
+        if: steps.signal.outputs.run == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # All three R2 credentials are required by the script — fail the run
+          # loudly if any is missing rather than silently skipping the bake-in.
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
+            echo "R2 credentials not fully set; cannot rebaseline." >&2
+            exit 1
+          fi
+          DRY_FLAG=""
+          if [ "${DRY_RUN:-}" = "true" ]; then DRY_FLAG="--dry-run"; fi
+          node scripts/rebaseline-captures.mjs --target "$TARGET" $DRY_FLAG
