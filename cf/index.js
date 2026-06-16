@@ -1461,6 +1461,9 @@ function normalizeRequest(params) {
   // them too. They are opaque text (not CSV), captured verbatim.
   if (params.ghalint) out.ghalint = params.ghalint;
   if (params.path) out.path = params.path;
+  // `persona` gates which findings survive, so it too is part of the verdict
+  // and must be captured (single token, verbatim).
+  if (params.persona) out.persona = params.persona;
   return out;
 }
 
