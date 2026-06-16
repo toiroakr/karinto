@@ -214,10 +214,20 @@ async function fetchCaptures(env, limit) {
     if (page === MAX_LIST_PAGES - 1) truncated = true;
   }
   if (truncated) {
-    const cap = Number.isFinite(limit) ? `the most recently modified ${limit}` : "all";
+    if (!Number.isFinite(limit)) {
+      // Default (whole-bucket) run, but the listing was cut off — we can no
+      // longer guarantee a complete rebaseline. Fail hard rather than silently
+      // leave the baseline in a mixed state. An operator who deliberately wants
+      // a bounded pass can pass `--limit N` to acknowledge a partial run.
+      throw new Error(
+        `captures/ list truncated at ${MAX_LIST_PAGES} pages (${all.length} objects) ` +
+          `during a full rebaseline; refusing to rewrite a partial bucket. ` +
+          `Re-run with an explicit --limit N for a bounded partial pass.`,
+      );
+    }
     console.warn(
       `captures/ list truncated at ${MAX_LIST_PAGES} pages (${all.length} objects); ` +
-        `rebaselining ${cap} from the listed subset.`,
+        `rebaselining the most recently modified ${limit} from the listed subset.`,
     );
   }
 
