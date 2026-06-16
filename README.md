@@ -102,14 +102,18 @@ finding. Pass `persona=regular` to match what a stock `zizmor` invocation
 Findings that are **not** `regular` (hidden unless you opt up):
 
 - **Pedantic** — `anonymous-definition`, `self-hosted-runner`,
-  `undocumented-permissions`, and the `template-injection` *Info backstop*
-  (the per-`${{ … }}` finding; the high-cap `Error` stays `regular`).
+  `undocumented-permissions`, `concurrency-limits`, the `template-injection`
+  *Info backstop* (the per-`${{ … }}` finding; the high-cap `Error` stays
+  `regular`), and the `excessive-permissions` *per-key* finding
+  (`<x>: write is overly broad`).
 - **Auditor** — `secrets-outside-env`, and `misfeature`'s
   `defaults.run.shell: cmd` finding.
 
-Everything else (including `excessive-permissions` and `concurrency-limits`)
-fires under `regular`. The mapping follows each upstream audit's documented
-persona gating.
+Everything else fires under `regular`. Note `excessive-permissions` is
+**split**: its blanket `write-all`/`read-all` and "default permissions used"
+findings are `regular` (real, default-persona zizmor findings), while the
+per-key over-scope finding is `pedantic`. The mapping is pinned against
+`zizmor`'s actual per-persona behaviour (see `persona_gating_test.mbt`).
 
 ### Ignoring findings
 
