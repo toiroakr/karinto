@@ -51,3 +51,23 @@ test "glob_match wildcard before literal `*` in input" {
   inspect(glob_match("*", "*"), content="true")
   inspect(glob_match("*x", "**x"), content="true")
 }
+
+///|
+test "parse_inline_ignores requires a `#` comment marker" {
+  // Inside a real `# <tool>: ignore[...]` comment → recorded for that line.
+  let with_hash =
+    #|      - uses: a/b@v1 # zizmor: ignore[unpinned-uses]
+  let m1 = parse_inline_ignores(with_hash)
+  assert_true(m1.get(1) is Some(["unpinned-uses"]))
+  // The same text as a quoted YAML value (no `#`) must NOT be treated as a
+  // directive — otherwise keys/values could silently suppress findings.
+  let no_hash =
+    #|      - run: echo "zizmor: ignore[unpinned-uses]"
+  let m2 = parse_inline_ignores(no_hash)
+  assert_true(m2.get(1) is None)
+  // A `#` further left on the line (content before the comment) still works.
+  let trailing =
+    #|    env: { X: 1 } # karinto: ignore[a, b]
+  let m3 = parse_inline_ignores(trailing)
+  assert_true(m3.get(1) is Some(["a", "b"]))
+}

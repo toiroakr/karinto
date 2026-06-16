@@ -311,6 +311,13 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
       let needle = tool + ": ignore["
       match index_of(s, needle) {
         Some(i) => {
+          // Only honour the directive when it sits inside a `#` comment, i.e.
+          // the text before it is `#` followed by optional whitespace. This
+          // keeps YAML keys/values that merely contain `<tool>: ignore[...]`
+          // (e.g. a quoted string) from suppressing findings — the documented
+          // form is `# <tool>: ignore[...]`.
+          let prefix = trim_ws(s[0:i].to_owned())
+          guard ends_with(prefix, "#") else { continue }
           let after = s[i + needle.length():].to_owned()
           // Stop at the closing bracket; anything after `]` (e.g. a trailing
           // `# zizmor: ignore[rule] explanation`) is a free-form note.
