@@ -4936,86 +4936,61 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     if !s.contains("${{") {
       return
     }
-    let chars = s.to_array()
-    let n = chars.length()
-    let mut i = 0
-    while i + 2 < n {
-      if chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == '{' {
-        i = i + 3
-        let mut prev_dot = false
-        while i + 1 < n && !(chars[i] == '}' && chars[i + 1] == '}') {
-          let c = chars[i]
-          if c == '\'' {
-            // String literal: skip to the closing quote so dotted contents like
-            // `'replay-summary.md'` are not misread as `<head>.<member>` context
-            // access. GitHub expression syntax escapes a literal quote by
-            // doubling it (`''`), so a doubled quote stays inside the string.
-            i = i + 1
-            while i < n {
-              if chars[i] == '\'' {
-                if i + 1 < n && chars[i + 1] == '\'' {
-                  i = i + 2
-                } else {
-                  i = i + 1
-                  break
-                }
-              } else {
-                i = i + 1
-              }
-            }
-            prev_dot = false
-          } else if c == '.' {
-            prev_dot = true
-            i = i + 1
-          } else if c == ' ' || c == '\t' || c == '\n' {
-            i = i + 1
-          } else if is_ident_start(c) {
-            let start = i
-            // `is_id_cont` (not `is_ident_cont`) so hyphenated property names
-            // like `needs.my-cross-platform` are scanned as one identifier,
-            // matching the expression lexer in `expr.mbt`. Splitting on `-`
-            // would misread the trailing segment (`platform`) as a context.
-            while i < n && is_id_cont(chars[i]) {
-              i = i + 1
-            }
-            if !prev_dot {
-              let buf = StringBuilder::new()
-              let mut k = start
-              while k < i {
-                buf.write_char(chars[k])
-                k = k + 1
-              }
-              let ident = buf.to_string()
-              let mut j = i
-              while j < n && chars[j] == ' ' {
-                j = j + 1
-              }
-              if j < n && chars[j] == '.' {
-                if !array_contains_string(contexts, ident) &&
-                  !seen.contains(ident) {
-                  seen[ident] = true
-                  let msg = match suggest(ident, contexts) {
-                    Some(c2) =>
-                      "unknown context `\{ident}` (did you mean `\{c2}`?)"
-                    None => "unknown context `\{ident}`"
-                  }
-                  add_diag(out, "unknown-context-or-function", Error, msg)
-                }
-              }
-            }
-            prev_dot = false
-          } else {
-            prev_dot = false
+    for body in extract_expr_bodies(s) {
+      // Strip single-quoted string literals before scanning so dotted contents
+      // like `'replay-summary.md'` are not misread as `<head>.<member>` context
+      // access. Shares the expr-body extraction and literal handling with the
+      // regular-context scan (`text_references_regular_context`).
+      let chars = strip_expr_string_literals(body).to_array()
+      let n = chars.length()
+      let mut i = 0
+      let mut prev_dot = false
+      while i < n {
+        let c = chars[i]
+        if c == '.' {
+          prev_dot = true
+          i = i + 1
+        } else if c == ' ' || c == '\t' || c == '\n' {
+          i = i + 1
+        } else if is_ident_start(c) {
+          let start = i
+          // `is_id_cont` (not `is_ident_cont`) so hyphenated property names
+          // like `needs.my-cross-platform` are scanned as one identifier,
+          // matching the expression lexer in `expr.mbt`. Splitting on `-`
+          // would misread the trailing segment (`platform`) as a context.
+          while i < n && is_id_cont(chars[i]) {
             i = i + 1
           }
-        }
-        if i + 1 < n {
-          i = i + 2
+          if !prev_dot {
+            let buf = StringBuilder::new()
+            let mut k = start
+            while k < i {
+              buf.write_char(chars[k])
+              k = k + 1
+            }
+            let ident = buf.to_string()
+            let mut j = i
+            while j < n && chars[j] == ' ' {
+              j = j + 1
+            }
+            if j < n && chars[j] == '.' {
+              if !array_contains_string(contexts, ident) &&
+                !seen.contains(ident) {
+                seen[ident] = true
+                let msg = match suggest(ident, contexts) {
+                  Some(c2) =>
+                    "unknown context `\{ident}` (did you mean `\{c2}`?)"
+                  None => "unknown context `\{ident}`"
+                }
+                add_diag(out, "unknown-context-or-function", Error, msg)
+              }
+            }
+          }
+          prev_dot = false
         } else {
-          i = n
+          prev_dot = false
+          i = i + 1
         }
-      } else {
-        i = i + 1
       }
     }
   })
