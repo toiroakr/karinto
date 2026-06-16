@@ -1,6 +1,6 @@
 {
   "name": "karinto",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "private": true,
   "description": "Tooling host for karinto release automation (changesets). The runtime lives under cf/ and the MoonBit library at the repo root.",
   "repository": {

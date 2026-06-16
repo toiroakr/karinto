@@ -1,5 +1,35 @@
 # karinto
 
+## 0.8.4
+
+### Patch Changes
+
+- [#51](https://github.com/toiroakr/karinto/pull/51) [`733a800`](https://github.com/toiroakr/karinto/commit/733a80021aa1d28b8a6d0f05b9354cc1098018ea) Thanks [@toiroakr](https://github.com/toiroakr)! - Honour author-written opt-outs from the upstream tools karinto consolidates:
+
+  - **Inline ignore comments** — `# karinto: ignore[rule-id]` and
+    `# zizmor: ignore[rule-id]` suppress findings on the same line (line-scoped),
+    supporting comma-separated rule lists and a trailing free-form note. Mirrors
+    zizmor's inline-ignore syntax. actionlint and ghalint have no inline form, so
+    only the `karinto` and `zizmor` prefixes are recognised.
+  - **ghalint config** — a `ghalint.yaml` `excludes:` list is honoured. Each
+    entry's `policy_name` maps onto the karinto rule(s) that absorbed it (via the
+    catalogue `origins`), with the `workflow_file_path` / `job_name` /
+    `action_name` / `step_id` scope fields applied. Available through the CLI's
+    `--ghalint-config` flag and the Worker's `ghalint` HTTP parameter (with
+    `path` / per-file paths resolving the `workflow_file_path` scope).
+
+  actionlint config support is intentionally deferred (tracked in #50): it ignores
+  by regex against actionlint's own error messages, which do not map onto
+  karinto's findings.
+
+- [#55](https://github.com/toiroakr/karinto/pull/55) [`82ad616`](https://github.com/toiroakr/karinto/commit/82ad6162d2c5cd4f72ab55fafbb3d619de79366c) Thanks [@toiroakr](https://github.com/toiroakr)! - Fix `unknown-context-or-function` false positive on single-quoted string
+  literals containing dots. The scanner walked expression bodies char by char
+  without skipping string literals, so a dotted literal like
+  `hashFiles('replay-summary.md')` or a bare `'a.b'` was misread as
+  `<head>.<member>` context access and reported the head as an unknown context.
+  Single-quoted literals are now skipped during the scan, matching the GitHub
+  Actions expression language.
+
 ## 0.8.3
 
 ### Patch Changes
