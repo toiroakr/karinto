@@ -45,7 +45,10 @@ import { appendFile, writeFile } from "node:fs/promises";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
-const DEFAULT_LIMIT = 1000;
+// No cap by default: a release rebaseline must refresh the WHOLE bucket so no
+// capture is left carrying the pre-release response. `--limit N` is only for
+// emergency partial runs. MAX_LIST_PAGES still bounds a runaway listing.
+const DEFAULT_LIMIT = Infinity;
 const FETCH_TIMEOUT_MS = 30000;
 // 1000 objects/page; the bucket is capped at ~7 GiB by cf/maintenance.js, so
 // this bounds a runaway bucket from listing forever (mirrors replay.mjs).
@@ -211,14 +214,17 @@ async function fetchCaptures(env, limit) {
     if (page === MAX_LIST_PAGES - 1) truncated = true;
   }
   if (truncated) {
+    const cap = Number.isFinite(limit) ? `the most recently modified ${limit}` : "all";
     console.warn(
       `captures/ list truncated at ${MAX_LIST_PAGES} pages (${all.length} objects); ` +
-        `rebaselining the most recently first-seen ${limit} from the listed subset.`,
+        `rebaselining ${cap} from the listed subset.`,
     );
   }
 
-  // Most recently first-seen first, then cap — same ordering as replay.mjs so
-  // a `--limit` rebaseline covers the same freshest surface area replay does.
+  // Most recently modified first, then cap. Selection is on the R2 object's
+  // LastModified (not first_seen) — same ordering as replay.mjs, so a `--limit`
+  // run covers the same freshest surface area replay does. (Default is no cap,
+  // so ordering only matters for partial `--limit` runs.)
   all.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
   const slice = all.slice(0, limit);
 
@@ -475,8 +481,11 @@ async function main() {
 
     if (!args.dryRun) {
       // Plain put (no `onlyIf`): the whole point is to overwrite the frozen
-      // response. Preserve `first_seen` (the dedup/age anchor used by replay's
-      // ordering and the diff-rule cutoffs) and stamp `rebaselined_at`.
+      // response. Preserve `first_seen` — the timestamp diff-rule cutoffs
+      // compare against (e.g. FIX_CUTOFF) and the original-capture record — and
+      // stamp `rebaselined_at`. Note replay.mjs orders by the R2 object's
+      // LastModified, which this overwrite necessarily bumps; first_seen does
+      // not drive that ordering.
       const payload = JSON.stringify({
         request: cap.request,
         response: replayed,
