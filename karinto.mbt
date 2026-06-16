@@ -231,16 +231,16 @@ pub fn lint(
   }
   // Single parse pass: the value tree (for rules), the position node tree, and
   // the line counter all come from one lex+parse of `content`.
-  let parsed = try? @yaml.parse_for_lint(content)
-  match parsed {
-    Err(e) =>
+  try @yaml.parse_for_lint(content) catch {
+    e =>
       LintResult::{
         kind,
         stats: Stats::{ jobs: 0, steps: 0, lines },
         diagnostics: [],
         parse_error: Some(e.message()),
       }
-    Ok(lp) => {
+  } noraise {
+    lp => {
       let doc = if lp.documents.length() > 0 {
         lp.documents[0]
       } else {

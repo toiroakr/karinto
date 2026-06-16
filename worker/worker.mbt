@@ -222,25 +222,24 @@ pub fn osv_match(uses_csv : String, advisories_json : String) -> String {
   if refs.length() == 0 || advisories_json == "" {
     return ""
   }
-  let parsed = try? @json.parse(advisories_json)
-  let advisories : Map[String, Array[VersionRange]] = match parsed {
-    Ok(j) =>
-      match j.as_object() {
-        Some(m) => parse_advisories_map(m)
-        None => Map::new()
-      }
-    Err(_) => Map::new()
+  let advisories : Map[String, Array[VersionRange]] = try {
+    match @json.parse(advisories_json) {
+      Object(m) => parse_advisories_map(m)
+      _ => {}
+    }
+  } catch {
+    _ => {}
   }
   let out = StringBuilder::new()
-  let seen : Map[String, Bool] = Map::new()
+  let seen : Map[String, Bool] = {}
   let mut first = true
   for r in refs {
     let at = last_at(r)
     if at < 0 {
       continue
     }
-    let name_full = r.substring(start=0, end=at)
-    let version = r.substring(start=at + 1)
+    let name_full = r[0:at].to_owned()
+    let version = r[at + 1:].to_owned()
     let name = action_root(name_full)
     match advisories.get(name) {
       Some(ranges) => {
@@ -267,7 +266,7 @@ pub fn osv_match(uses_csv : String, advisories_json : String) -> String {
 }
 
 ///|
-struct VersionRange {
+priv struct VersionRange {
   introduced : Array[Int]?
   fixed : Array[Int]?
   last_affected : Array[Int]?
@@ -277,28 +276,24 @@ struct VersionRange {
 fn parse_advisories_map(
   m : Map[String, Json],
 ) -> Map[String, Array[VersionRange]] {
-  let out : Map[String, Array[VersionRange]] = Map::new()
+  let out : Map[String, Array[VersionRange]] = {}
   m.each(fn(name, ranges_json) {
-    match ranges_json.as_array() {
-      Some(arr) => {
+    match ranges_json {
+      Array(arr) => {
         let ranges : Array[VersionRange] = []
         for entry in arr {
-          match entry.as_object() {
-            Some(em) => {
+          match entry {
+            Object(em) => {
               let events = match em.get("events") {
-                Some(e) =>
-                  match e.as_array() {
-                    Some(a) => a
-                    None => []
-                  }
-                None => []
+                Some(Array(a)) => a
+                _ => []
               }
               let mut intro : Array[Int]? = None
               let mut fixed : Array[Int]? = None
               let mut last : Array[Int]? = None
               for ev in events {
-                match ev.as_object() {
-                  Some(evm) => {
+                match ev {
+                  Object(evm) => {
                     match read_ver_field(evm, "introduced") {
                       Some(v) => intro = Some(v)
                       None => ()
@@ -312,7 +307,7 @@ fn parse_advisories_map(
                       None => ()
                     }
                   }
-                  None => ()
+                  _ => ()
                 }
               }
               ranges.push(VersionRange::{
@@ -321,12 +316,12 @@ fn parse_advisories_map(
                 last_affected: last,
               })
             }
-            None => ()
+            _ => ()
           }
         }
         out[name] = ranges
       }
-      None => ()
+      _ => ()
     }
   })
   out
@@ -335,12 +330,8 @@ fn parse_advisories_map(
 ///|
 fn read_ver_field(m : Map[String, Json], key : String) -> Array[Int]? {
   match m.get(key) {
-    Some(j) =>
-      match j.as_string() {
-        Some(s) => normalize_ver(s)
-        None => None
-      }
-    None => None
+    Some(String(s)) => normalize_ver(s)
+    _ => None
   }
 }
 
@@ -352,7 +343,7 @@ pub fn normalize_ver(s : String) -> Array[Int]? {
     return None
   }
   let body = if s.has_prefix("v") || s.has_prefix("V") {
-    s.substring(start=1)
+    s[1:].to_owned()
   } else {
     s
   }
@@ -463,7 +454,7 @@ fn action_root(name : String) -> String {
     if chars[i] == '/' {
       slashes = slashes + 1
       if slashes == 2 {
-        return name.substring(start=0, end=i)
+        return name[0:i].to_owned()
       }
     }
     i = i + 1
