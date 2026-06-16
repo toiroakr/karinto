@@ -41,8 +41,7 @@ fn ghalint_yaml_str(m : Map[String, @yaml.Yaml], key : String) -> String? {
 /// crashes a lint). Entries without a `policy_name` are skipped.
 fn parse_ghalint_excludes(config : String) -> Array[GhalintExclude] {
   let out : Array[GhalintExclude] = []
-  let parsed = try? @yaml.Yaml::load_from_string(config)
-  guard parsed is Ok(docs) else { return out }
+  let docs = @yaml.Yaml::load_from_string(config) catch { _ => return out }
   for d in docs {
     guard d is Map(top) else { continue }
     guard top.get("excludes") is Some(Array(items)) else { continue }

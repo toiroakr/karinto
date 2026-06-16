@@ -4,6 +4,18 @@
 // of yamlpos's API) and was removed.
 
 ///|
+/// karinto: assert that loading `source` raises a parse error. Replaces the
+/// deprecated `(try? Yaml::load_from_string(source)) is Err(_)` idiom by
+/// handling the raising call directly.
+fn assert_parse_error(source : String) -> Unit raise {
+  try Yaml::load_from_string(source) catch {
+    _ => ()
+  } noraise {
+    _ => fail("expected a parse error")
+  }
+}
+
+///|
 test "empty doc" {
   let source = "---"
   let docs = Yaml::load_from_string(source)
@@ -148,12 +160,12 @@ test "bad anchor" {
 test "should throw error" {
   // bad hyphen
   let source = "{-"
-  assert_true((try? Yaml::load_from_string(source)) is Err(_))
+  assert_parse_error(source)
 
   // invalid trailing content after a double quoted string
   let source =
     #|"foo" l"
-  assert_true((try? Yaml::load_from_string(source)) is Err(_))
+  assert_parse_error(source)
 }
 
 ///|
@@ -373,7 +385,7 @@ test "recursion depth check objects" {
     buf.write_string("}")
   }
   let source = buf.to_string()
-  assert_true((try? Yaml::load_from_string(source)) is Err(_))
+  assert_parse_error(source)
 }
 
 ///|
@@ -386,7 +398,7 @@ test "recursion depth check arrays" {
     buf.write_char(']')
   }
   let source = buf.to_string()
-  assert_true((try? Yaml::load_from_string(source)) is Err(_))
+  assert_parse_error(source)
 }
 
 ///|
@@ -394,7 +406,7 @@ test "mapping duplicates" {
   let source =
     #|a: foo
     #|a: bar
-  assert_true((try? Yaml::load_from_string(source)) is Err(_))
+  assert_parse_error(source)
 }
 
 ///|
@@ -879,8 +891,8 @@ test "double-quoted escaped line break consumes continuation indent" {
 /// karinto addition: an unterminated flow collection is a parse error even
 /// when it contains no entries.
 test "unterminated empty flow collections are errors" {
-  assert_true((try? Yaml::load_from_string("[")) is Err(_))
-  assert_true((try? Yaml::load_from_string("{")) is Err(_))
-  assert_true((try? Yaml::load_from_string("k: [")) is Err(_))
-  assert_true((try? Yaml::load_from_string("k: {")) is Err(_))
+  assert_parse_error("[")
+  assert_parse_error("{")
+  assert_parse_error("k: [")
+  assert_parse_error("k: {")
 }
