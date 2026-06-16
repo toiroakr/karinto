@@ -1,5 +1,21 @@
 # karinto
 
+## 0.8.5
+
+### Patch Changes
+
+- [#58](https://github.com/toiroakr/karinto/pull/58) [`ae00986`](https://github.com/toiroakr/karinto/commit/ae009866c281215a3c97cc2ab39d6729cf59bcbe) Thanks [@toiroakr](https://github.com/toiroakr)! - Honour inline `# zizmor: ignore[...]` / `# karinto: ignore[...]` comments for
+  workflow-scoped findings that carry no source position (e.g.
+  `cache-poisoning`). When inline ignores became line-scoped, such findings —
+  emitted once per workflow without a step/job anchor, so `fill_positions`
+  leaves them position-less — could no longer be suppressed by an inline
+  comment, because the line-scoped match guarded on a resolved position. The
+  opt-out was silently dropped even when the author placed the comment exactly
+  where the upstream tool (zizmor) attributes the finding. Position-less
+  findings now fall back to a file-wide match: any inline ignore in the file
+  that names the rule suppresses it. Positioned findings remain strictly
+  line-scoped.
+
 ## 0.8.4
 
 ### Patch Changes
