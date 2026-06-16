@@ -3481,9 +3481,14 @@ fn regular_context_patterns() -> Array[String] {
 
 ///|
 fn text_references_regular_context(t : String) -> Bool {
-  for p in regular_context_patterns() {
-    if t.contains(p) {
-      return true
+  // Scan only the `${{ … }}` expression bodies, not the whole script: a bare
+  // `vars.` / `github.ref` substring in a quoted string or comment must not
+  // promote a static-only expression's backstop from Pedantic to Regular.
+  for body in extract_expr_bodies(t) {
+    for p in regular_context_patterns() {
+      if body.contains(p) {
+        return true
+      }
     }
   }
   false

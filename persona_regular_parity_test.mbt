@@ -101,6 +101,33 @@ test "template-injection: vars.* in run is a regular finding" {
 }
 
 ///|
+test "template-injection: a regular-tier substring outside an expression does not promote" {
+  // `vars.` appears only in a literal string; the sole expression is static
+  // (`github.run_id`), so the finding must stay on the pedantic backstop.
+  let yaml =
+    #|name: t
+    #|on: push
+    #|jobs:
+    #|  b:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: |
+    #|          echo "see vars.md for the list"
+    #|          echo "${{ github.run_id }}"
+  inspect(
+    fires(yaml, @karinto.Persona::Regular, "template-injection"),
+    content="false",
+  )
+  inspect(
+    fires(yaml, @karinto.Persona::Pedantic, "template-injection"),
+    content="true",
+  )
+}
+
+///|
 test "template-injection: a static context stays the pedantic backstop" {
   let yaml =
     #|name: t
