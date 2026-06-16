@@ -1,5 +1,21 @@
 # karinto
 
+## 0.8.3
+
+### Patch Changes
+
+- [#52](https://github.com/toiroakr/karinto/pull/52) [`1a0709d`](https://github.com/toiroakr/karinto/commit/1a0709dd49df59eca38f7ec10d60d2f539f62fac) Thanks [@toiroakr](https://github.com/toiroakr)! - Align `superfluous-actions` and `template-injection` persona gating with real
+  zizmor, found by validating karinto against zizmor-using OSS workflows:
+
+  - `superfluous-actions` now uses a per-action persona map (zizmor gates a subset
+    — e.g. `peter-evans/create-pull-request`, `dtolnay/rust-toolchain` — behind
+    `--pedantic`; the rest fire at the default persona).
+  - `template-injection` now flags non-static influenceable contexts (`vars.*`,
+    `inputs.*`, `*.outputs.*`, `github.ref*`, `github.actor`, `github.workflow`)
+    at the regular persona instead of hiding them on the pedantic backstop.
+    `env.*` stays on the backstop because karinto cannot tell a statically-defined
+    env var from a dynamic one.
+
 ## 0.8.2
 
 ### Patch Changes
