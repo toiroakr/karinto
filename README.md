@@ -102,17 +102,26 @@ Findings that are **not** `regular` (hidden unless you opt up):
 
 - **Pedantic** — `anonymous-definition`, `self-hosted-runner`,
   `undocumented-permissions`, `concurrency-limits`, the `template-injection`
-  *Info backstop* (the per-`${{ … }}` finding; the high-cap `Error` stays
-  `regular`), and the `excessive-permissions` *per-key* finding
-  (`<x>: write is overly broad`).
+  *Info backstop* (the per-`${{ … }}` finding; see the split below), the
+  `excessive-permissions` *per-key* finding (`<x>: write is overly broad`), and
+  the pedantic-only subset of `superfluous-actions`.
 - **Auditor** — `secrets-outside-env`, and `misfeature`'s
   `defaults.run.shell: cmd` finding.
 
-Everything else fires under `regular`. Note `excessive-permissions` is
-**split**: its blanket `write-all`/`read-all` and "default permissions used"
-findings are `regular` (real, default-persona zizmor findings), while the
-per-key over-scope finding is `pedantic`. The mapping is pinned against
-`zizmor`'s actual per-persona behaviour (see `persona_gating_test.mbt`).
+Everything else fires under `regular`. Several rules are **persona-split** per
+finding, pinned against `zizmor`'s actual per-persona behaviour (see
+`persona_gating_test.mbt` / `persona_regular_parity_test.mbt`):
+
+- `excessive-permissions` — blanket `write-all`/`read-all` and "default
+  permissions used" are `regular`; the per-key over-scope finding is `pedantic`.
+- `template-injection` — the high-cap event contexts are `regular` (`Error`);
+  non-static influenceable contexts (`vars.*`, `inputs.*`, `*.outputs.*`,
+  `github.ref*`, `github.actor`, `github.workflow`) are `regular` (`Info`);
+  truly-static contexts (`github.run_id`, `github.sha`, `matrix.*`, …) and
+  `env.*` (karinto can't tell static from dynamic) are the `pedantic` backstop.
+- `superfluous-actions` — `regular` for most of the catalogue; `pedantic` for
+  the subset `zizmor` gates there (e.g. `peter-evans/create-pull-request`,
+  `dtolnay/rust-toolchain`).
 
 ### Examples
 
