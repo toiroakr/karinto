@@ -111,6 +111,92 @@ test "unknown-context-or-function: hyphenated `needs.<job-id>` is not an unknown
 }
 
 ///|
+test "unknown-context-or-function: dotted string literal is not a context" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - if: ${{ github.ref == 'a.b' }}
+    #|        run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
+test "unknown-context-or-function: dotted arg to hashFiles is not a context" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - if: ${{ always() && hashFiles('replay-summary.md') != '' }}
+    #|        run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "github-app-limit-permissions: granular `permission-*` inputs satisfy the limit" {
   let yaml =
     #|name: T

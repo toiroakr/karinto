@@ -4945,7 +4945,26 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         let mut prev_dot = false
         while i + 1 < n && !(chars[i] == '}' && chars[i + 1] == '}') {
           let c = chars[i]
-          if c == '.' {
+          if c == '\'' {
+            // String literal: skip to the closing quote so dotted contents like
+            // `'replay-summary.md'` are not misread as `<head>.<member>` context
+            // access. GitHub expression syntax escapes a literal quote by
+            // doubling it (`''`), so a doubled quote stays inside the string.
+            i = i + 1
+            while i < n {
+              if chars[i] == '\'' {
+                if i + 1 < n && chars[i + 1] == '\'' {
+                  i = i + 2
+                } else {
+                  i = i + 1
+                  break
+                }
+              } else {
+                i = i + 1
+              }
+            }
+            prev_dot = false
+          } else if c == '.' {
             prev_dot = true
             i = i + 1
           } else if c == ' ' || c == '\t' || c == '\n' {
