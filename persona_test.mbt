@@ -7,7 +7,10 @@
 //   - anonymous-definition → Pedantic (workflow + job, no `name:`)
 //   - template-injection   → Error (untrusted, Regular) + Info backstop (Pedantic)
 //   - secrets-outside-env  → Auditor
-//   - excessive-permissions, concurrency-limits → Regular
+//   - excessive-permissions → Regular here (the "default permissions used"
+//     finding; the per-key `write` finding is Pedantic, see
+//     persona_gating_test.mbt)
+//   - concurrency-limits   → Pedantic (hidden at regular)
 
 ///|
 fn persona_keys(content : String, persona : @karinto.Persona) -> Array[String] {
@@ -37,8 +40,8 @@ let persona_fixture : String =
 ///|
 test "persona=regular hides pedantic and auditor findings" {
   json_inspect(persona_keys(persona_fixture, @karinto.Persona::Regular), content=[
-    "info concurrency-limits", "error template-injection", "warning excessive-permissions",
-    "warning excessive-permissions", "warning job-permissions-required", "warning job-timeout-minutes-required",
+    "error template-injection", "warning excessive-permissions", "warning excessive-permissions",
+    "warning job-permissions-required", "warning job-timeout-minutes-required",
   ])
 }
 
