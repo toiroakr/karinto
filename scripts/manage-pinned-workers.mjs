@@ -192,8 +192,14 @@ if (releaseMajorTop && cmpVersion(releaseMajorTop, release) === 0) {
   console.log(`Deploying alias ${alias} -> ${release.raw}`);
   // Mirror release-publish.sh's repo-mode gate onto the alias (off by default).
   const repoModeFlag = ["--var", `REPO_MODE_ENABLED:${process.env.REPO_MODE_ENABLED || "false"}`];
-  shell("npx", ["wrangler", "deploy", "--env=", "--name", alias, ...repoModeFlag]);
-  putGithubToken(["--env=", "--name", alias]);
+  // `--config wrangler.deploy.jsonc`: the alias carries the same D1 binding as
+  // prod/pinned, so it must deploy against the rendered config that
+  // release-publish.sh produced (real database_id injected from
+  // D1_DATABASE_ID). The tracked wrangler.jsonc keeps the placeholder and would
+  // fail with Cloudflare error 10021 ("binding DB of type d1 must have a valid
+  // `database_id`").
+  shell("npx", ["wrangler", "deploy", "--config", "wrangler.deploy.jsonc", "--env=", "--name", alias, ...repoModeFlag]);
+  putGithubToken(["--config", "wrangler.deploy.jsonc", "--env=", "--name", alias]);
   shell("bash", ["smoke.sh", aliasUrl(release.major)]);
 } else {
   console.log(
