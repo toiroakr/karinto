@@ -7046,8 +7046,12 @@ fn extract_expr_bodies(s : String) -> Array[String] {
         // Skip over single-quoted string literals so a `}}` inside a literal
         // (e.g. `${{ hashFiles('a}}b') }}`) does not prematurely terminate the
         // body. GitHub escapes a literal quote by doubling it (`''`), so a
-        // doubled quote stays inside the string. The literal is kept in the
-        // returned body; callers strip it via `strip_expr_string_literals`.
+        // doubled quote stays inside the string. The literal text is preserved
+        // verbatim in the returned body; callers that must ignore literal
+        // contents (e.g. `check_unknown_context`,
+        // `text_references_regular_context`) strip it themselves via
+        // `strip_expr_string_literals`, while others (e.g.
+        // `check_meaningless_comparison`) scan the raw body.
         if chars[j] == '\'' {
           j = j + 1
           while j < n {
