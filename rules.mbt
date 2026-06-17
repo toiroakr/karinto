@@ -4950,7 +4950,7 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         if c == '.' {
           prev_dot = true
           i = i + 1
-        } else if c == ' ' || c == '\t' || c == '\n' {
+        } else if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
           i = i + 1
         } else if is_ident_start(c) {
           let start = i
@@ -4970,7 +4970,17 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             }
             let ident = buf.to_string()
             let mut j = i
-            while j < n && chars[j] == ' ' {
+            // Match the identifier-scan loop above (and the `expr.mbt` lexer):
+            // skip all whitespace — not just spaces — so a tab/newline between
+            // the identifier and its `.` (e.g. a multiline `${{ githab\n.ref }}`)
+            // does not hide an unknown context.
+            while j < n &&
+                  (
+                    chars[j] == ' ' ||
+                    chars[j] == '\t' ||
+                    chars[j] == '\n' ||
+                    chars[j] == '\r'
+                  ) {
               j = j + 1
             }
             if j < n && chars[j] == '.' {

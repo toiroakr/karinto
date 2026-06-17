@@ -11,4 +11,6 @@ locating the terminating `}}`, so a `}}` inside a literal (e.g.
 `${{ hashFiles('a}}b') && github.ref }}`) no longer truncates the extracted
 body — this preserves the previous `check_unknown_context` behaviour and also
 hardens the shared `text_references_regular_context` scan against the same
-edge case.
+edge case. The context-access lookahead in `check_unknown_context` now skips
+tabs and newlines (not just spaces) before the `.`, matching the `expr.mbt`
+lexer, so a typo like `${{ githab<TAB>.ref }}` is still flagged.
