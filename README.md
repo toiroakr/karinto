@@ -155,8 +155,9 @@ the opt-outs authors already wrote for the upstream tools:
 - **zizmor config** — a `zizmor.yml` `rules:` section is honoured. Each rule's
   `disable: true` skips that rule everywhere (rule ids match zizmor's audit
   names verbatim), and an `ignore:` list of `filename[:line[:col]]` entries
-  drops findings of that rule in the matching file (the column is not used;
-  an entry without a line matches any line). Pass it through the
+  drops findings of that rule in the matching file (a pinned `line` / `col`
+  must match the finding's position; an entry without a line matches any line,
+  and without a column any column on that line). Pass it through the
   [local CLI](#local-cli)'s `--zizmor-config`, or over HTTP via the `zizmor`
   parameter; the `ignore` filename resolves against `path` in content mode or
   each file's repo-relative path in repo mode.

@@ -86,9 +86,10 @@ fn parse_zizmor_ignore(s : String) -> ZizmorIgnore {
 }
 
 ///|
-/// Whether the file under lint matches a zizmor `ignore` filename (exact, a
-/// path-boundary suffix, or the bare basename). An empty `file_path` matches
-/// nothing, so a location-scoped ignore is conservatively not applied.
+/// Whether the file under lint matches a zizmor `ignore` filename: an exact
+/// match, or a path-boundary suffix (so a bare-filename pattern like `ci.yml`
+/// matches `.github/workflows/ci.yml`). An empty `file_path` matches nothing,
+/// so a location-scoped ignore is conservatively not applied.
 fn zizmor_ignore_file_matches(file_path : String, pat : String) -> Bool {
   if file_path == "" {
     return false
