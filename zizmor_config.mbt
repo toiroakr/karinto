@@ -64,10 +64,12 @@ fn parse_zizmor_ignore(s : String) -> ZizmorIgnore {
         Some((l, _)) => l
         None => rest
       }
+      // Lines are 1-based, so a non-positive (or non-numeric) line is treated
+      // as "any line" rather than a value that could never match a diagnostic.
       let n = parse_uint(line_str)
       ZizmorIgnore::{
         filename: fname,
-        line: if n >= 0 {
+        line: if n > 0 {
           Some(n)
         } else {
           None

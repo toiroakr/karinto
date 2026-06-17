@@ -440,6 +440,9 @@ test "expression-syntax: literal `{{ }}` template is not a stray `}}`" {
   assert_false(fires("echo \"${{ github.sha }} }}\""))
   // An unterminated `${{` is still an error.
   assert_true(fires("echo \"${{ github.sha\""))
+  // A literal `{{ }}` must not mask an unterminated `${{` later in the string:
+  // forward-scanning each `${{` catches it where token-counting would balance.
+  assert_true(fires("echo \"pattern={{version}}-${{ inputs.version\""))
 }
 
 ///|

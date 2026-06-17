@@ -1426,13 +1426,55 @@ fn check_artipacked_step(
 // ---------------------------------------------------------------------------
 
 ///|
-/// Like zizmor: only an `==` comparison of `github.actor` /
-/// `github.triggering_actor` against a `[bot]` login is spoofable. The `!=` /
-/// `endsWith(...)` forms exclude bots (safe), so they are not flagged.
+/// Whether an operand of a comparison is the actor context zizmor watches.
+fn operand_is_actor(op : String) -> Bool {
+  op.contains("github.actor") || op.contains("github.triggering_actor")
+}
+
+///|
+/// Split an `if:` expression into clauses on top-level `&&` / `||` so each
+/// `==` comparison can be inspected on its own. A heuristic split (no
+/// paren-depth tracking) — enough to keep `==` operands from one clause from
+/// being read against a `[bot]` literal in another.
+fn split_logical_clauses(s : String) -> Array[String] {
+  let by_and : Array[String] = []
+  let mut rest = s
+  while split_once(rest, "&&") is Some((a, b)) {
+    by_and.push(a)
+    rest = b
+  }
+  by_and.push(rest)
+  let out : Array[String] = []
+  for part in by_and {
+    let mut r = part
+    while split_once(r, "||") is Some((a, b)) {
+      out.push(a)
+      r = b
+    }
+    out.push(r)
+  }
+  out
+}
+
+///|
+/// Like zizmor: only an `==` comparison whose one operand is `github.actor` /
+/// `github.triggering_actor` and whose other operand is a `[bot]` login is
+/// spoofable. Inspecting operands per comparison (not the whole condition)
+/// keeps safe mixed conditions — e.g. `github.actor != '…[bot]' &&
+/// github.event_name == 'pull_request'`, or `… == 'octocat' &&
+/// !endsWith(github.actor, '[bot]')` — from being flagged. The `!=` /
+/// `endsWith(...)` forms exclude bots (safe), so they never match.
 fn looks_spoofable_bot(s : String) -> Bool {
-  let has_actor = s.contains("github.actor") ||
-    s.contains("github.triggering_actor")
-  has_actor && s.contains("[bot]") && s.contains("==")
+  for clause in split_logical_clauses(s) {
+    guard split_once(clause, "==") is Some((lhs, rhs)) else { continue }
+    let l = lhs.trim(chars=" \t").to_owned()
+    let r = rhs.trim(chars=" \t").to_owned()
+    if (operand_is_actor(l) && r.contains("[bot]")) ||
+      (operand_is_actor(r) && l.contains("[bot]")) {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -4617,38 +4659,6 @@ fn walk_strings(y : @yaml.Yaml, f : (String) -> Unit) -> Unit {
 }
 
 ///|
-/// Count non-overlapping substring occurrences.
-fn count_substr(s : String, sub : String) -> Int {
-  let sa = s.to_array()
-  let ba = sub.to_array()
-  let sl = sa.length()
-  let subl = ba.length()
-  if subl == 0 || sl < subl {
-    return 0
-  }
-  let mut count = 0
-  let mut i = 0
-  while i <= sl - subl {
-    let mut j = 0
-    let mut ok = true
-    while j < subl {
-      if sa[i + j] != ba[j] {
-        ok = false
-        break
-      }
-      j = j + 1
-    }
-    if ok {
-      count = count + 1
-      i = i + subl
-    } else {
-      i = i + 1
-    }
-  }
-  count
-}
-
-///|
 /// Levenshtein distance, capped early.
 fn edit_distance(a : String, b : String) -> Int {
   let la = a.length()
@@ -4894,11 +4904,12 @@ fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     if !s.contains("${{") {
       return
     }
-    let opens = count_substr(s, "${{")
-    let closes = count_substr(s, "}}")
     // Only an unterminated `${{` is an error. A bare/extra `}}` is not (like
-    // actionlint): templates such as `pattern={{version}}` carry a literal `}}`.
-    if opens > closes && !reported.get("unterminated").unwrap() {
+    // actionlint): templates such as `pattern={{version}}` carry a literal
+    // `}}`. Scan forward from each `${{` for its own `}}` rather than counting
+    // tokens — a literal `}}` elsewhere must not mask a real unterminated open.
+    if text_has_unterminated_expression(s) &&
+      !reported.get("unterminated").unwrap() {
       reported["unterminated"] = true
       add_diag(
         out,
@@ -4908,6 +4919,35 @@ fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       )
     }
   })
+}
+
+///|
+/// True when some `${{` in `s` has no following `}}`. Literal `{{ … }}`
+/// templates (not opened by `$`) are ignored.
+fn text_has_unterminated_expression(s : String) -> Bool {
+  let chars = s.to_array()
+  let n = chars.length()
+  let mut i = 0
+  while i + 2 < n {
+    if chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == '{' {
+      let mut j = i + 3
+      let mut closed = false
+      while j + 1 < n {
+        if chars[j] == '}' && chars[j + 1] == '}' {
+          closed = true
+          break
+        }
+        j = j + 1
+      }
+      if not(closed) {
+        return true
+      }
+      i = j + 2
+    } else {
+      i = i + 1
+    }
+  }
+  false
 }
 
 // ---------------------------------------------------------------------------

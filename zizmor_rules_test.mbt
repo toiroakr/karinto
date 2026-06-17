@@ -256,8 +256,21 @@ test "bot-conditions: only `==` is flagged; exclude forms are not" {
   assert_true(fires("github.actor == 'dependabot[bot]'"))
   // triggering_actor is covered too (it is not a substring of `github.actor`).
   assert_true(fires("github.triggering_actor == 'dependabot[bot]'"))
+  // Reversed operands still match (wrapped in `${{ }}` so the leading quote
+  // isn't read as a YAML quoted scalar).
+  assert_true(fires("${{ 'dependabot[bot]' == github.actor }}"))
   assert_false(fires("github.actor != 'dependabot[bot]'"))
   assert_false(fires("${{ ! endsWith(github.actor, '[bot]') }}"))
+  // Mixed conditions: the actor/`[bot]` and the `==` belong to *different*
+  // clauses, so neither should fire (operands are checked per comparison).
+  assert_false(
+    fires("github.actor == 'octocat' && ! endsWith(github.actor, '[bot]')"),
+  )
+  assert_false(
+    fires(
+      "github.actor != 'dependabot[bot]' && github.event_name == 'pull_request'",
+    ),
+  )
 }
 
 ///|
