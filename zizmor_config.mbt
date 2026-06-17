@@ -8,11 +8,13 @@
 /// Karinto's rule ids verbatim, so they map directly with no translation.
 
 ///|
-/// One `ignore:` location. `line == None` means "any line in `filename`"; the
-/// column zizmor records is not tracked (line scope is enough).
+/// One `ignore:` location. `line == None` means "any line in `filename`";
+/// `col == None` means "any column on that line". A pinned column is honoured
+/// (diagnostics are stamped with line/column before the config filter runs).
 priv struct ZizmorIgnore {
   filename : String
   line : Int?
+  col : Int?
 }
 
 ///|
@@ -54,26 +56,30 @@ fn parse_zizmor_config(config : String) -> ZizmorConfig {
 }
 
 ///|
-/// Split a `filename[:line[:col]]` ignore entry. A non-numeric line is treated
-/// as "any line".
+/// Split a `filename[:line[:col]]` ignore entry. Lines and columns are 1-based,
+/// so a non-positive (or non-numeric) value is treated as "any" rather than a
+/// value that could never match a diagnostic.
 fn parse_zizmor_ignore(s : String) -> ZizmorIgnore {
+  fn pos_or_none(v : String) -> Int? {
+    let n = parse_uint(v)
+    if n > 0 {
+      Some(n)
+    } else {
+      None
+    }
+  }
+
   match split_once(s, ":") {
-    None => ZizmorIgnore::{ filename: s, line: None }
+    None => ZizmorIgnore::{ filename: s, line: None, col: None }
     Some((fname, rest)) => {
-      let line_str = match split_once(rest, ":") {
-        Some((l, _)) => l
-        None => rest
+      let (line_str, col_str) = match split_once(rest, ":") {
+        Some((l, c)) => (l, c)
+        None => (rest, "")
       }
-      // Lines are 1-based, so a non-positive (or non-numeric) line is treated
-      // as "any line" rather than a value that could never match a diagnostic.
-      let n = parse_uint(line_str)
       ZizmorIgnore::{
         filename: fname,
-        line: if n > 0 {
-          Some(n)
-        } else {
-          None
-        },
+        line: pos_or_none(line_str),
+        col: pos_or_none(col_str),
       }
     }
   }
@@ -94,8 +100,8 @@ fn zizmor_ignore_file_matches(file_path : String, pat : String) -> Bool {
 
 ///|
 /// Whether diagnostic `d` is suppressed by the zizmor config: its rule is
-/// `disable`d, or an `ignore:` entry matches the file (and the line, when the
-/// entry pins one).
+/// `disable`d, or an `ignore:` entry matches the file (and the line, then the
+/// column, when the entry pins them).
 fn zizmor_config_excluded(
   d : Diagnostic,
   cfg : ZizmorConfig,
@@ -110,8 +116,15 @@ fn zizmor_config_excluded(
       continue
     }
     match p.line {
-      Some(ln) => if d.pos is Some(pos) && pos.line == ln { return true }
       None => return true
+      Some(ln) => {
+        guard d.pos is Some(pos) && pos.line == ln else { continue }
+        // Line matches; honour a pinned column when the entry has one.
+        match p.col {
+          None => return true
+          Some(c) => if pos.col == c { return true }
+        }
+      }
     }
   }
   false

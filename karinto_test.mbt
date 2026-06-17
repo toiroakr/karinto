@@ -574,6 +574,52 @@ test "zizmor config: rules.<id>.ignore scopes by file and line" {
 }
 
 ///|
+test "zizmor config: rules.<id>.ignore honours a pinned column" {
+  // The job-level `anonymous-definition` finding is stamped at line 3, col 3.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let path = ".github/workflows/ci.yml"
+  // Count the positioned (job-level) anonymous-definition finding at line 3.
+  fn job_anon(cfg : String) -> Int {
+    @karinto.lint(yaml, file_path=path, zizmor_config=cfg).diagnostics
+    .filter(fn(d) {
+      d.rule == "anonymous-definition" && d.pos is Some({ line: 3, .. })
+    })
+    .length()
+  }
+
+  assert_eq(job_anon(""), 1)
+  // Exact column suppresses it.
+  let exact =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3:3
+  assert_eq(job_anon(exact), 0)
+  // A non-matching column does not.
+  let wrong_col =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3:99
+  assert_eq(job_anon(wrong_col), 1)
+  // Line-only (no column) suppresses any column on that line.
+  let line_only =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3
+  assert_eq(job_anon(line_only), 0)
+}
+
+///|
 test "inline ignore: karinto alias and trailing explanation" {
   // The `karinto` alias and a free-form note after the bracket are both
   // honoured; comma-separated ids opt out of several rules at once.
