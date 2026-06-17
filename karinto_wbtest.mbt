@@ -82,3 +82,26 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let m5 = parse_inline_ignores(quote_then_comment)
   assert_true(m5.get(1) is Some(["unpinned-uses"]))
 }
+
+///|
+test "extract_expr_bodies: `}}` inside a quoted literal does not truncate the body" {
+  // The terminator scan skips single-quoted literals, so a `}}` inside one
+  // (escaped or not) stays in the body and the real expression after it is
+  // preserved. A naive first-`}}` scan would cut the body to `hashFiles('a`,
+  // dropping the trailing `&& githab.ref` and hiding the typo from downstream
+  // context checks.
+  let bodies = extract_expr_bodies(
+    "x ${{ hashFiles('a}}b') != '' && githab.ref }} y",
+  )
+  assert_eq(bodies.length(), 1)
+  assert_eq(bodies[0], " hashFiles('a}}b') != '' && githab.ref ")
+  // GitHub escapes a literal quote by doubling it; a doubled quote stays inside
+  // the string, so the literal `'it''s }}'` is one unit and does not terminate.
+  let escaped = extract_expr_bodies("${{ 'it''s }}' == github.ref }}")
+  assert_eq(escaped.length(), 1)
+  assert_eq(escaped[0], " 'it''s }}' == github.ref ")
+  // Plain bodies (no literal) are unaffected.
+  let plain = extract_expr_bodies("${{ github.ref }}")
+  assert_eq(plain.length(), 1)
+  assert_eq(plain[0], " github.ref ")
+}

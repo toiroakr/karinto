@@ -7033,7 +7033,28 @@ fn extract_expr_bodies(s : String) -> Array[String] {
       let start = i + 3
       let mut j = start
       while j + 1 < n && !(chars[j] == '}' && chars[j + 1] == '}') {
-        j = j + 1
+        // Skip over single-quoted string literals so a `}}` inside a literal
+        // (e.g. `${{ hashFiles('a}}b') }}`) does not prematurely terminate the
+        // body. GitHub escapes a literal quote by doubling it (`''`), so a
+        // doubled quote stays inside the string. The literal is kept in the
+        // returned body; callers strip it via `strip_expr_string_literals`.
+        if chars[j] == '\'' {
+          j = j + 1
+          while j < n {
+            if chars[j] == '\'' {
+              if j + 1 < n && chars[j + 1] == '\'' {
+                j = j + 2
+              } else {
+                j = j + 1
+                break
+              }
+            } else {
+              j = j + 1
+            }
+          }
+        } else {
+          j = j + 1
+        }
       }
       if j + 1 < n {
         let buf = StringBuilder::new()
