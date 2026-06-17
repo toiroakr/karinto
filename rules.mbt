@@ -1426,8 +1426,13 @@ fn check_artipacked_step(
 // ---------------------------------------------------------------------------
 
 ///|
+/// Like zizmor: only an `==` comparison of `github.actor` /
+/// `github.triggering_actor` against a `[bot]` login is spoofable. The `!=` /
+/// `endsWith(...)` forms exclude bots (safe), so they are not flagged.
 fn looks_spoofable_bot(s : String) -> Bool {
-  s.contains("github.actor") && s.contains("[bot]")
+  let has_actor = s.contains("github.actor") ||
+    s.contains("github.triggering_actor")
+  has_actor && s.contains("[bot]") && s.contains("==")
 }
 
 ///|
@@ -1496,11 +1501,14 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   match workflow_perms {
     None =>
+      // zizmor gates the workflow-level "no permissions: block" finding as
+      // Pedantic; the Regular signal is the per-job finding below.
       add_diag(
         out,
         "excessive-permissions",
         Warning,
         "default permissions used due to no permissions: block",
+        persona=Pedantic,
       )
     Some(String("read-all")) =>
       add_diag(
@@ -3190,19 +3198,12 @@ fn check_known_vulnerable_actions(
   out : Array[Diagnostic],
 ) -> Unit {
   match step.uses {
-    Some(u) => {
-      // Static fallback list for offline / no-context runs.
-      // tj-actions/* was retroactively compromised in March 2025.
-      let static_hit = u.has_prefix("tj-actions/changed-files@") ||
-        u.has_prefix("tj-actions/branch-names@") ||
-        u.has_prefix("tj-actions/eslint-changed-files@") ||
-        u.has_prefix("reviewdog/action-setup@v1.0.0") ||
-        u.has_prefix("reviewdog/action-setup@v1.0.1") ||
-        u.has_prefix("reviewdog/action-setup@v1.0.2") ||
-        u.has_prefix("reviewdog/action-setup@v1.0.3") ||
-        u.has_prefix("reviewdog/action-setup@v1.1.0")
-      let osv_hit = array_contains_string(ctx.vuln_uses, u)
-      if static_hit || osv_hit {
+    Some(u) =>
+      // Decided solely by the online advisory path (`ctx.vuln_uses`, from
+      // OSV.dev / the companion action). A hand-maintained static list can't
+      // track GHSA's per-advisory version ranges, so it false-flagged fixed
+      // releases (e.g. `changed-files@v47`); defer entirely to the advisory DB.
+      if array_contains_string(ctx.vuln_uses, u) {
         add_diag(
           out,
           "known-vulnerable-actions",
@@ -3210,7 +3211,6 @@ fn check_known_vulnerable_actions(
           "uses `\{u}`: known compromised release",
         )
       }
-    }
     None => ()
   }
 }
@@ -4889,13 +4889,15 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 
 ///|
 fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let reported = { "unterminated": false, "stray": false }
+  let reported = { "unterminated": false }
   walk_strings(ctx.doc, fn(s) {
-    if !s.contains("${{") && !s.contains("}}") {
+    if !s.contains("${{") {
       return
     }
     let opens = count_substr(s, "${{")
     let closes = count_substr(s, "}}")
+    // Only an unterminated `${{` is an error. A bare/extra `}}` is not (like
+    // actionlint): templates such as `pattern={{version}}` carry a literal `}}`.
     if opens > closes && !reported.get("unterminated").unwrap() {
       reported["unterminated"] = true
       add_diag(
@@ -4903,14 +4905,6 @@ fn check_expression_syntax(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         "expression-syntax",
         Error,
         "expression syntax error: unterminated `${{`",
-      )
-    } else if closes > opens && !reported.get("stray").unwrap() {
-      reported["stray"] = true
-      add_diag(
-        out,
-        "expression-syntax",
-        Error,
-        "expression syntax error: stray `}}`",
       )
     }
   })
@@ -6251,6 +6245,31 @@ fn check_concurrency_limits(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 }
 
 ///|
+/// True when `on:` declares a trigger that populates `inputs`
+/// (`workflow_call` / `workflow_dispatch`); there `inputs` is available at the
+/// workflow level too.
+fn on_defines_inputs(m : Map[String, @yaml.Yaml]) -> Bool {
+  fn is_input_trigger(s : String) -> Bool {
+    s == "workflow_call" || s == "workflow_dispatch"
+  }
+
+  match m.get("on") {
+    Some(@yaml.Yaml::String(s)) => is_input_trigger(s)
+    Some(@yaml.Yaml::Array(arr)) => {
+      for item in arr {
+        if item is @yaml.Yaml::String(s) && is_input_trigger(s) {
+          return true
+        }
+      }
+      false
+    }
+    Some(@yaml.Yaml::Map(on_map)) =>
+      on_map.contains("workflow_call") || on_map.contains("workflow_dispatch")
+    _ => false
+  }
+}
+
+///|
 /// True when the workflow's `on:` field lists only `workflow_call` — i.e.
 /// it is a reusable workflow whose concurrency must be managed by callers.
 fn is_reusable_only(m : Map[String, @yaml.Yaml]) -> Bool {
@@ -7358,9 +7377,14 @@ fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
       // Workflow scope: `env` / `concurrency` cannot read job-scoped context.
+      // `inputs` is forbidden only without a `workflow_call`/`workflow_dispatch`
+      // trigger to populate it.
       let workflow_forbidden = [
-        "needs", "steps", "matrix", "strategy", "runner", "job", "inputs",
+        "needs", "steps", "matrix", "strategy", "runner", "job",
       ]
+      if not(on_defines_inputs(m)) {
+        workflow_forbidden.push("inputs")
+      }
       check_avail_in_node(
         m.get("env"),
         "workflow-level `env`",

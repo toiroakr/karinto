@@ -502,6 +502,78 @@ test "ghalint config: workflow_file_path scopes the exclude" {
 }
 
 ///|
+test "zizmor config: rules.<id>.disable drops the rule everywhere" {
+  // Mirrors a real `zizmor.yml` that turns off `undocumented-permissions`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions:
+    #|    disable: true
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+  let res = @karinto.lint(yaml, zizmor_config=cfg)
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "zizmor config: rules.<id>.ignore scopes by file and line" {
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  // `concurrency-limits` is a workflow-global finding without a line, so a
+  // bare-filename ignore (line == any) is what suppresses it.
+  let cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    ignore:
+    #|      - ci.yml
+  // A non-matching filename leaves the finding in place.
+  let other = @karinto.lint(
+    yaml,
+    zizmor_config=cfg,
+    file_path=".github/workflows/release.yml",
+  )
+  assert_true(
+    other.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length() >
+    0,
+  )
+  // The matching filename (path-boundary suffix) drops it.
+  let hit = @karinto.lint(
+    yaml,
+    zizmor_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    hit.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
+    0,
+  )
+}
+
+///|
 test "inline ignore: karinto alias and trailing explanation" {
   // The `karinto` alias and a free-form note after the bracket are both
   // honoured; comma-separated ids opt out of several rules at once.

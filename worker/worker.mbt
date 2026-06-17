@@ -48,6 +48,7 @@ pub fn lint_string(
   persona_str? : String = "",
   ghalint_config_str? : String = "",
   file_path? : String = "",
+  zizmor_config_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -69,6 +70,7 @@ pub fn lint_string(
     persona=@karinto.persona_from_string(persona_str),
     file_path~,
     ghalint_config=ghalint_config_str,
+    zizmor_config=zizmor_config_str,
   )
   let body : Map[String, Json] = {
     "ok": (result.parse_error is None).to_json(),
@@ -97,6 +99,7 @@ pub fn lint_string_sarif(
   path? : String = "",
   persona_str? : String = "",
   ghalint_config_str? : String = "",
+  zizmor_config_str? : String = "",
 ) -> String {
   let kind = match kind_str {
     "workflow" => @karinto.FileKind::Workflow
@@ -114,6 +117,7 @@ pub fn lint_string_sarif(
     persona=@karinto.persona_from_string(persona_str),
     file_path=path,
     ghalint_config=ghalint_config_str,
+    zizmor_config=zizmor_config_str,
   )
   let entry_path = if path == "" { None } else { Some(path) }
   @karinto.sarif_report([@karinto.SarifEntry::{ path: entry_path, result }]).stringify(
@@ -141,6 +145,7 @@ pub fn lint_files_sarif(
   archived_uses_str? : String = "",
   persona_str? : String = "",
   ghalint_config_str? : String = "",
+  zizmor_config_str? : String = "",
 ) -> String {
   let disabled = split_csv(disable_str)
   let forbidden_uses = split_csv(forbidden_uses_str)
@@ -193,6 +198,7 @@ pub fn lint_files_sarif(
       persona~,
       file_path=path,
       ghalint_config=ghalint_config_str,
+      zizmor_config=zizmor_config_str,
     )
     entries.push(@karinto.SarifEntry::{ path: Some(path), result })
   }

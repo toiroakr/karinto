@@ -385,6 +385,64 @@ test "context-availability: `needs` referenced at workflow level" {
 }
 
 ///|
+test "context-availability: `inputs` allowed at workflow level for workflow_call" {
+  fn flags_inputs(yaml : String) -> Bool {
+    @karinto.lint(yaml).diagnostics
+    .filter(fn(d) {
+      d.rule == "context-availability" && d.message.contains("`inputs`")
+    })
+    .length() >
+    0
+  }
+
+  // A reusable workflow populates `inputs`, so it is available in workflow-level
+  // `concurrency` (actionlint allows this) — no finding.
+  let reusable =
+    #|on:
+    #|  workflow_call:
+    #|    inputs:
+    #|      v:
+    #|        type: string
+    #|concurrency:
+    #|  group: g-${{ inputs.v }}
+    #|jobs:
+    #|  j:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  assert_false(flags_inputs(reusable))
+  // Without an input trigger, `inputs` is not available there — flagged.
+  let push_only =
+    #|on: push
+    #|concurrency:
+    #|  group: g-${{ inputs.v }}
+    #|jobs:
+    #|  j:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  assert_true(flags_inputs(push_only))
+}
+
+///|
+test "expression-syntax: literal `{{ }}` template is not a stray `}}`" {
+  fn fires(script : String) -> Bool {
+    let yaml = "on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: \{script}"
+    @karinto.lint(yaml).diagnostics
+    .filter(fn(d) { d.rule == "expression-syntax" })
+    .length() >
+    0
+  }
+
+  // docker/metadata-action's `pattern={{version}}` carries a literal `}}` — not
+  // a stray expression close. An extra `}}` after a real expression is fine too.
+  assert_false(fires("echo \"pattern={{version}},value=${{ github.sha }}\""))
+  assert_false(fires("echo \"${{ github.sha }} }}\""))
+  // An unterminated `${{` is still an error.
+  assert_true(fires("echo \"${{ github.sha\""))
+}
+
+///|
 test "expression-steps-type: steps.<id>.outputs typed wrongly" {
   let yaml =
     #|on: push

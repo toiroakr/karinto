@@ -74,6 +74,7 @@ below.
 | `path` | string | Repo-relative path of the `content` (e.g. `.github/workflows/ci.yml`). In `format=sarif` it becomes the SARIF `artifactLocation.uri`; in either format it also resolves a `ghalint` exclude's `workflow_file_path` scope. Same shape rules as `targets` paths. Unnecessary in `repo` mode, where targets already carry paths. |
 | `persona` | `regular` \| `pedantic` \| `auditor` | Analysis profile (see [*Personas*](#personas)). Defaults to `auditor` (every finding). An unrecognized value is a `400`. |
 | `ghalint` | string | Verbatim ghalint config (`ghalint.yaml`) text; its `excludes:` list suppresses matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
+| `zizmor` | string | Verbatim zizmor config (`zizmor.yml`) text; its `rules.<id>.disable` / `rules.<id>.ignore` suppress matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -113,8 +114,11 @@ Everything else fires under `regular`. Several rules are **persona-split** per
 finding, pinned against `zizmor`'s actual per-persona behaviour (see
 `persona_gating_test.mbt` / `persona_regular_parity_test.mbt`):
 
-- `excessive-permissions` — blanket `write-all`/`read-all` and "default
-  permissions used" are `regular`; the per-key over-scope finding is `pedantic`.
+- `excessive-permissions` — blanket `write-all`/`read-all` and the **per-job**
+  "default permissions used" finding are `regular`; the **workflow-level** "no
+  `permissions:` block" finding and the per-key over-scope finding are
+  `pedantic` (matching `zizmor`, which only surfaces the workflow-level default
+  under `--pedantic`).
 - `template-injection` — the high-cap event contexts are `regular` (`Error`);
   non-static influenceable contexts (`vars.*`, `inputs.*`, `*.outputs.*`,
   `github.ref*`, `github.actor`, `github.workflow`) are `regular` (`Info`);
@@ -148,6 +152,14 @@ the opt-outs authors already wrote for the upstream tools:
   repo mode. actionlint configs are **not** honoured — they ignore by regex
   against actionlint's own error messages, which do not map onto karinto's
   findings.
+- **zizmor config** — a `zizmor.yml` `rules:` section is honoured. Each rule's
+  `disable: true` skips that rule everywhere (rule ids match zizmor's audit
+  names verbatim), and an `ignore:` list of `filename[:line[:col]]` entries
+  drops findings of that rule in the matching file (the column is not used;
+  an entry without a line matches any line). Pass it through the
+  [local CLI](#local-cli)'s `--zizmor-config`, or over HTTP via the `zizmor`
+  parameter; the `ignore` filename resolves against `path` in content mode or
+  each file's repo-relative path in repo mode.
 
 ### Examples
 
@@ -404,6 +416,9 @@ moon run --target js cmd/main -- --persona regular .github/workflows/ci.yml
 # honour a ghalint config's `excludes` (see *Ignoring findings*); the file
 # path is matched against each exclude's `workflow_file_path`
 moon run --target js cmd/main -- --ghalint-config ghalint.yaml .github/workflows/ci.yml
+
+# honour a zizmor config's `rules.<id>.disable` / `ignore` (see *Ignoring findings*)
+moon run --target js cmd/main -- --zizmor-config zizmor.yml .github/workflows/ci.yml
 
 # SARIF 2.1.0 for GitHub Code Scanning (same as the Worker's `format=sarif`);
 # file arguments become artifact URIs, stdin yields pathless results
