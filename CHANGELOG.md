@@ -1,5 +1,51 @@
 # karinto
 
+## 0.9.0
+
+### Minor Changes
+
+- [#62](https://github.com/toiroakr/karinto/pull/62) [`c50ee67`](https://github.com/toiroakr/karinto/commit/c50ee67a408f9d1facad3a7139fb51e3ee63bfc8) Thanks [@toiroakr](https://github.com/toiroakr)! - Honour `zizmor.yml` configs and fix five parity divergences found by diffing
+  karinto against zizmor / actionlint on real OSS workflows.
+
+  - **New: `zizmor.yml` config support.** A zizmor config's `rules.<id>.disable`
+    and `rules.<id>.ignore` (`filename[:line[:col]]`) opt-outs are now honoured,
+    alongside the existing inline-comment and ghalint-config opt-outs. Pass it via
+    the CLI's `--zizmor-config` or the HTTP `zizmor` parameter.
+  - **`known-vulnerable-actions`** no longer carries a hardcoded action list. It
+    could not track GHSA's per-advisory version ranges and false-flagged fixed
+    releases (e.g. `tj-actions/changed-files@v47`). Vulnerability is now decided
+    solely by the online advisory path (OSV.dev via `osv=1` / the companion
+    action) — the mechanism zizmor uses. Without `osv=1` the rule no longer fires.
+  - **`context-availability`** no longer flags `inputs` in workflow-level `env` /
+    `concurrency` for `workflow_call` / `workflow_dispatch` workflows, where the
+    `inputs` context is in fact available (matching actionlint).
+  - **`expression-syntax`** no longer reports a stray `}}`: a literal `{{ … }}`
+    template (e.g. docker/metadata-action's `pattern={{version}}`) is not an
+    expression. Only an unterminated `${{` is an error, as in actionlint.
+  - **`bot-conditions`** now fires only on an `==` comparison of `github.actor` /
+    `github.triggering_actor` against a `[bot]` login (and now also covers
+    `triggering_actor`), matching zizmor; the `!=` / `endsWith(...)` exclude forms
+    are no longer flagged.
+  - **`excessive-permissions`** persona gating: the workflow-level "no
+    `permissions:` block" finding is now `pedantic` (the per-job "default
+    permissions used" finding stays `regular`), matching zizmor's per-persona
+    behaviour.
+
+### Patch Changes
+
+- [#56](https://github.com/toiroakr/karinto/pull/56) [`19e61a5`](https://github.com/toiroakr/karinto/commit/19e61a588926e1695c1fe27ccb90014fe64f3e12) Thanks [@toiroakr](https://github.com/toiroakr)! - Refactor `check_unknown_context` to reuse the shared `extract_expr_bodies`
+  and `strip_expr_string_literals` helpers instead of its own inline `${{ }}`
+  extraction and string-literal skipping. The duplicated expression-scanning
+  logic is removed and the single-quoted-literal false-positive fix is
+  preserved. `extract_expr_bodies` now skips single-quoted literals while
+  locating the terminating `}}`, so a `}}` inside a literal (e.g.
+  `${{ hashFiles('a}}b') && github.ref }}`) no longer truncates the extracted
+  body — this preserves the previous `check_unknown_context` behaviour and also
+  hardens the shared `text_references_regular_context` scan against the same
+  edge case. The context-access lookahead in `check_unknown_context` now skips
+  tabs and newlines (not just spaces) before the `.`, matching the `expr.mbt`
+  lexer, so a typo like `${{ githab<TAB>.ref }}` is still flagged.
+
 ## 0.8.5
 
 ### Patch Changes
