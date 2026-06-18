@@ -89,6 +89,18 @@ fn run() -> Int {
       }
     }
   }
+  let zizmor_config_path = last_value(matches, "zizmor-config")
+  let zizmor_config = if zizmor_config_path == "" {
+    ""
+  } else {
+    match js_read_file(zizmor_config_path) {
+      Some(c) => c
+      None => {
+        eprintln("error: cannot read zizmor config '\{zizmor_config_path}'")
+        return 2
+      }
+    }
+  }
   let files = match matches.values.get("files") {
     Some(fs) => fs
     None => []
@@ -103,9 +115,11 @@ fn run() -> Int {
       eprintln(build_command().render_help())
       return 2
     }
-    lint_stdin(kind, disabled, format, persona, ghalint_config)
+    lint_stdin(kind, disabled, format, persona, ghalint_config, zizmor_config)
   } else {
-    lint_files(files, kind, disabled, format, persona, ghalint_config)
+    lint_files(
+      files, kind, disabled, format, persona, ghalint_config, zizmor_config,
+    )
   }
 }
 
@@ -144,6 +158,11 @@ fn build_command() -> @argparse.Command {
         "ghalint-config",
         long="ghalint-config",
         about="Path to a ghalint config (ghalint.yaml); its `excludes` are honoured",
+      ),
+      @argparse.OptionArg::new(
+        "zizmor-config",
+        long="zizmor-config",
+        about="Path to a zizmor config (zizmor.yml); its `rules.<id>.disable`/`ignore` are honoured",
       ),
     ],
     positionals=[
@@ -302,6 +321,7 @@ fn lint_stdin(
   format : OutputFormat,
   persona : @karinto.Persona,
   ghalint_config : String,
+  zizmor_config : String,
 ) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
@@ -310,14 +330,15 @@ fn lint_stdin(
       return 2
     }
   }
-  // stdin has no path, so path-scoped ghalint excludes can't match; path-less
-  // ones still apply.
+  // stdin has no path, so path-scoped ghalint excludes and zizmor location
+  // ignores can't match; path-less ones (e.g. zizmor `disable`) still apply.
   let result = @karinto.lint(
     content,
     kind~,
     disabled~,
     persona~,
     ghalint_config~,
+    zizmor_config~,
   )
   match format {
     Envelope => {
@@ -350,6 +371,7 @@ fn lint_files(
   format : OutputFormat,
   persona : @karinto.Persona,
   ghalint_config : String,
+  zizmor_config : String,
 ) -> Int {
   let entries : Array[Json] = []
   let sarif_entries : Array[@karinto.SarifEntry] = []
@@ -394,6 +416,7 @@ fn lint_files(
           persona~,
           file_path=path,
           ghalint_config~,
+          zizmor_config~,
         )
         let ok = result.parse_error is None
         if !ok {

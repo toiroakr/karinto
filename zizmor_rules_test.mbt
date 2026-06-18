@@ -242,6 +242,38 @@ test "bot-conditions: spoofable github.actor bot check" {
 }
 
 ///|
+test "bot-conditions: only `==` is flagged; exclude forms are not" {
+  // Like zizmor, only an `==` comparison against a `[bot]` login is spoofable.
+  // The `!=` and `endsWith(...)` forms (which *exclude* bots) are safe.
+  fn fires(cond : String) -> Bool {
+    let yaml = "on: pull_request\njobs:\n  j:\n    runs-on: ubuntu-latest\n    if: \{cond}\n    steps:\n      - run: echo hi"
+    @karinto.lint(yaml).diagnostics
+    .filter(fn(d) { d.rule == "bot-conditions" })
+    .length() >
+    0
+  }
+
+  assert_true(fires("github.actor == 'dependabot[bot]'"))
+  // triggering_actor is covered too (it is not a substring of `github.actor`).
+  assert_true(fires("github.triggering_actor == 'dependabot[bot]'"))
+  // Reversed operands still match (wrapped in `${{ }}` so the leading quote
+  // isn't read as a YAML quoted scalar).
+  assert_true(fires("${{ 'dependabot[bot]' == github.actor }}"))
+  assert_false(fires("github.actor != 'dependabot[bot]'"))
+  assert_false(fires("${{ ! endsWith(github.actor, '[bot]') }}"))
+  // Mixed conditions: the actor/`[bot]` and the `==` belong to *different*
+  // clauses, so neither should fire (operands are checked per comparison).
+  assert_false(
+    fires("github.actor == 'octocat' && ! endsWith(github.actor, '[bot]')"),
+  )
+  assert_false(
+    fires(
+      "github.actor != 'dependabot[bot]' && github.event_name == 'pull_request'",
+    ),
+  )
+}
+
+///|
 test "cache-poisoning: cache restore in publish flow" {
   let yaml =
     #|on:
@@ -789,7 +821,11 @@ test "insecure-commands: ACTIONS_ALLOW_UNSECURE_COMMANDS is set" {
 }
 
 ///|
-test "known-vulnerable-actions: CVE-listed action version pinned" {
+test "known-vulnerable-actions: not flagged statically (advisory path only)" {
+  // A CVE-listed action is *not* flagged from a hardcoded list: vulnerability
+  // comes solely from the online advisory path (`vuln_uses`, see the OSV test
+  // below). Here, with no advisory input, only `unpinned-uses` fires on the
+  // tag — no `known-vulnerable-actions`.
   let yaml =
     #|on: push
     #|jobs:
@@ -831,14 +867,6 @@ test "known-vulnerable-actions: CVE-listed action version pinned" {
         "severity": "warning",
         "message": "uses `tj-actions/changed-files@v35` is not pinned to a full-length SHA",
         "pos": { "line": 9, "col": 15 },
-        "job": "build",
-        "step": { "index": 0 },
-      },
-      {
-        "rule": "known-vulnerable-actions",
-        "severity": "error",
-        "message": "uses `tj-actions/changed-files@v35`: known compromised release",
-        "pos": { "line": 9, "col": 9 },
         "job": "build",
         "step": { "index": 0 },
       },

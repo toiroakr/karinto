@@ -214,6 +214,7 @@ pub fn lint(
   persona? : Persona = Auditor,
   file_path? : String = "",
   ghalint_config? : String = "",
+  zizmor_config? : String = "",
 ) -> LintResult {
   let lines = count_lines(content)
   // Inline ignores: parsed up front, applied as a post-pass (below) rather than
@@ -231,6 +232,13 @@ pub fn lint(
     ghalint_policy_map()
   } else {
     {}
+  }
+  // zizmor config (if any): `rules.<id>.disable` / `.ignore`, applied as a
+  // post-pass below alongside the inline-ignore and ghalint-exclude passes.
+  let zizmor_cfg = if zizmor_config == "" {
+    ZizmorConfig::{ disabled: [], ignores: {} }
+  } else {
+    parse_zizmor_config(zizmor_config)
   }
   // Single parse pass: the value tree (for rules), the position node tree, and
   // the line counter all come from one lex+parse of `content`.
@@ -281,6 +289,10 @@ pub fn lint(
           ghalint_excluded(
             d, ghalint_excludes, ghalint_policies, file_path, doc,
           ) {
+          return false
+        }
+        if zizmor_config != "" &&
+          zizmor_config_excluded(d, zizmor_cfg, file_path) {
           return false
         }
         true

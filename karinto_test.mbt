@@ -502,6 +502,124 @@ test "ghalint config: workflow_file_path scopes the exclude" {
 }
 
 ///|
+test "zizmor config: rules.<id>.disable drops the rule everywhere" {
+  // Mirrors a real `zizmor.yml` that turns off `undocumented-permissions`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions:
+    #|    disable: true
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+  let res = @karinto.lint(yaml, zizmor_config=cfg)
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "zizmor config: rules.<id>.ignore scopes by file and line" {
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  // `concurrency-limits` is a workflow-global finding without a line, so a
+  // bare-filename ignore (line == any) is what suppresses it.
+  let cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    ignore:
+    #|      - ci.yml
+  // A non-matching filename leaves the finding in place.
+  let other = @karinto.lint(
+    yaml,
+    zizmor_config=cfg,
+    file_path=".github/workflows/release.yml",
+  )
+  assert_true(
+    other.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length() >
+    0,
+  )
+  // The matching filename (path-boundary suffix) drops it.
+  let hit = @karinto.lint(
+    yaml,
+    zizmor_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    hit.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
+    0,
+  )
+}
+
+///|
+test "zizmor config: rules.<id>.ignore honours a pinned column" {
+  // The job-level `anonymous-definition` finding is stamped at line 3, col 3.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let path = ".github/workflows/ci.yml"
+  // Count the positioned (job-level) anonymous-definition finding at line 3.
+  fn job_anon(cfg : String) -> Int {
+    @karinto.lint(yaml, file_path=path, zizmor_config=cfg).diagnostics
+    .filter(fn(d) {
+      d.rule == "anonymous-definition" && d.pos is Some({ line: 3, .. })
+    })
+    .length()
+  }
+
+  assert_eq(job_anon(""), 1)
+  // Exact column suppresses it.
+  let exact =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3:3
+  assert_eq(job_anon(exact), 0)
+  // A non-matching column does not.
+  let wrong_col =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3:99
+  assert_eq(job_anon(wrong_col), 1)
+  // Line-only (no column) suppresses any column on that line.
+  let line_only =
+    #|rules:
+    #|  anonymous-definition:
+    #|    ignore:
+    #|      - ci.yml:3
+  assert_eq(job_anon(line_only), 0)
+}
+
+///|
 test "inline ignore: karinto alias and trailing explanation" {
   // The `karinto` alias and a free-form note after the bracket are both
   // honoured; comma-separated ids opt out of several rules at once.

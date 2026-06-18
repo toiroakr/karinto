@@ -13,7 +13,7 @@ pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
 
-pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona, file_path? : String, ghalint_config? : String) -> LintResult
+pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona, file_path? : String, ghalint_config? : String, zizmor_config? : String) -> LintResult
 
 pub fn persona_from_string(String) -> Persona
 
