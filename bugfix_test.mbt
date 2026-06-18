@@ -197,6 +197,47 @@ test "unknown-context-or-function: dotted arg to hashFiles is not a context" {
 }
 
 ///|
+// A tab (or newline) between an identifier and its `.` must still be read as a
+// context access — the lookahead now skips the same whitespace as the lexer in
+// `expr.mbt`, so the `githab` typo here is flagged rather than slipping through.
+test "unknown-context-or-function: whitespace before `.` does not hide a typo" {
+  let yaml = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n    steps:\n      - name: \"${{ githab\t.ref }}\"\n        run: echo hi\n"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "unknown-context-or-function",
+        "severity": "error",
+        "message": "unknown context `githab` (did you mean `github`?)",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "github-app-limit-permissions: granular `permission-*` inputs satisfy the limit" {
   let yaml =
     #|name: T
