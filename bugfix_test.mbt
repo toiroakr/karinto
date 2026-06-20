@@ -1,5 +1,5 @@
-// Regression tests for four false positives found while auditing real
-// workflows:
+// Regression tests for false positives / false negatives found while auditing
+// real workflows:
 //   1. `concurrency:` as a plain string (valid GitHub Actions) was wrongly
 //      flagged by `invalid-mapping-values`.
 //   2. `needs.<hyphenated-job-id>.result` was wrongly flagged by
@@ -8,6 +8,9 @@
 //      wrongly flagged by `github-app-limit-permissions`.
 //   4. `ubuntu-slim` (an official GitHub-hosted runner) was wrongly flagged by
 //      `unknown-runner-label`.
+//   5. Workflow steps using a known-outdated action (e.g. `actions/checkout@v3`)
+//      were not flagged by `outdated-action-version` because the rule only ran
+//      on action.yml files.
 
 ///|
 test "invalid-mapping-values: string `concurrency` is valid (not a mapping error)" {
@@ -305,4 +308,27 @@ test "unknown-runner-label: `ubuntu-slim` is an official GitHub-hosted runner" {
       },
     ],
   })
+}
+
+///|
+// Bug #5: workflow step using `actions/checkout@v3` (node16 runner) must fire
+// `outdated-action-version`. Previously the rule was `action_only` so it never
+// ran on workflow files; step-level check was missing entirely.
+test "outdated-action-version: actions/checkout@v3 in workflow step fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    name: Check
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 10
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
 }

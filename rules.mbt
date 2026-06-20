@@ -613,10 +613,10 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "outdated-action-version",
       title: "Outdated action runtime",
-      applies: action_only,
+      applies: workflow_or_action,
       on_doc: Some(check_outdated_action_version),
       on_job: no_job(),
-      on_step: no_step(),
+      on_step: Some(check_outdated_action_step),
     },
     Rule::{
       id: "uses-syntax",
@@ -4579,6 +4579,65 @@ fn check_outdated_action_version(
         _ => ()
       }
     _ => ()
+  }
+}
+
+///|
+// Returns the last major version that uses a deprecated runtime (node12/node16)
+// for well-known GitHub Actions. Versions ≤ this value are outdated.
+fn last_outdated_major(action : String) -> Int? {
+  match action {
+    "actions/checkout" => Some(3)
+    "actions/setup-node" => Some(3)
+    "actions/cache" => Some(3)
+    "actions/upload-artifact" => Some(3)
+    "actions/download-artifact" => Some(3)
+    "actions/setup-python" => Some(3)
+    "actions/setup-java" => Some(3)
+    "actions/setup-go" => Some(3)
+    "actions/github-script" => Some(5)
+    "actions/stale" => Some(8)
+    _ => None
+  }
+}
+
+///|
+fn check_outdated_action_step(
+  _ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) =>
+      if step.at_idx >= 0 {
+        let action = u[:step.at_idx].to_owned()
+        let ref_str = u[step.at_idx + 1:].to_owned()
+        if ref_str.has_prefix("v") {
+          let after_v = ref_str[1:].to_owned()
+          let dot = index_of_char(after_v, '.')
+          let major_str = if dot >= 0 {
+            after_v[:dot].to_owned()
+          } else {
+            after_v
+          }
+          let major = parse_uint(major_str)
+          if major >= 0 {
+            match last_outdated_major(action) {
+              Some(limit) =>
+                if major <= limit {
+                  add_diag(
+                    out,
+                    "outdated-action-version",
+                    Warning,
+                    "action `\{action}@v\{major}` uses a deprecated runner; update to a newer version",
+                  )
+                }
+              None => ()
+            }
+          }
+        }
+      }
+    None => ()
   }
 }
 
