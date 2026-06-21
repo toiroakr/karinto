@@ -4603,20 +4603,43 @@ fn last_outdated_major(action : String) -> Int? {
 
 ///|
 fn check_outdated_action_step(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.uses {
     Some(u) =>
       if step.at_idx >= 0 {
-        let action = u[:step.at_idx].to_owned()
+        let full_action = u[:step.at_idx].to_owned()
+        // Normalize subpath refs (e.g. `actions/cache/restore`) to root
+        // `owner/repo` so they match entries in `last_outdated_major`.
+        let slash1 = index_of_char(full_action, '/')
+        let slash2 = if slash1 >= 0 {
+          let rest = full_action[slash1 + 1:].to_owned()
+          let s = index_of_char(rest, '/')
+          if s >= 0 {
+            slash1 + 1 + s
+          } else {
+            -1
+          }
+        } else {
+          -1
+        }
+        let action = if slash2 >= 0 {
+          full_action[:slash2].to_owned()
+        } else {
+          full_action
+        }
         let ref_str = u[step.at_idx + 1:].to_owned()
         if ref_str.has_prefix("v") {
           let after_v = ref_str[1:].to_owned()
           let dot = index_of_char(after_v, '.')
-          let major_str = if dot >= 0 {
+          let hyphen = index_of_char(after_v, '-')
+          // Take the numeric prefix before the first `.` or `-`.
+          let major_str = if dot >= 0 && (hyphen < 0 || dot < hyphen) {
             after_v[:dot].to_owned()
+          } else if hyphen >= 0 {
+            after_v[:hyphen].to_owned()
           } else {
             after_v
           }
@@ -4625,11 +4648,14 @@ fn check_outdated_action_step(
             match last_outdated_major(action) {
               Some(limit) =>
                 if major <= limit {
-                  add_diag(
+                  add_diag_step_field(
                     out,
+                    ctx,
                     "outdated-action-version",
                     Warning,
-                    "action `\{action}@v\{major}` uses a deprecated runner; update to a newer version",
+                    "action `\{full_action}@v\{major}` uses a deprecated Node.js runtime; update to a newer version",
+                    step,
+                    "uses",
                   )
                 }
               None => ()

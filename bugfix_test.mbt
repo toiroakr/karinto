@@ -368,3 +368,38 @@ test "outdated-action-version: actions/checkout@v3 in workflow step fires warnin
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
 }
+
+///|
+// Subpath ref normalization: `actions/cache/restore@v3` must match the root
+// `actions/cache` entry in `last_outdated_major`.
+test "outdated-action-version: actions/cache/restore@v3 subpath ref fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/cache/restore@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+}
+
+///|
+// Hyphen suffix in ref: `v3-beta` must still be treated as major 3.
+test "outdated-action-version: actions/checkout@v3-beta fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/checkout@v3-beta
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+}
