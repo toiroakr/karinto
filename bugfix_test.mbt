@@ -311,6 +311,42 @@ test "unknown-runner-label: `ubuntu-slim` is an official GitHub-hosted runner" {
 }
 
 ///|
+// Bug #6: unknown runner labels were only flagged when the label had an
+// ubuntu-/macos-/windows- prefix or a close suggestion. Vendor-specific labels
+// like `depot-ubuntu-22.04-arm-4` (depot.dev) and `codspeed-macro` (CodSpeed)
+// slipped through silently, diverging from actionlint which flags all unknown
+// labels. Fix: remove the `looks_hosted` guard and flag everything not in
+// known_runner_labels() (which already contains self-hosted meta-labels).
+test "unknown-runner-label: depot-ubuntu-22.04-arm-4 fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: depot-ubuntu-22.04-arm-4
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 1)
+}
+
+///|
+test "unknown-runner-label: codspeed-macro fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  bench:
+    #|    runs-on: codspeed-macro
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 1)
+}
+
+///|
 // Bug #5: workflow step using `actions/checkout@v3` (node16 runner) must fire
 // `outdated-action-version`. Previously the rule was `action_only` so it never
 // ran on workflow files; step-level check was missing entirely.

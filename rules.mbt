@@ -6226,15 +6226,10 @@ fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
     return
   }
   let hint = suggest(label, labels)
-  // Group labels (e.g. `gpu`, `org/runner-pool`) are user-defined. Flag a
-  // label only if it looks like a GitHub-hosted runner family OR there is a
-  // close known-label suggestion (catches typos like `ubunto-latest`).
-  let looks_hosted = label.has_prefix("ubuntu-") ||
-    label.has_prefix("macos-") ||
-    label.has_prefix("windows-")
-  if !looks_hosted && hint is None {
-    return
-  }
+  // Flag every label not in the known list. This matches actionlint behaviour:
+  // any label outside the known set is considered unknown regardless of prefix.
+  // Self-hosted meta-labels (self-hosted, linux, x64, …) are already in
+  // known_runner_labels(), so they still pass silently.
   let msg = match hint {
     Some(c) => "unknown runner label `\{label}` (did you mean `\{c}`?)"
     None => "unknown runner label `\{label}`"
