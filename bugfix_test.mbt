@@ -407,3 +407,21 @@ test "outdated-action-version: actions/checkout@v3-beta fires warning" {
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
 }
+
+///|
+// Case-insensitive lookup: GitHub owner/repo names are case-insensitive so
+// `Actions/Checkout@v3` must match the same entry as `actions/checkout@v3`.
+test "outdated-action-version: Actions/Checkout@v3 (mixed case) fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: Actions/Checkout@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+}

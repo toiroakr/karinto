@@ -4611,25 +4611,10 @@ fn check_outdated_action_step(
     Some(u) =>
       if step.at_idx >= 0 {
         let full_action = u[:step.at_idx].to_owned()
-        // Normalize subpath refs (e.g. `actions/cache/restore`) to root
-        // `owner/repo` so they match entries in `last_outdated_major`.
-        let slash1 = index_of_char(full_action, '/')
-        let slash2 = if slash1 >= 0 {
-          let rest = full_action[slash1 + 1:].to_owned()
-          let s = index_of_char(rest, '/')
-          if s >= 0 {
-            slash1 + 1 + s
-          } else {
-            -1
-          }
-        } else {
-          -1
-        }
-        let action = if slash2 >= 0 {
-          full_action[:slash2].to_owned()
-        } else {
-          full_action
-        }
+        // bare_repo_of strips @ref and normalizes subpath refs to root owner/repo.
+        // to_lower() makes lookup case-insensitive (GitHub treats owner/repo
+        // names case-insensitively, e.g. `Actions/Checkout` == `actions/checkout`).
+        let action = bare_repo_of(u.to_lower())
         let ref_str = u[step.at_idx + 1:].to_owned()
         if ref_str.has_prefix("v") {
           let after_v = ref_str[1:].to_owned()
