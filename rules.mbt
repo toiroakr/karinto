@@ -6256,13 +6256,26 @@ fn check_unknown_runner_label(
 ) -> Unit {
   match job.raw.get("runs-on") {
     Some(String(s)) => flag_runner_label(s, out)
-    Some(Array(arr)) =>
+    Some(Array(arr)) => {
+      // When `self-hosted` is one of the labels, the rest are routing hints
+      // for self-hosted infrastructure. actionlint skips the unknown-label
+      // check in that case, so we do the same.
+      let mut has_self_hosted = false
       for item in arr {
         match item {
-          String(s) => flag_runner_label(s, out)
+          String("self-hosted") => has_self_hosted = true
           _ => ()
         }
       }
+      if not(has_self_hosted) {
+        for item in arr {
+          match item {
+            String(s) => flag_runner_label(s, out)
+            _ => ()
+          }
+        }
+      }
+    }
     _ => ()
   }
 }

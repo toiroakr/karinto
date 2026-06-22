@@ -15,6 +15,10 @@
 //   6. Vendor-prefix runner labels (`depot-ubuntu-*`, `codspeed-macro`) were not
 //      flagged by `unknown-runner-label` because the check only targeted
 //      ubuntu-/macos-/windows- prefixes, ignoring all other vendor labels.
+//   7. `runs-on: [self-hosted, custom-pool]` was wrongly flagged by
+//      `unknown-runner-label` for `custom-pool`. actionlint skips unknown-label
+//      checks when `self-hosted` is present in the array (routing labels for
+//      self-hosted infrastructure are user-defined and not validated).
 
 ///|
 test "invalid-mapping-values: string `concurrency` is valid (not a mapping error)" {
@@ -428,4 +432,22 @@ test "outdated-action-version: Actions/Checkout@v3 (mixed case) fires warning" {
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
   assert_true(ov[0].message.contains("deprecated Node.js runtime"))
+}
+
+///|
+// Bug #7: `runs-on: [self-hosted, custom-pool]` was wrongly flagged for
+// `custom-pool`. When `self-hosted` is present in the array, actionlint treats
+// remaining labels as self-hosted routing hints and skips unknown-label checks.
+test "unknown-runner-label: [self-hosted, custom-pool] does not fire warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, custom-pool]
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 0)
 }
