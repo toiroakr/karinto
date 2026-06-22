@@ -1856,6 +1856,13 @@
         "extra:obfuscation"
       ],
       "reason": "Fixture carries `# zizmor: ignore[obfuscation]` trailing several `if:` expressions. karinto reports obfuscation at a line that differs from the comment line, so its line-scoped inline-ignore cannot match; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/actionlint/testdata/ok/issue-442-download-artifact-v3-workaround.yaml",
+      "expect": [
+        "karinto-only"
+      ],
+      "reason": "actions/download-artifact@v3-node20 is a node20-runtime backport of the v3 API, not a deprecated runtime. karinto's hyphen-suffix parsing extracts major=3 and fires outdated-action-version, but this tag deliberately targets node20. Known false positive; actionlint is correctly silent."
     }
   ]
 }
