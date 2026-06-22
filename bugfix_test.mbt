@@ -10,7 +10,11 @@
 //      `unknown-runner-label`.
 //   5. Workflow steps using a known-outdated action (e.g. `actions/checkout@v3`)
 //      were not flagged by `outdated-action-version` because the rule only ran
-//      on action.yml files.
+//      on action.yml files. Also: subpath refs (`actions/cache/restore@v3`) and
+//      pre-release refs (`actions/checkout@v3-beta`) were incorrectly skipped.
+//   6. Vendor-prefix runner labels (`depot-ubuntu-*`, `codspeed-macro`) were not
+//      flagged by `unknown-runner-label` because the check only targeted
+//      ubuntu-/macos-/windows- prefixes, ignoring all other vendor labels.
 
 ///|
 test "invalid-mapping-values: string `concurrency` is valid (not a mapping error)" {
