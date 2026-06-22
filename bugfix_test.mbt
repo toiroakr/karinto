@@ -371,6 +371,7 @@ test "outdated-action-version: actions/checkout@v3 in workflow step fires warnin
   let res = @karinto.lint(yaml)
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
 }
 
 ///|
@@ -389,6 +390,7 @@ test "outdated-action-version: actions/cache/restore@v3 subpath ref fires warnin
   let res = @karinto.lint(yaml)
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
 }
 
 ///|
@@ -406,6 +408,7 @@ test "outdated-action-version: actions/checkout@v3-beta fires warning" {
   let res = @karinto.lint(yaml)
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
 }
 
 ///|
@@ -424,4 +427,5 @@ test "outdated-action-version: Actions/Checkout@v3 (mixed case) fires warning" {
   let res = @karinto.lint(yaml)
   let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
   assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
 }
