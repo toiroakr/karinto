@@ -13,5 +13,5 @@
 
 [tools]
 "aqua:rhysd/actionlint" = "1.7.12"
-"ubi:zizmorcore/zizmor" = "1.25.2"
+"ubi:zizmorcore/zizmor" = "1.26.1"
 "aqua:suzuki-shunsuke/ghalint" = "1.5.6"
