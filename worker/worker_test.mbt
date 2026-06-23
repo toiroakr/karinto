@@ -73,7 +73,7 @@ test "lint_string: persona param gates pedantic findings" {
   // Default (no persona) is auditor — self-hosted-runner (a pedantic finding)
   // surfaces in diagnostics.
   let auditor = @worker.lint_string(yaml, "workflow", "", "")
-  inspect(rule_in(auditor, "diagnostics", "self-hosted-runner"), content="true")
+  assert_true(rule_in(auditor, "diagnostics", "self-hosted-runner"))
   // persona=regular moves it from diagnostics to ignored (not dropped silently).
   let regular = @worker.lint_string(
     yaml,
@@ -82,11 +82,8 @@ test "lint_string: persona param gates pedantic findings" {
     "",
     persona_str="regular",
   )
-  inspect(
-    rule_in(regular, "diagnostics", "self-hosted-runner"),
-    content="false",
-  )
-  inspect(rule_in(regular, "ignored", "self-hosted-runner"), content="true")
+  assert_false(rule_in(regular, "diagnostics", "self-hosted-runner"))
+  assert_true(rule_in(regular, "ignored", "self-hosted-runner"))
   // persona=pedantic brings it back to diagnostics.
   let pedantic = @worker.lint_string(
     yaml,
@@ -95,10 +92,7 @@ test "lint_string: persona param gates pedantic findings" {
     "",
     persona_str="pedantic",
   )
-  inspect(
-    rule_in(pedantic, "diagnostics", "self-hosted-runner"),
-    content="true",
-  )
+  assert_true(rule_in(pedantic, "diagnostics", "self-hosted-runner"))
 }
 
 ///|
