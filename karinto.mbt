@@ -150,6 +150,10 @@ pub(all) struct LintResult {
   stats : Stats
   diagnostics : Array[Diagnostic]
   parse_error : String?
+  // Findings that were generated but suppressed by an inline ignore comment,
+  // a ghalint/zizmor config exclude, or the persona gate. Omitted from JSON
+  // when empty so the response schema is unchanged for existing callers.
+  ignored : Array[Diagnostic]
 }
 
 ///|
@@ -172,6 +176,9 @@ pub impl ToJson for LintResult with fn to_json(self) {
   match self.parse_error {
     Some(e) => m["parse_error"] = e.to_json()
     None => ()
+  }
+  if self.ignored.length() > 0 {
+    m["ignored"] = self.ignored.to_json()
   }
   m.to_json()
 }
@@ -249,6 +256,7 @@ pub fn lint(
         stats: Stats::{ jobs: 0, steps: 0, lines },
         diagnostics: [],
         parse_error: Some(e.message()),
+        ignored: [],
       }
   } noraise {
     lp => {
@@ -281,31 +289,42 @@ pub fn lint(
       // resolved line fall back to a file-wide match — any inline ignore in the
       // file that names the rule suppresses them. ghalint excludes drop findings
       // by policy/file/job/step/action scope (line-independent).
-      let kept = diagnostics.filter(fn(d) {
+      // Suppressed findings are collected into `ignored` rather than discarded
+      // so callers can inspect what was silenced.
+      let ignored : Array[Diagnostic] = []
+      let kept : Array[Diagnostic] = []
+      for d in diagnostics {
         if is_inline_ignored(d, inline_ignores) {
-          return false
-        }
-        if ghalint_excludes.length() > 0 &&
+          ignored.push(d)
+        } else if ghalint_excludes.length() > 0 &&
           ghalint_excluded(
             d, ghalint_excludes, ghalint_policies, file_path, doc,
           ) {
-          return false
-        }
-        if zizmor_config != "" &&
+          ignored.push(d)
+        } else if zizmor_config != "" &&
           zizmor_config_excluded(d, zizmor_cfg, file_path) {
-          return false
+          ignored.push(d)
+        } else {
+          kept.push(d)
         }
-        true
-      })
+      }
       // Persona gate: keep findings whose minimum persona is at or below the
       // requested one. `Auditor` (the default) keeps everything.
       let want = persona_rank(persona)
-      let visible = kept.filter(fn(d) { persona_rank(d.persona) <= want })
+      let visible : Array[Diagnostic] = []
+      for d in kept {
+        if persona_rank(d.persona) <= want {
+          visible.push(d)
+        } else {
+          ignored.push(d)
+        }
+      }
       LintResult::{
         kind: resolved_kind,
         stats,
         diagnostics: visible,
         parse_error: None,
+        ignored,
       }
     }
   }

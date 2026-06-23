@@ -71,6 +71,7 @@ pub(all) struct LintResult {
   stats : Stats
   diagnostics : Array[Diagnostic]
   parse_error : String?
+  ignored : Array[Diagnostic]
 }
 pub impl ToJson for LintResult
 

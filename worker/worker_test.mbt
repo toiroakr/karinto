@@ -37,11 +37,44 @@ test "lint_string: persona param gates pedantic findings" {
     #|      contents: read
     #|    steps:
     #|      - run: echo hi
+  // Whether `rule_id` appears in the named section (`"diagnostics"` or
+  // `"ignored"`) of the lint_string JSON envelope.
+  fn rule_in(json_str : String, section : String, rule_id : String) -> Bool {
+    let doc : Json = @json.parse(json_str) catch {
+      e => abort("rule_in: failed to parse lint_string output: \{e}")
+    }
+    match doc {
+      Object(outer) =>
+        match outer.get("result") {
+          Some(Object(result)) =>
+            match result.get(section) {
+              Some(Array(arr)) => {
+                let mut found = false
+                for d in arr {
+                  match d {
+                    Object(dm) =>
+                      match dm.get("rule") {
+                        Some(String(r)) => if r == rule_id { found = true }
+                        _ => ()
+                      }
+                    _ => ()
+                  }
+                }
+                found
+              }
+              _ => false
+            }
+          _ => false
+        }
+      _ => false
+    }
+  }
+
   // Default (no persona) is auditor — self-hosted-runner (a pedantic finding)
-  // surfaces.
+  // surfaces in diagnostics.
   let auditor = @worker.lint_string(yaml, "workflow", "", "")
-  inspect(auditor.contains("self-hosted-runner"), content="true")
-  // persona=regular drops it.
+  assert_true(rule_in(auditor, "diagnostics", "self-hosted-runner"))
+  // persona=regular moves it from diagnostics to ignored (not dropped silently).
   let regular = @worker.lint_string(
     yaml,
     "workflow",
@@ -49,8 +82,9 @@ test "lint_string: persona param gates pedantic findings" {
     "",
     persona_str="regular",
   )
-  inspect(regular.contains("self-hosted-runner"), content="false")
-  // persona=pedantic brings it back.
+  assert_false(rule_in(regular, "diagnostics", "self-hosted-runner"))
+  assert_true(rule_in(regular, "ignored", "self-hosted-runner"))
+  // persona=pedantic brings it back to diagnostics.
   let pedantic = @worker.lint_string(
     yaml,
     "workflow",
@@ -58,7 +92,7 @@ test "lint_string: persona param gates pedantic findings" {
     "",
     persona_str="pedantic",
   )
-  inspect(pedantic.contains("self-hosted-runner"), content="true")
+  assert_true(rule_in(pedantic, "diagnostics", "self-hosted-runner"))
 }
 
 ///|
