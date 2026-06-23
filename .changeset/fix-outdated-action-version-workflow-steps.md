@@ -11,7 +11,10 @@ The rule previously only checked an action file's own `runs.using` field, so
 silently ignored. The rule now also inspects `uses:` in workflow steps and fires
 when a well-known action's major version is known to use a deprecated runtime.
 Subpath refs (`actions/cache/restore@v3`), pre-release suffixes (`v3-beta`), and
-mixed-case refs (`Actions/Checkout@v3`) are all normalized correctly.
+mixed-case refs (`Actions/Checkout@v3`) are all normalized correctly. Runtime-upgrade
+backport tags such as `@v3-node20` (which explicitly targets node20) are correctly
+excluded. The diagnostic message now echoes the original ref string from the workflow
+(e.g. `@v3-beta`) rather than reconstructing it as `@v<major>`.
 
 **unknown-runner-label**
 
