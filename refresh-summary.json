@@ -1,0 +1,15 @@
+{
+  "changed": true,
+  "updates": [
+    {
+      "name": "zizmor",
+      "repo": "zizmorcore/zizmor",
+      "from": "1.25.2",
+      "to": "1.26.1",
+      "tag": "v1.26.1",
+      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.26.1",
+      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.25.2...v1.26.1",
+      "notes": "This is a small corrective release for [1.26.0](https://docs.zizmor.sh/release-notes/#1260)."
+    }
+  ]
+}
