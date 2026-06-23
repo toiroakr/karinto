@@ -613,10 +613,10 @@ pub fn all_rules() -> Array[Rule] {
     Rule::{
       id: "outdated-action-version",
       title: "Outdated action runtime",
-      applies: action_only,
+      applies: workflow_or_action,
       on_doc: Some(check_outdated_action_version),
       on_job: no_job(),
-      on_step: no_step(),
+      on_step: Some(check_outdated_action_step),
     },
     Rule::{
       id: "uses-syntax",
@@ -4582,6 +4582,85 @@ fn check_outdated_action_version(
   }
 }
 
+///|
+// Returns the last major version that uses a deprecated runtime (node12/node16)
+// for well-known GitHub Actions. Versions ≤ this value are outdated.
+fn last_outdated_major(action : String) -> Int? {
+  match action {
+    "actions/checkout" => Some(3)
+    "actions/setup-node" => Some(3)
+    "actions/cache" => Some(3)
+    "actions/upload-artifact" => Some(3)
+    "actions/download-artifact" => Some(3)
+    "actions/setup-python" => Some(3)
+    "actions/setup-java" => Some(3)
+    "actions/setup-go" => Some(3)
+    "actions/github-script" => Some(5)
+    "actions/stale" => Some(8)
+    _ => None
+  }
+}
+
+///|
+fn check_outdated_action_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) =>
+      if step.at_idx >= 0 {
+        let full_action = u[:step.at_idx].to_owned()
+        // bare_repo_of strips @ref and normalizes subpath refs to root owner/repo.
+        // to_lower() makes lookup case-insensitive (GitHub treats owner/repo
+        // names case-insensitively, e.g. `Actions/Checkout` == `actions/checkout`).
+        let action = bare_repo_of(u.to_lower())
+        let ref_str = u[step.at_idx + 1:].to_owned()
+        if ref_str.has_prefix("v") {
+          let after_v = ref_str[1:].to_owned()
+          let dot = index_of_char(after_v, '.')
+          let hyphen = index_of_char(after_v, '-')
+          // Take the numeric prefix before the first `.` or `-`.
+          let major_str = if dot >= 0 && (hyphen < 0 || dot < hyphen) {
+            after_v[:dot].to_owned()
+          } else if hyphen >= 0 {
+            after_v[:hyphen].to_owned()
+          } else {
+            after_v
+          }
+          // A hyphen suffix naming a newer Node.js runtime (e.g. "-node20") is a
+          // runtime-upgrade backport tag that deliberately targets node20+. Do not
+          // flag it as using a deprecated runtime.
+          let node_backport = if hyphen >= 0 {
+            let suffix = after_v[hyphen + 1:].to_owned()
+            suffix.has_prefix("node") && parse_uint(suffix[4:].to_owned()) >= 20
+          } else {
+            false
+          }
+          let major = parse_uint(major_str)
+          if major >= 0 && !node_backport {
+            match last_outdated_major(action) {
+              Some(limit) =>
+                if major <= limit {
+                  add_diag_step_field(
+                    out,
+                    ctx,
+                    "outdated-action-version",
+                    Warning,
+                    "action `\{full_action}@\{ref_str}` uses a deprecated Node.js runtime; update to a newer version",
+                    step,
+                    "uses",
+                  )
+                }
+              None => ()
+            }
+          }
+        }
+      }
+    None => ()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Rule: uses-syntax (actionlint)
 // ---------------------------------------------------------------------------
@@ -6167,15 +6246,10 @@ fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
     return
   }
   let hint = suggest(label, labels)
-  // Group labels (e.g. `gpu`, `org/runner-pool`) are user-defined. Flag a
-  // label only if it looks like a GitHub-hosted runner family OR there is a
-  // close known-label suggestion (catches typos like `ubunto-latest`).
-  let looks_hosted = label.has_prefix("ubuntu-") ||
-    label.has_prefix("macos-") ||
-    label.has_prefix("windows-")
-  if !looks_hosted && hint is None {
-    return
-  }
+  // Flag every label not in the known list. This matches actionlint behaviour:
+  // any label outside the known set is considered unknown regardless of prefix.
+  // Self-hosted meta-labels (self-hosted, linux, x64, …) are already in
+  // known_runner_labels(), so they still pass silently.
   let msg = match hint {
     Some(c) => "unknown runner label `\{label}` (did you mean `\{c}`?)"
     None => "unknown runner label `\{label}`"
@@ -6191,13 +6265,26 @@ fn check_unknown_runner_label(
 ) -> Unit {
   match job.raw.get("runs-on") {
     Some(String(s)) => flag_runner_label(s, out)
-    Some(Array(arr)) =>
+    Some(Array(arr)) => {
+      // When `self-hosted` is one of the labels, the rest are routing hints
+      // for self-hosted infrastructure. actionlint skips the unknown-label
+      // check in that case, so we do the same.
+      let mut has_self_hosted = false
       for item in arr {
         match item {
-          String(s) => flag_runner_label(s, out)
+          String("self-hosted") => has_self_hosted = true
           _ => ()
         }
       }
+      if not(has_self_hosted) {
+        for item in arr {
+          match item {
+            String(s) => flag_runner_label(s, out)
+            _ => ()
+          }
+        }
+      }
+    }
     _ => ()
   }
 }

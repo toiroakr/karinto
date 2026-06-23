@@ -1,5 +1,5 @@
-// Regression tests for four false positives found while auditing real
-// workflows:
+// Regression tests for false positives / false negatives found while auditing
+// real workflows:
 //   1. `concurrency:` as a plain string (valid GitHub Actions) was wrongly
 //      flagged by `invalid-mapping-values`.
 //   2. `needs.<hyphenated-job-id>.result` was wrongly flagged by
@@ -8,6 +8,17 @@
 //      wrongly flagged by `github-app-limit-permissions`.
 //   4. `ubuntu-slim` (an official GitHub-hosted runner) was wrongly flagged by
 //      `unknown-runner-label`.
+//   5. Workflow steps using a known-outdated action (e.g. `actions/checkout@v3`)
+//      were not flagged by `outdated-action-version` because the rule only ran
+//      on action.yml files. Also: subpath refs (`actions/cache/restore@v3`) and
+//      pre-release refs (`actions/checkout@v3-beta`) were incorrectly skipped.
+//   6. Vendor-prefix runner labels (`depot-ubuntu-*`, `codspeed-macro`) were not
+//      flagged by `unknown-runner-label` because the check only targeted
+//      ubuntu-/macos-/windows- prefixes, ignoring all other vendor labels.
+//   7. `runs-on: [self-hosted, custom-pool]` was wrongly flagged by
+//      `unknown-runner-label` for `custom-pool`. actionlint skips unknown-label
+//      checks when `self-hosted` is present in the array (routing labels for
+//      self-hosted infrastructure are user-defined and not validated).
 
 ///|
 test "invalid-mapping-values: string `concurrency` is valid (not a mapping error)" {
@@ -305,4 +316,156 @@ test "unknown-runner-label: `ubuntu-slim` is an official GitHub-hosted runner" {
       },
     ],
   })
+}
+
+///|
+// Bug #6: unknown runner labels were only flagged when the label had an
+// ubuntu-/macos-/windows- prefix or a close suggestion. Vendor-specific labels
+// like `depot-ubuntu-22.04-arm-4` (depot.dev) and `codspeed-macro` (CodSpeed)
+// slipped through silently, diverging from actionlint which flags all unknown
+// labels. Fix: remove the `looks_hosted` guard and flag everything not in
+// known_runner_labels() (which already contains self-hosted meta-labels).
+test "unknown-runner-label: depot-ubuntu-22.04-arm-4 fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: depot-ubuntu-22.04-arm-4
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 1)
+}
+
+///|
+test "unknown-runner-label: codspeed-macro fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  bench:
+    #|    runs-on: codspeed-macro
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 1)
+}
+
+///|
+// Bug #5: workflow step using `actions/checkout@v3` (node16 runner) must fire
+// `outdated-action-version`. Previously the rule was `action_only` so it never
+// ran on workflow files; step-level check was missing entirely.
+test "outdated-action-version: actions/checkout@v3 in workflow step fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    name: Check
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 10
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
+}
+
+///|
+// Subpath ref normalization: `actions/cache/restore@v3` must match the root
+// `actions/cache` entry in `last_outdated_major`.
+test "outdated-action-version: actions/cache/restore@v3 subpath ref fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/cache/restore@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
+}
+
+///|
+// Hyphen suffix in ref: `v3-beta` must still be treated as major 3.
+test "outdated-action-version: actions/checkout@v3-beta fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/checkout@v3-beta
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
+}
+
+///|
+// Runtime-upgrade backport: `v3-node20` is a node20 backport of the v3 API
+// and explicitly targets a non-deprecated runtime. It must not fire.
+test "outdated-action-version: actions/download-artifact@v3-node20 does not fire" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/download-artifact@v3-node20
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 0)
+}
+
+///|
+// Case-insensitive lookup: GitHub owner/repo names are case-insensitive so
+// `Actions/Checkout@v3` must match the same entry as `actions/checkout@v3`.
+test "outdated-action-version: Actions/Checkout@v3 (mixed case) fires warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: Actions/Checkout@v3
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 1)
+  assert_true(ov[0].message.contains("deprecated Node.js runtime"))
+}
+
+///|
+// Bug #7: `runs-on: [self-hosted, custom-pool]` was wrongly flagged for
+// `custom-pool`. When `self-hosted` is present in the array, actionlint treats
+// remaining labels as self-hosted routing hints and skips unknown-label checks.
+test "unknown-runner-label: [self-hosted, custom-pool] does not fire warning" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, custom-pool]
+    #|    steps:
+    #|      - run: echo ok
+  let res = @karinto.lint(yaml)
+  let rl = res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" })
+  assert_eq(rl.length(), 0)
 }
