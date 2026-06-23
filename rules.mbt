@@ -3125,11 +3125,34 @@ fn text_has_computed_index(text : String) -> Bool {
 }
 
 ///|
+/// Returns `true` when the step's `if:` condition is statically false
+/// (`if: false` or `if: ${{ false }}`), meaning the step is unreachable
+/// and should not be audited.
+fn step_has_static_false_if(step : StepInfo) -> Bool {
+  match step.raw.get("if") {
+    Some(Boolean(false)) => true
+    Some(String(s)) => {
+      let t = s.trim(chars=" \t\n\r").to_owned()
+      if t.has_prefix("${{") && t.has_suffix("}}") {
+        let inner = t[3:t.length() - 2].trim(chars=" \t\n\r").to_owned()
+        inner == "false"
+      } else {
+        false
+      }
+    }
+    _ => false
+  }
+}
+
+///|
 fn check_obfuscation(
   _ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  if step_has_static_false_if(step) {
+    return
+  }
   match step.uses {
     Some(u) =>
       if step.at_idx >= 0 {
@@ -4037,6 +4060,16 @@ fn eval_tag_push_inner(s : String) -> Bool? {
     (lo.contains("'refs/tags/'") || lo.contains("\"refs/tags/\"")) {
     return Some(true)
   }
+  // `github.ref_type == 'tag'` — under a tag push `github.ref_type` is `tag`.
+  if lo.contains("github.ref_type") &&
+    (
+      lo.contains("== 'tag'") ||
+      lo.contains("== \"tag\"") ||
+      lo.contains("=='tag'") ||
+      lo.contains("==\"tag\"")
+    ) {
+    return Some(true)
+  }
   None
 }
 
@@ -4483,6 +4516,9 @@ fn check_unpinned_tools(
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  if step_has_static_false_if(step) {
+    return
+  }
   match step.run {
     Some(r) =>
       if run_has_pipe_to_shell(r) {
