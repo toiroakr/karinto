@@ -1856,6 +1856,21 @@
         "extra:obfuscation"
       ],
       "reason": "Fixture carries `# zizmor: ignore[obfuscation]` trailing several `if:` expressions. karinto reports obfuscation at a line that differs from the comment line, so its line-scoped inline-ignore cannot match; zizmor anchors a node-scoped ignore at the leaf. Known scoping-model divergence (line-scoped vs node-scoped inline ignores)."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/cache-poisoning/trigger-heuristics/tag-and-release.yml",
+      "expect": [
+        "extra:cache-poisoning"
+      ],
+      "reason": "zizmor 1.26.0 added tag-event trigger heuristics for cache-poisoning: when the workflow is gated on `push: tags` or `release` events only, the cache key cannot be tainted by a PR actor. karinto has not yet implemented this heuristic. Remove this entry once karinto catches up."
+    },
+    {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/unpinned-tools/if-false.yml",
+      "expect": [
+        "extra:unpinned-tools",
+        "extra:obfuscation"
+      ],
+      "reason": "zizmor 1.26.1 fixed issue #2059: steps whose `if:` guard is statically false (e.g. `if: false`, `if: ${{ false }}`) are unreachable and should not be audited. karinto has not yet implemented this guard-condition pruning. Remove this entry once karinto skips statically-dead steps."
     }
   ]
 }

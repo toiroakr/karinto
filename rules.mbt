@@ -6454,7 +6454,12 @@ fn check_undocumented_permissions(
         for e in entries {
           let (_, before, comment) = e
           let kv = trim_ws(before)
-          if comment == "" && kv != "contents: read" {
+          // Accept YAML-quoted forms: `contents: "read"` and `contents: 'read'`
+          // are semantically identical to the self-explanatory `contents: read`.
+          let kv_is_contents_read = kv == "contents: read" ||
+            kv == "contents: \"read\"" ||
+            kv == "contents: 'read'"
+          if comment == "" && not(kv_is_contents_read) {
             uncommented = uncommented + 1
           }
         }
