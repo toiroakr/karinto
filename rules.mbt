@@ -4628,8 +4628,17 @@ fn check_outdated_action_step(
           } else {
             after_v
           }
+          // A hyphen suffix naming a newer Node.js runtime (e.g. "-node20") is a
+          // runtime-upgrade backport tag that deliberately targets node20+. Do not
+          // flag it as using a deprecated runtime.
+          let node_backport = if hyphen >= 0 {
+            let suffix = after_v[hyphen + 1:].to_owned()
+            suffix.has_prefix("node") && parse_uint(suffix[4:].to_owned()) >= 20
+          } else {
+            false
+          }
           let major = parse_uint(major_str)
-          if major >= 0 {
+          if major >= 0 && !node_backport {
             match last_outdated_major(action) {
               Some(limit) =>
                 if major <= limit {
@@ -4638,7 +4647,7 @@ fn check_outdated_action_step(
                     ctx,
                     "outdated-action-version",
                     Warning,
-                    "action `\{full_action}@v\{major}` uses a deprecated Node.js runtime; update to a newer version",
+                    "action `\{full_action}@\{ref_str}` uses a deprecated Node.js runtime; update to a newer version",
                     step,
                     "uses",
                   )

@@ -12,7 +12,8 @@ function isOutdatedActionVersion(x) {
     x.rule === "outdated-action-version" &&
     typeof x.message === "string" &&
     x.message.startsWith("action `") &&
-    x.message.includes("uses a deprecated Node.js runtime")
+    x.message.includes("uses a deprecated Node.js runtime") &&
+    x.message.endsWith("update to a newer version")
   );
 }
 

@@ -416,6 +416,24 @@ test "outdated-action-version: actions/checkout@v3-beta fires warning" {
 }
 
 ///|
+// Runtime-upgrade backport: `v3-node20` is a node20 backport of the v3 API
+// and explicitly targets a non-deprecated runtime. It must not fire.
+test "outdated-action-version: actions/download-artifact@v3-node20 does not fire" {
+  let yaml =
+    #|name: CI
+    #|on: push
+    #|jobs:
+    #|  check:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/download-artifact@v3-node20
+    #|      - run: echo done
+  let res = @karinto.lint(yaml)
+  let ov = res.diagnostics.filter(fn(d) { d.rule == "outdated-action-version" })
+  assert_eq(ov.length(), 0)
+}
+
+///|
 // Case-insensitive lookup: GitHub owner/repo names are case-insensitive so
 // `Actions/Checkout@v3` must match the same entry as `actions/checkout@v3`.
 test "outdated-action-version: Actions/Checkout@v3 (mixed case) fires warning" {
