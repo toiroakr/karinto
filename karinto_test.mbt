@@ -677,3 +677,129 @@ test "positions: merge key column tolerates extra spaces after dash" {
   assert_true(mk.length() == 1)
   assert_true(mk[0].pos is Some({ line: 7, col: 11 }))
 }
+
+// ---------------------------------------------------------------------------
+// ignored: suppressed findings surface in LintResult.ignored
+// ---------------------------------------------------------------------------
+
+///|
+test "ignored: inline ignore comment moves finding to ignored" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ github.event.issue.title }}" # zizmor: ignore[template-injection]
+  let res = @karinto.lint(yaml)
+  // The suppressed finding must not appear in diagnostics…
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "template-injection" }).length(),
+    0,
+  )
+  // …but must be visible in ignored.
+  assert_true(
+    res.ignored.filter(fn(d) { d.rule == "template-injection" }).length() > 0,
+  )
+}
+
+///|
+test "ignored: ghalint config exclude moves finding to ignored" {
+  let yaml =
+    #|on: workflow_call
+    #|jobs:
+    #|  build:
+    #|    uses: ./.github/workflows/reusable.yml
+    #|    secrets: inherit
+  let cfg =
+    #|excludes:
+    #|  - policy_name: deny_inherit_secrets
+  let res = @karinto.lint(yaml, ghalint_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length(),
+    0,
+  )
+  assert_true(
+    res.ignored.filter(fn(d) { d.rule == "secrets-inherit" }).length() > 0,
+  )
+}
+
+///|
+test "ignored: zizmor config disable moves finding to ignored" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions:
+    #|    disable: true
+  let res = @karinto.lint(yaml, zizmor_config=cfg)
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  assert_true(
+    res.ignored.filter(fn(d) { d.rule == "undocumented-permissions" }).length() >
+    0,
+  )
+}
+
+///|
+test "ignored: persona gate moves below-threshold findings to ignored" {
+  // At Regular persona, Auditor-only findings like `secrets-outside-env` are
+  // hidden. They must appear in `ignored` rather than disappear silently.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ secrets.TOKEN }}"
+  let res = @karinto.lint(yaml, persona=@karinto.Persona::Regular)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "secrets-outside-env" }).length(),
+    0,
+  )
+  assert_true(
+    res.ignored.filter(fn(d) { d.rule == "secrets-outside-env" }).length() > 0,
+  )
+}
+
+///|
+test "ignored: empty when nothing is suppressed" {
+  // A completely clean workflow with no inline ignores or config excludes must
+  // yield an empty ignored array (and consequently no `ignored` key in JSON).
+  let yaml =
+    #|on: push
+    #|name: CI
+    #|concurrency:
+    #|  group: ci
+    #|  cancel-in-progress: true
+    #|jobs:
+    #|  build:
+    #|    name: Build
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+  let res = @karinto.lint(yaml)
+  assert_eq(res.ignored.length(), 0)
+  // The JSON output must not contain an `ignored` key.
+  let j = res.to_json()
+  assert_true(
+    match j {
+      Object(m) => !m.contains("ignored")
+      _ => false
+    },
+  )
+}
