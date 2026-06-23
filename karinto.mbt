@@ -290,38 +290,35 @@ pub fn lint(
       // file that names the rule suppresses them. ghalint excludes drop findings
       // by policy/file/job/step/action scope (line-independent).
       // Suppressed findings are collected into `ignored` rather than discarded
-      // so callers can inspect what was silenced and why.
+      // so callers can inspect what was silenced.
       let ignored : Array[Diagnostic] = []
-      let kept = diagnostics.filter(fn(d) {
+      let kept : Array[Diagnostic] = []
+      for d in diagnostics {
         if is_inline_ignored(d, inline_ignores) {
           ignored.push(d)
-          return false
-        }
-        if ghalint_excludes.length() > 0 &&
+        } else if ghalint_excludes.length() > 0 &&
           ghalint_excluded(
             d, ghalint_excludes, ghalint_policies, file_path, doc,
           ) {
           ignored.push(d)
-          return false
-        }
-        if zizmor_config != "" &&
+        } else if zizmor_config != "" &&
           zizmor_config_excluded(d, zizmor_cfg, file_path) {
           ignored.push(d)
-          return false
+        } else {
+          kept.push(d)
         }
-        true
-      })
+      }
       // Persona gate: keep findings whose minimum persona is at or below the
       // requested one. `Auditor` (the default) keeps everything.
       let want = persona_rank(persona)
-      let visible = kept.filter(fn(d) {
+      let visible : Array[Diagnostic] = []
+      for d in kept {
         if persona_rank(d.persona) <= want {
-          true
+          visible.push(d)
         } else {
           ignored.push(d)
-          false
         }
-      })
+      }
       LintResult::{
         kind: resolved_kind,
         stats,

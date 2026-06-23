@@ -40,7 +40,9 @@ test "lint_string: persona param gates pedantic findings" {
   // Whether `rule_id` appears in the named section (`"diagnostics"` or
   // `"ignored"`) of the lint_string JSON envelope.
   fn rule_in(json_str : String, section : String, rule_id : String) -> Bool {
-    let doc : Json = @json.parse(json_str) catch { _ => Json::null() }
+    let doc : Json = @json.parse(json_str) catch {
+      e => abort("rule_in: failed to parse lint_string output: \{e}")
+    }
     match doc {
       Object(outer) =>
         match outer.get("result") {
@@ -71,10 +73,7 @@ test "lint_string: persona param gates pedantic findings" {
   // Default (no persona) is auditor — self-hosted-runner (a pedantic finding)
   // surfaces in diagnostics.
   let auditor = @worker.lint_string(yaml, "workflow", "", "")
-  inspect(
-    rule_in(auditor, "diagnostics", "self-hosted-runner"),
-    content="true",
-  )
+  inspect(rule_in(auditor, "diagnostics", "self-hosted-runner"), content="true")
   // persona=regular moves it from diagnostics to ignored (not dropped silently).
   let regular = @worker.lint_string(
     yaml,
