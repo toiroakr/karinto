@@ -7,9 +7,13 @@ name: upstream-parity
 # mise.toml + the weekly upstream-refresh workflow.
 #
 # When does it run, and what happens on a hard divergence?
-#   - pull_request (paths-filtered): the regression gate. A divergence
-#     introduced by the PR hard-fails the check so it gets caught at review
-#     time. Divergence here is almost always the PR's own change.
+#   - pull_request: the regression gate. A divergence introduced by the PR
+#     hard-fails the check so it gets caught at review time. Divergence here
+#     is almost always the PR's own change. `parity` is a required status
+#     check, so the trigger has no `paths:` filter (a non-matching PR would
+#     get no check run and be permanently unmergeable) — instead the
+#     `changes` job detects relevant paths and `parity` skips (= passes the
+#     requirement) when nothing relevant changed.
 #   - push to main: informational. The report posts to the step summary but a
 #     divergence does NOT fail the run (main is already merged).
 #   - schedule (daily) + workflow_dispatch: the safety net. A divergence that
@@ -26,15 +30,6 @@ name: upstream-parity
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - .github/workflows/upstream-parity.yml
-      - mise.toml
-      - rules.mbt
-      - rules_catalog.mbt
-      - karinto.mbt
-      - worker/**
-      - fixtures/upstream/**
-      - scripts/upstream-parity/**
   push:
     branches: [main]
     paths:
@@ -57,15 +52,47 @@ on:
   workflow_dispatch:
 
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - '.github/workflows/upstream-parity.yml'
+              - 'mise.toml'
+              - 'rules.mbt'
+              - 'rules_catalog.mbt'
+              - 'karinto.mbt'
+              - 'worker/**'
+              - 'fixtures/upstream/**'
+              - 'scripts/upstream-parity/**'
+
   parity:
-    # Every event runs as before, except a `labeled` event runs only for the
-    # `run-parity` trigger label. This is the manual escape hatch for
-    # token-created refresh PRs; label application already requires write
-    # access, so gating on the label name is enough. Normal
-    # opened/synchronize/push/schedule checks are untouched.
+    needs: changes
+    # Every event runs as before, except:
+    #   - a `labeled` event runs only for the `run-parity` trigger label. This
+    #     is the manual escape hatch for token-created refresh PRs; label
+    #     application already requires write access, so gating on the label
+    #     name is enough.
+    #   - a pull_request runs only when `changes` found relevant paths —
+    #     `relevant != 'false'` (not `== 'true'`) so a failed `changes` job
+    #     falls back to running the comparison rather than silently
+    #     green-lighting the PR. Non-pull_request events skip `changes`,
+    #     hence the `!cancelled()`.
     if: >-
-      github.event.action != 'labeled'
-      || github.event.label.name == 'run-parity'
+      ${{ !cancelled()
+      && (github.event.action != 'labeled'
+          || github.event.label.name == 'run-parity')
+      && (github.event_name != 'pull_request'
+          || needs.changes.outputs.relevant != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Read-only: this job builds and runs PR-controlled code (moon build,
@@ -82,7 +109,7 @@ jobs:
       # issue body can quote it without re-running the comparison.
       body: ${{ steps.report.outputs.body }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         # Don't leave the job token in .git/config — nothing here needs git
         # auth, and persisting it would hand a credential to the PR-controlled
         # build/compare steps that run next.
@@ -99,12 +126,12 @@ jobs:
       - name: Build JS bundle
         run: moon build --target js --release
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Install upstream linters
-        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
         with:
           install: true
           # Don't activate the shims globally; we invoke binaries explicitly

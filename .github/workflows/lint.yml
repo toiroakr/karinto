@@ -4,12 +4,14 @@ name: lint
 # linters the project benchmarks against (actionlint / zizmor / ghalint). The
 # binaries are pinned in mise.toml and installed via mise-action, mirroring
 # upstream-parity.yml.
+#
+# `lint` is a required status check, so the workflow must report a check run
+# on every PR — a trigger-level `paths:` filter would leave non-matching PRs
+# without a check run and permanently unmergeable. Instead the `changes` job
+# detects relevant paths and `lint` skips (= passes the requirement) when
+# nothing relevant changed.
 on:
   pull_request:
-    paths:
-      - .github/workflows/**
-      - mise.toml
-      - ghalint.yaml
   push:
     branches: [main]
     paths:
@@ -17,22 +19,48 @@ on:
       - mise.toml
       - ghalint.yaml
 
-# Default to no privileges; the job opts into exactly what it needs.
+# Default to no privileges; each job opts into exactly what it needs.
 permissions: {}
 
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - '.github/workflows/**'
+              - 'mise.toml'
+              - 'ghalint.yaml'
+
   lint:
+    needs: changes
+    # `relevant != 'false'` (not `== 'true'`) so a failed `changes` job falls
+    # back to running the lint rather than silently green-lighting the PR.
+    # Non-pull_request events skip `changes`, hence the `!cancelled()`.
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name != 'pull_request'
+          || needs.changes.outputs.relevant != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Install linters
-        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
         with:
           install: true
           # Invoke binaries explicitly via `mise exec` rather than activating
