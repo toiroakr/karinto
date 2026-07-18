@@ -4,3 +4,4 @@ ignore_actions:
   # line, whose renamed inputs broke the release workflow. Keep it out of
   # automatic re-pinning; Renovate manages its (stable-only) updates instead.
   - name: changesets/action
+    ref: .*
