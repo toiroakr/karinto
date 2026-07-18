@@ -100,7 +100,7 @@ jobs:
         run: bash smoke.sh "$WORKER_URL"
 
       - name: Comment preview URL
-        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: preview-worker
           message: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Comment replay summary
         if: ${{ always() && hashFiles('replay-summary.md') != '' }}
-        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: dark-launch-replay
           path: ${{ github.workspace }}/replay-summary.md
