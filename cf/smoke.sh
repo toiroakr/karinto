@@ -19,8 +19,8 @@ printf 'smoke-testing %s\n' "$URL"
 # before asserting anything. 36 × 5s ≈ 3 min total budget.
 streak=0
 for attempt in $(seq 1 36); do
-  body_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
-  empty_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data '' "$URL" || true)
+  body_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
+  empty_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data '' "$URL" || true)
   if [ "$body_code" = "200" ] && [ "$empty_code" = "400" ]; then
     streak=$((streak + 1))
     if [ "$streak" -ge 3 ]; then
@@ -32,6 +32,10 @@ for attempt in $(seq 1 36); do
   fi
   sleep 5
 done
+if [ "$streak" -lt 3 ]; then
+  printf 'error: %s did not become ready within the wait budget\n' "$URL" >&2
+  exit 1
+fi
 
 YAML='name: ci
 on: push
