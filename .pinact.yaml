@@ -1,0 +1,6 @@
+version: 3
+ignore_actions:
+  # The local pin-latest hook once bumped this to the v2.0.0-next.* prerelease
+  # line, whose renamed inputs broke the release workflow. Keep it out of
+  # automatic re-pinning; Renovate manages its (stable-only) updates instead.
+  - name: changesets/action
