@@ -46,7 +46,7 @@ jobs:
       # accessible via the run's "Artifacts" panel.
       - name: Comment preview link
         if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff # v3.0.3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: docs-preview
           message: |
