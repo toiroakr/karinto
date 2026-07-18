@@ -72,15 +72,21 @@ jobs:
           # "latest patch per major" set is kept on top of this regardless.
           PINNED_KEEP_RECENT: ${{ vars.PINNED_KEEP_RECENT }}
 
-      - name: Trigger prune-diff-rules
-        # prune-diff-rules declares `on: release: published`, but the GitHub
-        # Release above is created by changesets/action with GITHUB_TOKEN, and
-        # token-created events never start other workflows — so that trigger
-        # can't fire from a real release. Dispatch it explicitly instead
-        # (dispatching with GITHUB_TOKEN is allowed; only event *creation*
-        # is suppressed). Requires the workflow-level `actions: write`.
+      - name: Trigger release-published workflows
+        # prune-diff-rules and rebaseline-captures declare
+        # `on: release: published`, but the GitHub Release above is created by
+        # changesets/action with GITHUB_TOKEN, and token-created events never
+        # start other workflows — so those triggers can't fire from a real
+        # release. Dispatch them explicitly instead (dispatching with
+        # GITHUB_TOKEN is allowed; only event *creation* is suppressed).
+        # Requires the workflow-level `actions: write`. Both are safe to
+        # dispatch unconditionally: prune no-ops into "no removable rules",
+        # and rebaseline's signal gate re-derives the release tag range
+        # itself and no-ops without a removed diff-rule.
         if: steps.changesets.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-        run: gh workflow run prune-diff-rules --repo "$REPO"
+        run: |
+          gh workflow run prune-diff-rules --repo "$REPO"
+          gh workflow run rebaseline-captures --repo "$REPO"
