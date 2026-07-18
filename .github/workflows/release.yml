@@ -11,6 +11,8 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  # For dispatching prune-diff-rules after a publish (see the last step).
+  actions: write
 
 jobs:
   release:
@@ -24,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -38,7 +40,7 @@ jobs:
 
       - name: Create Release PR or publish
         id: changesets
-        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        uses: changesets/action@c47fa68bd43bb8ae0bae7e558622593deebf5955 # v2.0.0-next.3
         with:
           version: npm run version-packages
           publish: bash scripts/release-publish.sh
@@ -69,3 +71,16 @@ jobs:
           # Top-N retention for `karinto-vX-Y-Z` pinned Workers. The
           # "latest patch per major" set is kept on top of this regardless.
           PINNED_KEEP_RECENT: ${{ vars.PINNED_KEEP_RECENT }}
+
+      - name: Trigger prune-diff-rules
+        # prune-diff-rules declares `on: release: published`, but the GitHub
+        # Release above is created by changesets/action with GITHUB_TOKEN, and
+        # token-created events never start other workflows — so that trigger
+        # can't fire from a real release. Dispatch it explicitly instead
+        # (dispatching with GITHUB_TOKEN is allowed; only event *creation*
+        # is suppressed). Requires the workflow-level `actions: write`.
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run prune-diff-rules --repo "$REPO"
