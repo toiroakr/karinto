@@ -99,5 +99,12 @@ npx changeset tag
 # `github-tags`. The dotted tag stays canonical (gets the GitHub Release);
 # the dashed one is a lightweight pointer used only by tooling.
 DASHED_TAG="v${VERSION//./-}"
-git tag "$DASHED_TAG" "v$VERSION"
-git push origin "$DASHED_TAG"
+# Idempotent like `changeset tag` above: publish re-runs on every
+# changeset-less push to main (e.g. chore commits, Renovate automerges),
+# where the release tags already exist and must be left untouched.
+if git rev-parse -q --verify "refs/tags/$DASHED_TAG" >/dev/null; then
+  echo "Tag $DASHED_TAG already exists; skipping."
+else
+  git tag "$DASHED_TAG" "v$VERSION"
+  git push origin "$DASHED_TAG"
+fi
