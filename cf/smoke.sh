@@ -11,19 +11,31 @@ URL="${1:-https://karinto.toiroakr.workers.dev}"
 printf 'smoke-testing %s\n' "$URL"
 
 # Newly deployed workers.dev hostnames can take 30s+ to propagate on the
-# very first deploy of a PR preview. Probe both the body-bearing and
-# empty-body code paths until both stop returning 404 (they can warm up
-# independently). 24 × 5s ≈ 2 min total budget.
-for attempt in $(seq 1 24); do
-  body_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
-  empty_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data '' "$URL" || true)
-  if [ "$body_code" != "404" ] && [ "$body_code" != "000" ] \
-     && [ "$empty_code" != "404" ] && [ "$empty_code" != "000" ]; then
-    break
+# very first deploy, and readiness flaps across edge PoPs while it spreads:
+# one probe can hit a warm colo while the next lands on a cold one that still
+# answers 404 or a plain-text Cloudflare error (e.g. 1042), which would break
+# the jq-based checks below. So wait for both code paths to return their
+# *expected* codes (yaml body → 200, empty body → 400) three times in a row
+# before asserting anything. 36 × 5s ≈ 3 min total budget.
+streak=0
+for attempt in $(seq 1 36); do
+  body_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
+  empty_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data '' "$URL" || true)
+  if [ "$body_code" = "200" ] && [ "$empty_code" = "400" ]; then
+    streak=$((streak + 1))
+    if [ "$streak" -ge 3 ]; then
+      break
+    fi
+  else
+    streak=0
+    printf '  waiting for %s (attempt %s, body=%s empty=%s)\n' "$URL" "$attempt" "$body_code" "$empty_code"
   fi
-  printf '  waiting for %s (attempt %s, body=%s empty=%s)\n' "$URL" "$attempt" "$body_code" "$empty_code"
   sleep 5
 done
+if [ "$streak" -lt 3 ]; then
+  printf 'error: %s did not become ready within the wait budget\n' "$URL" >&2
+  exit 1
+fi
 
 YAML='name: ci
 on: push

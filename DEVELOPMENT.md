@@ -277,7 +277,7 @@ action keeps a "chore: release" PR open that previews the next version.
 
 | Secret | Where to get it |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_API_TOKEN` | CF dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template, **plus the `Account → D1 → Edit` permission added on top** — the template alone has no D1 scope, so `refresh-archived.yml`'s `wrangler d1 execute --remote` fails with Cloudflare error 7403 ("not authorized to access this service"). |
 | `CLOUDFLARE_ACCOUNT_ID` | Workers dashboard sidebar |
 | `R2_ACCESS_KEY_ID` (optional) | Created in CF Dashboard → R2 → Manage R2 API Tokens. Scoped to **read-only** on the `karinto-captures` bucket. Enables the PR dark-launch replay step. |
 | `R2_SECRET_ACCESS_KEY` (optional) | The matching secret from the same R2 API token. |
