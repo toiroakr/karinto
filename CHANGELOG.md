@@ -1,5 +1,11 @@
 # karinto
 
+## 0.9.2
+
+### Patch Changes
+
+- [#76](https://github.com/toiroakr/karinto/pull/76) [`88e676c`](https://github.com/toiroakr/karinto/commit/88e676cc7ff8711e39c5371bb731a43923af5393) Thanks [@github-actions](https://github.com/apps/github-actions)! - Fix `template-injection` (and other per-step rules) missing findings inside zizmor 1.27's experimental `parallel:` steps. `build_steps` now flattens `parallel:` sub-steps into the step list so `on_step` rules see their `run:`/`uses:` bodies; diagnostics for a nested sub-step report the position of the parent `parallel:` entry.
+
 ## 0.9.1
 
 ### Patch Changes
