@@ -4,12 +4,12 @@
     {
       "name": "zizmor",
       "repo": "zizmorcore/zizmor",
-      "from": "1.25.2",
-      "to": "1.26.1",
-      "tag": "v1.26.1",
-      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.26.1",
-      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.25.2...v1.26.1",
-      "notes": "This is a small corrective release for [1.26.0](https://docs.zizmor.sh/release-notes/#1260)."
+      "from": "1.26.1",
+      "to": "1.27.0",
+      "tag": "v1.27.0",
+      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.27.0",
+      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.26.1...v1.27.0",
+      "notes": "## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-feartures)\r\n\r\n- zizmor now has experimental support for workflows that specify parallel steps. See [Usage - Parallel steps](https://docs.zizmor.sh/usage/#parallel-steps) for more information ([#2153](https://github.com/zizmorcore/zizmor/issues/2153))\r\nEnhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)\r\n\r\n- zizmor's handling of paths is now more consistent, particularly when run on Windows ([#2163](https://github.com/zizmorcore/zizmor/issues/2163))\r\n\r\n- zizmor now emits a helpful warning when being run in implicit offline mode ([#2180](https://github.com/zizmorcore/zizmor/issues/2180))\r\n\r\n## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)\r\n\r\n- Fixed a bug where the [secrets-outside-env](https://docs.zizmor.sh/audits/#secrets-outside-env) audit would not honor ignore comments within the same job scope ([#2157](https://github.com/zizmorcore/zizmor/issues/2157))\r\n\r\n- Fixed a bug where the [ref-version-mismatch](https://docs.zizmor.sh/audits/#ref-version-mismatch) audit would not honor ignore comments within the same steps scope ([#2177](https://github.com/zizmorcore/zizmor/issues/2177))\r\n\r\n- Fixed a bug where `--collect=[MODE]` was not correctly handled when auditing remote inputs ([#2185](https://github.com/zizmorcore/zizmor/issues/2185))"
     }
   ]
 }

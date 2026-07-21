@@ -166,7 +166,24 @@ fn build_steps(arr : Array[@yaml.Yaml], job : String?) -> Array[StepInfo] {
   let mut step_index = 0
   for step in arr {
     match step {
-      Map(sm) => out.push(build_step_info(sm, job, step_index))
+      // zizmor 1.27's experimental `parallel:` steps nest a list of
+      // sub-steps under a single steps-list entry. Flatten them into
+      // `StepInfo` under the parent's `step_index` so `on_step` rules
+      // (template-injection, secrets-outside-env, ...) still see their
+      // `run:`/`uses:` bodies; diagnostics fall back to the parent
+      // `parallel:` entry's position, same as any other unresolved field.
+      Map(sm) =>
+        match sm.get("parallel") {
+          Some(Array(sub)) =>
+            for sub_step in sub {
+              match sub_step {
+                Map(sub_sm) =>
+                  out.push(build_step_info(sub_sm, job, step_index))
+                _ => ()
+              }
+            }
+          _ => out.push(build_step_info(sm, job, step_index))
+        }
       _ => ()
     }
     step_index = step_index + 1

@@ -1322,6 +1322,63 @@ test "template-injection: untrusted input in run script" {
 }
 
 ///|
+test "template-injection: untrusted input inside a `parallel:` sub-step" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  hackme:
+    #|    runs-on: ubuntu-latest
+    #|    permissions: {}
+    #|    steps:
+    #|      - parallel:
+    #|          - name: hackme
+    #|            run: echo "${{ github.event.pull_request.title }}"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `hackme` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "hackme",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "error",
+        "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
+        "pos": { "line": 7, "col": 9 },
+        "job": "hackme",
+        "step": { "index": 0 },
+      },
+      {
+        "rule": "job-timeout-minutes-required",
+        "severity": "warning",
+        "message": "job `hackme` does not declare `timeout-minutes:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "hackme",
+      },
+    ],
+  })
+}
+
+///|
 #skip("not implemented yet")
 test "undocumented-permissions: permissions block has no comment" {
   let yaml =
