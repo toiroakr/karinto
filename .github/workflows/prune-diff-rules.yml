@@ -107,28 +107,63 @@ jobs:
 
           mapfile -t CANDIDATES < <(jq -r '.rules[] | select(.matchCount > 0) | .file' "$REPORT")
 
-          is_candidate() {
+          is_in() {
             local name="$1"
-            for c in "${CANDIDATES[@]}"; do
-              [ "$name" = "$c" ] && return 0
+            shift
+            for x in "$@"; do
+              [ "$name" = "$x" ] && return 0
             done
             return 1
           }
 
+          imports() {
+            # Does $1 (a scripts/diff-rules/*.mjs basename) import $2 (a basename)?
+            local importer="scripts/diff-rules/$1"
+            local target="$2"
+            grep -qF "./${target}\"" "$importer" \
+              || grep -qF "./${target}'" "$importer" \
+              || grep -qF "./${target}\`" "$importer"
+          }
+
+          # SURVIVORS starts as every non-candidate file, then grows by fixed-point
+          # closure: a candidate joins SURVIVORS as soon as *any* current survivor
+          # imports it — including another candidate that already joined. Without
+          # this closure, a candidate that is itself only kept alive by another
+          # surviving candidate (not a non-candidate file) would be missed, and
+          # removing it would break the surviving importer's import.
+          SURVIVORS=()
+          for other in scripts/diff-rules/*.mjs; do
+            other_name=$(basename "$other")
+            is_in "$other_name" "${CANDIDATES[@]}" || SURVIVORS+=("$other_name")
+          done
+
+          changed=true
+          while $changed; do
+            changed=false
+            for f in "${CANDIDATES[@]}"; do
+              is_in "$f" "${SURVIVORS[@]}" && continue
+              for s in "${SURVIVORS[@]}"; do
+                if imports "$s" "$f"; then
+                  SURVIVORS+=("$f")
+                  changed=true
+                  break
+                fi
+              done
+            done
+          done
+
           TO_REMOVE=()
           SKIPPED=()
           for f in "${CANDIDATES[@]}"; do
-            depended_on_by=""
-            for other in scripts/diff-rules/*.mjs; do
-              other_name=$(basename "$other")
-              [ "$other_name" = "$f" ] && continue
-              is_candidate "$other_name" && continue
-              if grep -qF "./${f}\"" "$other" || grep -qF "./${f}'" "$other" || grep -qF "./${f}\`" "$other"; then
-                depended_on_by="$other_name"
-                break
-              fi
-            done
-            if [ -n "$depended_on_by" ]; then
+            if is_in "$f" "${SURVIVORS[@]}"; then
+              depended_on_by=""
+              for s in "${SURVIVORS[@]}"; do
+                [ "$s" = "$f" ] && continue
+                if imports "$s" "$f"; then
+                  depended_on_by="$s"
+                  break
+                fi
+              done
               echo "::warning::scripts/diff-rules/$f is shipped but still imported by $depended_on_by; skipping removal until the importer is updated."
               SKIPPED+=("$f")
             else
