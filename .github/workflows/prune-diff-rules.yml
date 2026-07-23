@@ -83,6 +83,13 @@ jobs:
       # Select the rules whose fix has shipped (matchCount > 0), git rm them, and
       # build the PR body. Sets removed=<count> so the PR step is skipped when
       # nothing is removable.
+      #
+      # Guard: a candidate is skipped (not removed) if a rule file that is NOT
+      # itself being removed still `import`s it — composite rules delegate to
+      # other rule files (e.g. 2026-06-string-literal-with-promoted.mjs used to
+      # import 2026-05-promote-zizmor-planned-rules.mjs), and deleting the
+      # delegate out from under a surviving importer crashes replay.mjs's
+      # `await import(...)` at rule-load time instead of just failing to match.
       - name: Select shipped rules
         id: select
         env:
@@ -90,19 +97,56 @@ jobs:
           BODY: ${{ github.workspace }}/pr-body.md
         run: |
           set -euo pipefail
-          REMOVED=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
-          echo "removed=$REMOVED" >> "$GITHUB_OUTPUT"
-          if [ "$REMOVED" -eq 0 ]; then
+          CANDIDATE_COUNT=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
+          if [ "$CANDIDATE_COUNT" -eq 0 ]; then
+            echo "removed=0" >> "$GITHUB_OUTPUT"
             echo "No diff-rules are in the shipped state; nothing to prune."
             exit 0
           fi
 
-          jq -r '.rules[] | select(.matchCount > 0) | "scripts/diff-rules/\(.file)"' "$REPORT" \
-            | while IFS= read -r f; do
-                echo "removing $f"
-                git rm --quiet "$f"
-              done
+          mapfile -t CANDIDATES < <(jq -r '.rules[] | select(.matchCount > 0) | .file' "$REPORT")
 
+          is_candidate() {
+            local name="$1"
+            for c in "${CANDIDATES[@]}"; do
+              [ "$name" = "$c" ] && return 0
+            done
+            return 1
+          }
+
+          TO_REMOVE=()
+          SKIPPED=()
+          for f in "${CANDIDATES[@]}"; do
+            depended_on_by=""
+            for other in scripts/diff-rules/*.mjs; do
+              other_name=$(basename "$other")
+              [ "$other_name" = "$f" ] && continue
+              is_candidate "$other_name" && continue
+              if grep -qE "from [\"']\./${f}[\"']" "$other"; then
+                depended_on_by="$other_name"
+                break
+              fi
+            done
+            if [ -n "$depended_on_by" ]; then
+              echo "::warning::scripts/diff-rules/$f is shipped but still imported by $depended_on_by; skipping removal until the importer is updated."
+              SKIPPED+=("$f")
+            else
+              TO_REMOVE+=("$f")
+            fi
+          done
+
+          echo "removed=${#TO_REMOVE[@]}" >> "$GITHUB_OUTPUT"
+          if [ "${#TO_REMOVE[@]}" -eq 0 ]; then
+            echo "All shipped rules are still imported by a surviving rule file; nothing removed."
+            exit 0
+          fi
+
+          for f in "${TO_REMOVE[@]}"; do
+            echo "removing scripts/diff-rules/$f"
+            git rm --quiet "scripts/diff-rules/$f"
+          done
+
+          TO_REMOVE_JSON=$(printf '%s\n' "${TO_REMOVE[@]}" | jq -R . | jq -s .)
           UNEXPECTED=$(jq '.unexpected' "$REPORT")
           {
             echo "## Automated diff-rule pruning"
@@ -114,7 +158,14 @@ jobs:
             echo "job and can be removed."
             echo
             echo "Removed:"
-            jq -r '.rules[] | select(.matchCount > 0) | "- `scripts/diff-rules/\(.file)` (id `\(.id)`) — suppressing \(.matchCount) capture diff(s)"' "$REPORT"
+            jq -r --argjson removed "$TO_REMOVE_JSON" \
+              '.rules[] | select(.file as $f | $removed | index($f)) | "- `scripts/diff-rules/\(.file)` (id `\(.id)`) — suppressing \(.matchCount) capture diff(s)"' \
+              "$REPORT"
+            if [ "${#SKIPPED[@]}" -gt 0 ]; then
+              echo
+              echo "Skipped (shipped, but still imported by another rule file — see the job log):"
+              printf -- '- `scripts/diff-rules/%s`\n' "${SKIPPED[@]}"
+            fi
             echo
             echo "After this merges, the next \`release: published\` triggers"
             echo "\`rebaseline-captures.yml\`, which overwrites the stored captures with the"
