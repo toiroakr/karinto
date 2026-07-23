@@ -160,6 +160,48 @@ test "excessive-permissions default-perms: multi-job non-reusable workflow is re
 }
 
 ///|
+test "excessive-permissions default-perms: all-jobs-explicit workflow is pedantic with no job-level findings" {
+  // Two jobs, neither is reusable-only, and the workflow itself has no
+  // `permissions:` block — but every job declares its own. zizmor's gate
+  // (`all_jobs_have_permissions`) demotes the workflow-level finding to
+  // Pedantic; no job-level "default permissions used" finding fires at all,
+  // since each job already has its own `permissions:`.
+  let yaml =
+    #|name: t
+    #|on: push
+    #|jobs:
+    #|  job1:
+    #|    name: job1
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  job2:
+    #|    name: job2
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  inspect(
+    fires(yaml, @karinto.Persona::Regular, "excessive-permissions"),
+    content="false",
+  )
+  let pedantic_hits = @karinto.lint(yaml, persona=@karinto.Persona::Pedantic).diagnostics.filter(fn(
+      d,
+    ) {
+      d.rule == "excessive-permissions"
+    },
+  )
+  inspect(pedantic_hits.length(), content="1")
+  inspect(
+    pedantic_hits[0].message,
+    content="default permissions used due to no permissions: block",
+  )
+}
+
+///|
 test "excessive-permissions default-perms: reusable-only workflow gates normal jobs pedantic, caller jobs stay regular" {
   // `on: workflow_call` only → reusable-only. The normal job's "default
   // permissions used" finding is pedantic-only; the caller job's (`uses:`)

@@ -1573,7 +1573,7 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   let mut all_jobs_have_permissions = ctx.jobs.length() > 0
   for job in ctx.jobs {
-    if !job.raw.contains("permissions") {
+    if !job.has_permissions {
       all_jobs_have_permissions = false
       break
     }
