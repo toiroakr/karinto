@@ -47,15 +47,16 @@ jobs:
       TARGET: ${{ github.event.inputs.target || 'https://karinto.toiroakr.workers.dev' }}
       DRY_RUN: ${{ github.event.inputs.dry_run }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # No `cache:` input, and this job builds/publishes nothing — it only runs
       # replay.mjs and opens a PR — so there is no runtime cache surface to poison.
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning]
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: '22'
+          package-manager-cache: false
 
       # Replay the stored captures against prod. The per-rule report is written
       # to REPLAY_REPORT_PATH regardless of exit code (replay exits 1 when there
@@ -83,6 +84,13 @@ jobs:
       # Select the rules whose fix has shipped (matchCount > 0), git rm them, and
       # build the PR body. Sets removed=<count> so the PR step is skipped when
       # nothing is removable.
+      #
+      # Guard: a candidate is skipped (not removed) if a rule file that is NOT
+      # itself being removed still `import`s it — composite rules delegate to
+      # other rule files (e.g. 2026-06-string-literal-with-promoted.mjs used to
+      # import 2026-05-promote-zizmor-planned-rules.mjs), and deleting the
+      # delegate out from under a surviving importer crashes replay.mjs's
+      # `await import(...)` at rule-load time instead of just failing to match.
       - name: Select shipped rules
         id: select
         env:
@@ -90,19 +98,91 @@ jobs:
           BODY: ${{ github.workspace }}/pr-body.md
         run: |
           set -euo pipefail
-          REMOVED=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
-          echo "removed=$REMOVED" >> "$GITHUB_OUTPUT"
-          if [ "$REMOVED" -eq 0 ]; then
+          CANDIDATE_COUNT=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
+          if [ "$CANDIDATE_COUNT" -eq 0 ]; then
+            echo "removed=0" >> "$GITHUB_OUTPUT"
             echo "No diff-rules are in the shipped state; nothing to prune."
             exit 0
           fi
 
-          jq -r '.rules[] | select(.matchCount > 0) | "scripts/diff-rules/\(.file)"' "$REPORT" \
-            | while IFS= read -r f; do
-                echo "removing $f"
-                git rm --quiet "$f"
-              done
+          mapfile -t CANDIDATES < <(jq -r '.rules[] | select(.matchCount > 0) | .file' "$REPORT")
 
+          is_in() {
+            local name="$1"
+            shift
+            for x in "$@"; do
+              [ "$name" = "$x" ] && return 0
+            done
+            return 1
+          }
+
+          imports() {
+            # Does $1 (a scripts/diff-rules/*.mjs basename) import $2 (a basename)?
+            local importer="scripts/diff-rules/$1"
+            local target="$2"
+            grep -qF "./${target}\"" "$importer" \
+              || grep -qF "./${target}'" "$importer" \
+              || grep -qF "./${target}\`" "$importer"
+          }
+
+          # SURVIVORS starts as every non-candidate file, then grows by fixed-point
+          # closure: a candidate joins SURVIVORS as soon as *any* current survivor
+          # imports it — including another candidate that already joined. Without
+          # this closure, a candidate that is itself only kept alive by another
+          # surviving candidate (not a non-candidate file) would be missed, and
+          # removing it would break the surviving importer's import.
+          SURVIVORS=()
+          for other in scripts/diff-rules/*.mjs; do
+            other_name=$(basename "$other")
+            is_in "$other_name" "${CANDIDATES[@]}" || SURVIVORS+=("$other_name")
+          done
+
+          changed=true
+          while $changed; do
+            changed=false
+            for f in "${CANDIDATES[@]}"; do
+              is_in "$f" "${SURVIVORS[@]}" && continue
+              for s in "${SURVIVORS[@]}"; do
+                if imports "$s" "$f"; then
+                  SURVIVORS+=("$f")
+                  changed=true
+                  break
+                fi
+              done
+            done
+          done
+
+          TO_REMOVE=()
+          SKIPPED=()
+          for f in "${CANDIDATES[@]}"; do
+            if is_in "$f" "${SURVIVORS[@]}"; then
+              depended_on_by=""
+              for s in "${SURVIVORS[@]}"; do
+                [ "$s" = "$f" ] && continue
+                if imports "$s" "$f"; then
+                  depended_on_by="$s"
+                  break
+                fi
+              done
+              echo "::warning::scripts/diff-rules/$f is shipped but still imported by $depended_on_by; skipping removal until the importer is updated."
+              SKIPPED+=("$f")
+            else
+              TO_REMOVE+=("$f")
+            fi
+          done
+
+          echo "removed=${#TO_REMOVE[@]}" >> "$GITHUB_OUTPUT"
+          if [ "${#TO_REMOVE[@]}" -eq 0 ]; then
+            echo "All shipped rules are still imported by a surviving rule file; nothing removed."
+            exit 0
+          fi
+
+          for f in "${TO_REMOVE[@]}"; do
+            echo "removing scripts/diff-rules/$f"
+            git rm --quiet "scripts/diff-rules/$f"
+          done
+
+          TO_REMOVE_JSON=$(printf '%s\n' "${TO_REMOVE[@]}" | jq -R . | jq -s .)
           UNEXPECTED=$(jq '.unexpected' "$REPORT")
           {
             echo "## Automated diff-rule pruning"
@@ -114,7 +194,14 @@ jobs:
             echo "job and can be removed."
             echo
             echo "Removed:"
-            jq -r '.rules[] | select(.matchCount > 0) | "- `scripts/diff-rules/\(.file)` (id `\(.id)`) — suppressing \(.matchCount) capture diff(s)"' "$REPORT"
+            jq -r --argjson removed "$TO_REMOVE_JSON" \
+              '.rules[] | select(.file as $f | $removed | index($f)) | "- `scripts/diff-rules/\(.file)` (id `\(.id)`) — suppressing \(.matchCount) capture diff(s)"' \
+              "$REPORT"
+            if [ "${#SKIPPED[@]}" -gt 0 ]; then
+              echo
+              echo "Skipped (shipped, but still imported by another rule file — see the job log):"
+              printf -- "- \`scripts/diff-rules/%s\`\n" "${SKIPPED[@]}"
+            fi
             echo
             echo "After this merges, the next \`release: published\` triggers"
             echo "\`rebaseline-captures.yml\`, which overwrites the stored captures with the"

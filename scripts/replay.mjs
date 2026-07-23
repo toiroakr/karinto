@@ -238,7 +238,16 @@ async function loadRules(dir) {
   const rules = [];
   for (const f of entries.sort()) {
     if (!f.endsWith(".mjs")) continue;
-    const mod = await import(pathToFileURL(join(dir, f)).href);
+    let mod;
+    try {
+      mod = await import(pathToFileURL(join(dir, f)).href);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
+        { cause: e },
+      );
+    }
     if (typeof mod.matches !== "function") continue;
     rules.push({
       id: mod.id || f.replace(/\.mjs$/, ""),
