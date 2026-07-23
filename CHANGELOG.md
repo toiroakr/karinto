@@ -1,5 +1,11 @@
 # karinto
 
+## 0.9.4
+
+### Patch Changes
+
+- [#84](https://github.com/toiroakr/karinto/pull/84) [`673c594`](https://github.com/toiroakr/karinto/commit/673c594d64ee46e93c2a73467910ce820fd6e3ff) Thanks [@toiroakr](https://github.com/toiroakr)! - Fix `excessive-permissions`'s persona gating for the "default permissions used due to no permissions: block" finding to match zizmor's actual conditions instead of a blanket workflow-level-Pedantic / job-level-Regular split. It's now Pedantic only when the workflow has a single job, every job declares its own `permissions:`, or the workflow is reusable-only (`on:` lists only `workflow_call`); otherwise it's Regular. Reusable-workflow caller jobs (`uses:`) stay Regular regardless, since the caller is responsible for permissions. Previously, karinto missed real Regular-persona findings on multi-job workflows and over-reported on reusable-only workflows' normal jobs.
+
 ## 0.9.3
 
 ### Patch Changes
