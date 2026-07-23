@@ -1547,10 +1547,14 @@ fn check_bot_conditions(
 //   any of: the workflow has only one job; every job declares its own
 //   `permissions:`; or the workflow is reusable-only (`on:` lists only
 //   `workflow_call`). Otherwise it's Regular.
-// - The job-level equivalent, for normal (non-`uses:`) jobs, is Pedantic iff
-//   the workflow is reusable-only, else Regular. Reusable-workflow caller
-//   jobs (`uses:`) are always Regular — the caller is responsible for
-//   permissions regardless of how the callee workflow is triggered.
+// - The job-level equivalent, for normal (non-`uses:`) jobs, shares the same
+//   gate as the workflow-level finding above (single-job / all-explicit /
+//   reusable-only → Pedantic, else Regular) — reaching this branch already
+//   means the job itself lacks `permissions:`, so "all jobs declare their
+//   own" is moot here and the live conditions reduce to single-job or
+//   reusable-only. Reusable-workflow caller jobs (`uses:`) are always
+//   Regular — the caller is responsible for permissions regardless of how
+//   the callee workflow is triggered.
 // - The blanket `read-all` / `write-all` findings (workflow- and job-level)
 //   are always Regular; the per-key `<x>: write is overly broad` finding is
 //   Pedantic (zizmor only flags per-key over-scope under `--pedantic`).

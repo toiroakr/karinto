@@ -122,8 +122,37 @@ test "excessive-permissions default-perms: multi-job non-reusable workflow is re
     #|    runs-on: ubuntu-latest
     #|    steps:
     #|      - run: echo hi
+  let regular_hits = @karinto.lint(yaml, persona=@karinto.Persona::Regular).diagnostics.filter(fn(
+      d,
+    ) {
+      d.rule == "excessive-permissions"
+    },
+  )
+  inspect(regular_hits.length(), content="3")
   inspect(
-    fires(yaml, @karinto.Persona::Regular, "excessive-permissions"),
+    regular_hits
+    .iter()
+    .any(fn(d) {
+      d.message == "default permissions used due to no permissions: block"
+    }),
+    content="true",
+  )
+  inspect(
+    regular_hits
+    .iter()
+    .any(fn(d) {
+      d.message ==
+      "job `job1`: default permissions used due to no permissions: block"
+    }),
+    content="true",
+  )
+  inspect(
+    regular_hits
+    .iter()
+    .any(fn(d) {
+      d.message ==
+      "job `job2`: default permissions used due to no permissions: block"
+    }),
     content="true",
   )
 }
