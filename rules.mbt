@@ -1541,10 +1541,19 @@ fn check_bot_conditions(
 // their own Explicit map are not flagged — zizmor explicitly punts on per-key
 // over-scoping analysis there.
 //
-// Persona-split to match zizmor's per-finding gating: the blanket
-// `read-all` / `write-all` and "default permissions used" findings are
-// Regular; the per-key `<x>: write is overly broad` finding is Pedantic (zizmor
-// only flags per-key over-scope under `--pedantic`).
+// Persona-split to match zizmor's per-finding gating:
+//
+// - The workflow-level "default permissions used" finding is Pedantic when
+//   any of: the workflow has only one job; every job declares its own
+//   `permissions:`; or the workflow is reusable-only (`on:` lists only
+//   `workflow_call`). Otherwise it's Regular.
+// - The job-level equivalent, for normal (non-`uses:`) jobs, is Pedantic iff
+//   the workflow is reusable-only, else Regular. Reusable-workflow caller
+//   jobs (`uses:`) are always Regular — the caller is responsible for
+//   permissions regardless of how the callee workflow is triggered.
+// - The blanket `read-all` / `write-all` findings (workflow- and job-level)
+//   are always Regular; the per-key `<x>: write is overly broad` finding is
+//   Pedantic (zizmor only flags per-key over-scope under `--pedantic`).
 // ---------------------------------------------------------------------------
 
 ///|
@@ -1558,16 +1567,29 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     None => false
     Some(_) => true
   }
+  let mut all_jobs_have_permissions = ctx.jobs.length() > 0
+  for job in ctx.jobs {
+    if !job.raw.contains("permissions") {
+      all_jobs_have_permissions = false
+      break
+    }
+  }
+  let reusable_only = is_reusable_only(m)
+  let workflow_persona = if ctx.jobs.length() == 1 ||
+    all_jobs_have_permissions ||
+    reusable_only {
+    Pedantic
+  } else {
+    Regular
+  }
   match workflow_perms {
     None =>
-      // zizmor gates the workflow-level "no permissions: block" finding as
-      // Pedantic; the Regular signal is the per-job finding below.
       add_diag(
         out,
         "excessive-permissions",
         Warning,
         "default permissions used due to no permissions: block",
-        persona=Pedantic,
+        persona=workflow_persona,
       )
     Some(String("read-all")) =>
       add_diag(
@@ -1606,11 +1628,23 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match job.raw.get("permissions") {
       None =>
         if !explicit_parent_permissions {
+          // Caller jobs (`uses:`) are always Regular — the caller is
+          // responsible for permissions regardless of trigger. Normal jobs
+          // share the workflow-level gate: reaching this branch means the
+          // job lacks its own `permissions:`, so `all_jobs_have_permissions`
+          // is necessarily false here, leaving single-job / reusable-only as
+          // the live conditions — the same ones `workflow_persona` encodes.
+          let job_persona = if job.uses is Some(_) {
+            Regular
+          } else {
+            workflow_persona
+          }
           add_diag(
             out,
             "excessive-permissions",
             Warning,
             "job `\{job.name}`: default permissions used due to no permissions: block",
+            persona=job_persona,
           )
         }
       Some(String("read-all")) =>
