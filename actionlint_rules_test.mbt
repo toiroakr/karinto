@@ -55,6 +55,65 @@ test "unexpected-keys: unknown key under job" {
 }
 
 ///|
+test "unexpected-keys: `parallel:` steps are not flagged as an unknown step key" {
+  // Regression guard for the actionlint upstream gap (actionlint v1.7.12
+  // rejects `parallel:` steps with "step must run script with \"run\"
+  // section or run action with \"uses\" section [syntax-check]"). karinto's
+  // `build_steps` flattens `parallel:` sub-steps (see `step-into-parallel-steps`
+  // changeset), so the group itself never reaches `check_unexpected_keys_step`
+  // and a genuine unknown key nested inside a sub-step is still caught.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - parallel:
+    #|          - run: echo one
+    #|          - run: echo two
+    #|            typo: oops
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 12 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "unexpected-keys",
+        "severity": "error",
+        "message": "step `step`: unknown key `typo`",
+        "pos": { "line": 9, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
 test "missing-required-keys: workflow missing `on`" {
   let yaml =
     #|jobs:
