@@ -2,14 +2,16 @@
 // zizmor-using OSS workflows (django, trivy, …): karinto at `persona=regular`
 // fired two zizmor audits that real `zizmor` only emits under `--pedantic`.
 //
-// Empirical zizmor 1.25.2 gating (oracle):
-//   - concurrency-limits          → pedantic only
-//   - excessive-permissions       → MIXED: blanket write-all/read-all are
-//     always Regular; the per-key "<x>: write is overly broad" finding is
-//     pedantic only; the "default permissions used" finding (workflow- and
-//     job-level) is conditionally pedantic — see the "default permissions
-//     used" gating tests below and the derivation in
-//     `check_excessive_permissions`'s doc comment in rules.mbt.
+// Empirical zizmor gating (oracle):
+//   - concurrency-limits          → pedantic only (pinned against 1.25.2)
+//   - excessive-permissions       → MIXED (pinned against 1.25.2, "default
+//     permissions used" conditions re-verified against 1.27.0's audit
+//     source): blanket write-all/read-all are always Regular; the per-key
+//     "<x>: write is overly broad" finding is pedantic only; the "default
+//     permissions used" finding (workflow- and job-level) is conditionally
+//     pedantic — see the "default permissions used" gating tests below and
+//     the derivation in `check_excessive_permissions`'s doc comment in
+//     rules.mbt.
 
 ///|
 fn fires(content : String, persona : @karinto.Persona, rule : String) -> Bool {
