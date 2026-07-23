@@ -122,7 +122,7 @@ jobs:
               other_name=$(basename "$other")
               [ "$other_name" = "$f" ] && continue
               is_candidate "$other_name" && continue
-              if grep -qE "from [\"']\./${f}[\"']" "$other"; then
+              if grep -qF "./${f}\"" "$other" || grep -qF "./${f}'" "$other"; then
                 depended_on_by="$other_name"
                 break
               fi

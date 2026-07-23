@@ -242,8 +242,9 @@ async function loadRules(dir) {
     try {
       mod = await import(pathToFileURL(join(dir, f)).href);
     } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${e.message}`,
+        `diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
         { cause: e },
       );
     }
