@@ -6691,15 +6691,16 @@ fn is_jobs_key_line(trimmed : String) -> Bool {
   if !trimmed.has_prefix(needle) {
     return false
   }
-  let after_trimmed = trim_ws(trimmed[needle.length():].to_owned())
-  if after_trimmed == "" {
-    return true
-  }
-  // Strip a trailing comment; anything else remaining is an inline value
-  // (`jobs: {}`, `jobs: read-all`-shaped garbage, …) — not a block header.
-  let val = match index_of(after_trimmed, "#") {
-    Some(k) => trim_ws(after_trimmed[0:k].to_owned())
-    None => after_trimmed
+  // `comment_start` (shared with the inline-ignore scanner) only recognises
+  // `#` as a comment opener when it's preceded by whitespace — `jobs:#x` has
+  // no space before the `#`, so per YAML it's an inline scalar value
+  // (`"#x"`), not a comment, and must not be mistaken for a bare header.
+  // Run it over the whole (already de-indented) line, not just the slice
+  // after `jobs:`, so a leading run of indentation-adjacent spaces is still
+  // correctly attributed as "preceded by whitespace".
+  let val = match comment_start(trimmed) {
+    Some(cs) => trim_ws(trimmed[needle.length():cs - 1].to_owned())
+    None => trim_ws(trimmed[needle.length():].to_owned())
   }
   val == ""
 }

@@ -124,12 +124,17 @@ test "is_jobs_key_line: bare header, spacing variants, and inline values" {
   assert_true(is_jobs_key_line("jobs:"))
   assert_true(is_jobs_key_line("jobs: # top-level jobs"))
   assert_true(is_jobs_key_line("jobs:    # extra spaces before comment"))
-  assert_true(is_jobs_key_line("jobs:#no space before comment"))
   // An inline value means this isn't a block-mapping header, even though
   // the first character after the key is whitespace.
   assert_true(!is_jobs_key_line("jobs: {}"))
   assert_true(!is_jobs_key_line("jobs: read-all"))
   assert_true(!is_jobs_key_line("jobsfoo:"))
+  // `#` with no preceding whitespace isn't a comment opener in YAML — it's
+  // part of an inline scalar value (`jobs: "#no space before comment"`), so
+  // this must not be mistaken for a bare header either. (This exact input
+  // actually fails to parse as YAML at all in practice — confirmed via
+  // `@karinto.lint` — but `is_jobs_key_line` shouldn't rely on that.)
+  assert_true(!is_jobs_key_line("jobs:#no space before comment"))
 }
 
 ///|
