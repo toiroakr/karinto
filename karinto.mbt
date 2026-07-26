@@ -465,15 +465,16 @@ fn is_inline_ignored(
     }
     return false
   }
-  // Job-scoped findings with no owning step (e.g. `use-trusted-publishing`'s
-  // run-based detection) resolve `pos` to the job's own key line (`  build:`)
-  // rather than whichever step triggered them. Besides the key line itself,
-  // also honour a "disable next line" comment placed on the line directly
-  // above it — that reads more naturally than a trailing comment on the key
-  // line and mirrors how many linters' next-line pragmas work. Step-scoped
-  // findings stay strictly same-line: a step's own line is always the
-  // intuitive, unambiguous place, and consecutive steps commonly trip the
-  // same rule, so a look-behind there would risk suppressing the wrong step.
+  // Findings with no owning step (e.g. `undocumented-permissions`, which is
+  // about a `permissions:` block rather than any one step) resolve `pos` to
+  // that field's own line, or the job's key line (`  build:`) absent a more
+  // specific field. Besides that line itself, also honour a "disable next
+  // line" comment placed on the line directly above it — that reads more
+  // naturally than a trailing comment there and mirrors how many linters'
+  // next-line pragmas work. Step-scoped findings stay strictly same-line: a
+  // step's own line is always the intuitive, unambiguous place, and
+  // consecutive steps commonly trip the same rule, so a look-behind there
+  // would risk suppressing the wrong step.
   let candidates = if d.step is None { [p.line, p.line - 1] } else { [p.line] }
   for candidate in candidates {
     match inline_ignores.get(candidate) {
