@@ -6614,6 +6614,25 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// True iff `trimmed` is a bare `jobs:` key line — optionally followed by
+/// whitespace and/or a trailing comment, with no inline value (workflows
+/// never give `jobs:` an inline value, so any content after the key besides
+/// a comment means this isn't really the header).
+fn is_jobs_key_line(trimmed : String) -> Bool {
+  let needle = "jobs:"
+  if !trimmed.has_prefix(needle) {
+    return false
+  }
+  let rest = trimmed[needle.length():].to_owned()
+  if rest == "" {
+    return true
+  }
+  let chars = rest.to_array()
+  let c = chars[0]
+  c == ' ' || c == '\t' || c == '#'
+}
+
+///|
 /// Maps each source line to the job it's nested under (by tracking
 /// indentation under the `jobs:` mapping), or `None` for workflow-level
 /// lines. Lets raw-text-scanning rules (e.g. `undocumented-permissions`)
@@ -6636,8 +6655,10 @@ fn build_line_job_map(lines : Array[String]) -> Array[String?] {
     let indent = leading_spaces(line)
     if jobs_indent < 0 {
       // Not inside `jobs:` yet. Recognize the header itself (with or without
-      // a trailing comment) and start tracking from the next line.
-      if trimmed == "jobs:" || trimmed.has_prefix("jobs: #") {
+      // a trailing comment, regardless of spacing — `jobs:#comment` and
+      // `jobs:    # comment` both count) and start tracking from the next
+      // line.
+      if is_jobs_key_line(trimmed) {
         jobs_indent = indent
       }
       owners[i] = None

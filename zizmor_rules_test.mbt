@@ -365,6 +365,29 @@ test "undocumented-permissions: distinguishes multiple per-job blocks by pos/job
 }
 
 ///|
+test "undocumented-permissions: job attribution survives an odd `jobs:` header spacing" {
+  // A `jobs:` header with extra spaces before its trailing comment must
+  // still be recognized so job attribution doesn't silently fall back to
+  // `None`.
+  let yaml =
+    #|on: push
+    #|jobs:    # top-level jobs
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: write
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+}
+
+///|
 test "concurrency-limits: no concurrency on deploy workflow" {
   let yaml =
     #|on:
