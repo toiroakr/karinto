@@ -465,10 +465,25 @@ fn is_inline_ignored(
     }
     return false
   }
-  guard inline_ignores.get(p.line) is Some(pats) else { return false }
-  for pat in pats {
-    if glob_match(pat, d.rule) {
-      return true
+  // Job-scoped findings with no owning step (e.g. `use-trusted-publishing`'s
+  // run-based detection) resolve `pos` to the job's own key line (`  build:`)
+  // rather than whichever step triggered them. Besides the key line itself,
+  // also honour a "disable next line" comment placed on the line directly
+  // above it — that reads more naturally than a trailing comment on the key
+  // line and mirrors how many linters' next-line pragmas work. Step-scoped
+  // findings stay strictly same-line: a step's own line is always the
+  // intuitive, unambiguous place, and consecutive steps commonly trip the
+  // same rule, so a look-behind there would risk suppressing the wrong step.
+  let candidates = if d.step is None { [p.line, p.line - 1] } else { [p.line] }
+  for candidate in candidates {
+    match inline_ignores.get(candidate) {
+      Some(pats) =>
+        for pat in pats {
+          if glob_match(pat, d.rule) {
+            return true
+          }
+        }
+      None => ()
     }
   }
   false

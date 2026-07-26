@@ -1866,6 +1866,58 @@ fn shell_tokens(line : String) -> Array[String] {
 }
 
 ///|
+/// Strips a trailing `@version` (or `@tag`) from a package spec, keeping a
+/// leading scope marker intact (`@scope/pkg@1.0.0` -> `@scope/pkg`).
+fn strip_pkg_version(spec : String) -> String {
+  let chars : Array[Char] = []
+  for ch in spec {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let mut at_idx = -1
+  for i in 1..<n {
+    if chars[i] == '@' {
+      at_idx = i
+    }
+  }
+  if at_idx < 0 {
+    return spec
+  }
+  let buf = StringBuilder::new()
+  for j in 0..<at_idx {
+    buf.write_char(chars[j])
+  }
+  buf.to_string()
+}
+
+///|
+/// Known "ephemeral publish" tools that are commonly run via a package
+/// manager's dlx/exec mechanism but don't push to a long-lived-token-backed
+/// npm registry (e.g. `pkg-pr-new` publishes PR preview builds authenticated
+/// via the job's own `GITHUB_TOKEN`, not an npm auth token).
+fn is_known_non_registry_dlx_tool(name : String) -> Bool {
+  name == "pkg-pr-new"
+}
+
+///|
+/// If `cmd`/`rest` run a package via a dlx-style mechanism (`pnpm dlx`,
+/// `yarn dlx`, `npm exec`), returns the bare (version-stripped) package name
+/// being invoked.
+fn dlx_invoked_tool(cmd : String, rest : Array[String]) -> String? {
+  if (cmd == "pnpm" || cmd == "yarn") && rest.length() > 1 && rest[0] == "dlx" {
+    return Some(strip_pkg_version(rest[1]))
+  }
+  if cmd == "npm" && rest.length() > 1 && rest[0] == "exec" {
+    let idx = if rest[1] == "--" { 2 } else { 1 }
+    if idx < rest.length() {
+      return Some(strip_pkg_version(rest[idx]))
+    }
+    return None
+  }
+  None
+}
+
+///|
 /// Returns true if `tokens` (a single flattened shell command line)
 /// invokes one of upstream zizmor's tracked publishing commands.
 fn shell_line_is_publish(tokens : Array[String]) -> Bool {
@@ -1876,6 +1928,10 @@ fn shell_line_is_publish(tokens : Array[String]) -> Bool {
   let rest : Array[String] = []
   for k in 1..<tokens.length() {
     rest.push(tokens[k])
+  }
+  match dlx_invoked_tool(cmd, rest) {
+    Some(tool) => if is_known_non_registry_dlx_tool(tool) { return false }
+    None => ()
   }
   if cmd == "cargo" {
     return tokens_contain(rest, "publish") &&
@@ -2821,11 +2877,18 @@ fn check_github_app_limit_repos(
   if !is_github_app_token_step(step) {
     return
   }
-  let has = match step.with_ {
+  // Per ghalint's own ghl-009 doc, omitting both `owner:` and `repositories:`
+  // scopes the token to the current repository and is compliant — only
+  // `owner:` set without `repositories:` spans the whole installation.
+  let has_owner = match step.with_ {
+    Some(w) => w.contains("owner")
+    None => false
+  }
+  let has_repos = match step.with_ {
     Some(w) => w.contains("repositories")
     None => false
   }
-  if !has {
+  if has_owner && !has_repos {
     add_diag(
       out,
       "github-app-limit-repositories",
@@ -6551,6 +6614,64 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// Maps each source line to the job it's nested under (by tracking
+/// indentation under the `jobs:` mapping), or `None` for workflow-level
+/// lines. Lets raw-text-scanning rules (e.g. `undocumented-permissions`)
+/// attribute a finding to a job without a positioned YAML parse.
+fn build_line_job_map(lines : Array[String]) -> Array[String?] {
+  let n = lines.length()
+  let owners : Array[String?] = Array::make(n, None)
+  let mut jobs_indent = -1
+  let mut job_key_indent = -1
+  let mut current_job : String? = None
+  let mut i = 0
+  while i < n {
+    let line = lines[i]
+    let trimmed = trim_ws(line)
+    if trimmed == "" || trimmed.has_prefix("#") {
+      owners[i] = current_job
+      i = i + 1
+      continue
+    }
+    let indent = leading_spaces(line)
+    if jobs_indent < 0 {
+      // Not inside `jobs:` yet. Recognize the header itself (with or without
+      // a trailing comment) and start tracking from the next line.
+      if trimmed == "jobs:" || trimmed.has_prefix("jobs: #") {
+        jobs_indent = indent
+      }
+      owners[i] = None
+      i = i + 1
+      continue
+    }
+    if indent <= jobs_indent {
+      // Back out to workflow level (or a sibling top-level key) — the
+      // `jobs:` mapping has ended.
+      jobs_indent = -1
+      job_key_indent = -1
+      current_job = None
+      owners[i] = None
+      i = i + 1
+      continue
+    }
+    if job_key_indent < 0 {
+      job_key_indent = indent
+    }
+    if indent == job_key_indent {
+      // A job's own key line, e.g. `  build:`.
+      let name = match index_of(trimmed, ":") {
+        Some(k) => trimmed[0:k].to_owned()
+        None => trimmed
+      }
+      current_job = Some(name)
+    }
+    owners[i] = current_job
+    i = i + 1
+  }
+  owners
+}
+
+///|
 /// Mirrors zizmor's `undocumented-permissions` (pedantic persona): a
 /// `permissions:` block whose entries lack explanatory comments is suspect.
 /// We re-scan the raw source because the YAML parser drops comments.
@@ -6561,6 +6682,11 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 ///   - Otherwise, every key:value line in the block must have a non-empty
 ///     trailing comment. An empty `#` does not count; any text after `#`
 ///     (including a `zizmor: ignore[...]` directive) does.
+///
+/// Each finding carries the `permissions:` key's own `pos` and, when the
+/// block is nested under a job, that job's `id` — so a workflow with several
+/// per-job `permissions:` blocks can trace each count back to its block
+/// instead of requiring a manual audit of the whole file.
 fn check_undocumented_permissions(
   ctx : WalkCtx,
   out : Array[Diagnostic],
@@ -6573,6 +6699,7 @@ fn check_undocumented_permissions(
     lines.push(v.to_owned())
   }
   let n = lines.length()
+  let line_job = build_line_job_map(lines)
   let mut i = 0
   while i < n {
     let line = lines[i]
@@ -6642,13 +6769,15 @@ fn check_undocumented_permissions(
           }
         }
         if uncommented > 0 {
-          add_diag(
-            out,
-            "undocumented-permissions",
-            Info,
-            "permissions block has \{uncommented} entry/entries without explanatory comments",
-            persona=Pedantic,
-          )
+          out.push(Diagnostic::{
+            rule: "undocumented-permissions",
+            severity: Info,
+            message: "permissions block has \{uncommented} entry/entries without explanatory comments",
+            pos: Some(Position::{ line: i + 1, col: indent + 1 }),
+            job: line_job[i],
+            step: None,
+            persona: Pedantic,
+          })
         }
       }
       i = j

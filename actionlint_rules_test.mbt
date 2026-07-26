@@ -1867,6 +1867,7 @@ test "permissions-syntax: unknown permission scope" {
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 2, "col": 1 },
       },
     ],
   })

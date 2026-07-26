@@ -326,9 +326,42 @@ test "cache-poisoning: cache restore in publish flow" {
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 8, "col": 5 },
+        "job": "release",
       },
     ],
   })
+}
+
+///|
+test "undocumented-permissions: distinguishes multiple per-job blocks by pos/job" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: write
+    #|      actions: write
+    #|    steps:
+    #|      - run: echo hi
+    #|  deploy:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      packages: write
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  inspect(hits.length(), content="2")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].pos is Some({ line: 6, col: 5 }))
+  assert_true(hits[1].job is Some("deploy"))
+  assert_true(hits[1].pos is Some({ line: 14, col: 5 }))
 }
 
 ///|
@@ -523,6 +556,8 @@ test "excessive-permissions: workflow without `permissions:` block emits default
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 4 entry/entries without explanatory comments",
+        "pos": { "line": 6, "col": 5 },
+        "job": "build",
       },
     ],
   })
@@ -1758,6 +1793,8 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 8, "col": 5 },
+        "job": "publish",
       },
       {
         "rule": "use-trusted-publishing",
@@ -1768,4 +1805,38 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
       },
     ],
   })
+}
+
+///|
+test "use-trusted-publishing: run-based detection fires on a real npm publish" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "use-trusted-publishing: silent on pkg-pr-new preview publish (not an npm registry publish)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  preview:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
 }

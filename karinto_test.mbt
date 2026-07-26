@@ -663,6 +663,28 @@ test "inline ignore: position-less workflow finding honoured file-wide" {
 }
 
 ///|
+test "inline ignore: comment on the line above a job-scoped finding is honoured" {
+  // Job-scoped findings (e.g. `use-trusted-publishing`'s run-based detection)
+  // resolve `pos` to the job's own key line, not whichever step triggered
+  // them. A `# karinto: ignore[...]` placed on the line directly above that
+  // job key — a "disable next line" style — should suppress the finding the
+  // same way placing it on the key line itself does.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  # karinto: ignore[use-trusted-publishing]
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  assert_eq(hits.length(), 0)
+}
+
+///|
 test "positions: merge key column tolerates extra spaces after dash" {
   let yaml =
     #|defaults: &d

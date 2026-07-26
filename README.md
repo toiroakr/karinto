@@ -142,6 +142,37 @@ the opt-outs authors already wrote for the upstream tools:
   it reads straight from `content`, so it works on every entry point.
   actionlint and ghalint have no inline-comment form, so karinto recognises
   only the `karinto` and `zizmor` prefixes.
+
+  For a finding with no owning step (a job-level finding, e.g.
+  `use-trusted-publishing`'s run-based detection, or a workflow-level one like
+  `undocumented-permissions`), "that same line" is the job's own key line
+  (`  build:`) or the specific field karinto anchors the finding to (e.g.
+  `permissions:`) — not whichever step actually triggered it. Placing the
+  comment on the step itself has no effect:
+
+  ```yaml
+  jobs:
+    preview:
+      name: Preview
+      steps:
+        - name: Publish preview
+          run: pnpm dlx some-tool publish ... # karinto: ignore[use-trusted-publishing] -- has no effect here
+  ```
+
+  Instead, put it on the job's key line, or — easier to read for a longer
+  job body — on the line directly above it (a "disable next line" comment
+  works the same as one on the key line itself; this only applies to
+  job/workflow-level findings, not step-scoped ones):
+
+  ```yaml
+  jobs:
+    # karinto: ignore[use-trusted-publishing]
+    preview:
+      name: Preview
+      steps:
+        - name: Publish preview
+          run: pnpm dlx some-tool publish ...
+  ```
 - **ghalint config** — a `ghalint.yaml` `excludes:` list is honoured. Each
   entry's `policy_name` is mapped onto the karinto rule(s) that absorbed it
   (via the catalogue's `origins`), and the `workflow_file_path` / `job_name` /
