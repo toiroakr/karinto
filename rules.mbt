@@ -6728,12 +6728,12 @@ fn build_line_job_map(lines : Array[String]) -> Array[String?] {
     let indent = leading_spaces(line)
     if jobs_indent < 0 {
       // Not inside `jobs:` yet. Recognize the header itself (with or without
-      // a trailing comment, regardless of spacing — `jobs:#comment` and
-      // `jobs:    # comment` both count) and start tracking from the next
-      // line. `jobs:` is only ever valid at the workflow's top level, so
-      // require indent 0 — otherwise a `run: |` script body that happens to
-      // contain a line starting with `jobs:` (e.g. example YAML in a step's
-      // output) could be mistaken for the real header before it's reached.
+      // a trailing comment — see `is_jobs_key_line`) and start tracking from
+      // the next line. `jobs:` is only ever valid at the workflow's top
+      // level, so require indent 0 — otherwise a `run: |` script body that
+      // happens to contain a line starting with `jobs:` (e.g. example YAML
+      // in a step's output) could be mistaken for the real header before
+      // it's reached.
       if indent == 0 && is_jobs_key_line(trimmed) {
         jobs_indent = indent
       }
