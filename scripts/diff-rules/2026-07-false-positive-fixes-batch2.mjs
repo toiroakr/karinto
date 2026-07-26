@@ -51,17 +51,29 @@ function isFixArtifact(x) {
 export function matches(capture, _replayed, diff) {
   if (!capturedBeforeFix(capture)) return false;
   let sawArtifact = false;
-  const isKnown = (x) => {
-    if (isFixArtifact(x)) {
-      sawArtifact = true;
-      return true;
-    }
-    return isOldDefaultPermsArtifact(capture, x);
-  };
   for (const d of diff) {
     if (d.kind !== "diagnostics") return false;
-    if (!d.onlyInCaptured.every(isKnown)) return false;
-    if (!d.onlyInReplayed.every(isKnown)) return false;
+    // This PR's two fixes only ever remove a finding (false positive dropped),
+    // never add one — so isFixArtifact is only legitimate in onlyInCaptured.
+    // Permitting it in onlyInReplayed too would mask a real regression where
+    // the worker newly starts emitting one of these findings for an old
+    // capture that never had it.
+    if (
+      !d.onlyInCaptured.every((x) => {
+        if (isFixArtifact(x)) {
+          sawArtifact = true;
+          return true;
+        }
+        return isOldDefaultPermsArtifact(capture, x);
+      })
+    ) {
+      return false;
+    }
+    // onlyInReplayed may only carry the other (genuinely bidirectional) rule's
+    // artifact — never this PR's own fixes.
+    if (!d.onlyInReplayed.every((x) => isOldDefaultPermsArtifact(capture, x))) {
+      return false;
+    }
   }
   return sawArtifact;
 }
