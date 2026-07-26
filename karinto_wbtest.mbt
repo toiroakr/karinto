@@ -118,3 +118,19 @@ test "is_jobs_key_line: bare header, spacing variants, and inline values" {
   assert_true(!is_jobs_key_line("jobs: read-all"))
   assert_true(!is_jobs_key_line("jobsfoo:"))
 }
+
+///|
+test "build_line_job_map: an indented `jobs:`-looking line before the real header is not mistaken for it" {
+  // `jobs:` is only ever valid at the workflow's top level (indent 0). A
+  // decoy line that happens to start with `jobs:` at a deeper indent — e.g.
+  // inside an earlier top-level field's block-scalar body — must not be
+  // mistaken for the real header, or the state machine loses track of the
+  // real `jobs:` section entirely (see below).
+  let lines = [
+    "name: |", "  jobs:", "  fake example text, not real YAML structure", "on: push",
+    "jobs:", "  build:", "    runs-on: ubuntu-latest",
+  ]
+  let owners = build_line_job_map(lines)
+  assert_true(owners[5] is Some("build"))
+  assert_true(owners[6] is Some("build"))
+}
