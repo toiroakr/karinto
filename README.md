@@ -143,35 +143,39 @@ the opt-outs authors already wrote for the upstream tools:
   actionlint and ghalint have no inline-comment form, so karinto recognises
   only the `karinto` and `zizmor` prefixes.
 
-  For a finding with no owning step (a job-level finding, e.g.
-  `use-trusted-publishing`'s run-based detection, or a workflow-level one like
-  `undocumented-permissions`), "that same line" is the job's own key line
-  (`  build:`) or the specific field karinto anchors the finding to (e.g.
-  `permissions:`) — not whichever step actually triggered it. Placing the
-  comment on the step itself has no effect:
+  Most findings are attributed to the specific step that triggered them (e.g.
+  `use-trusted-publishing`'s run-based detection points at the offending
+  `run:` line), so the comment goes right there as you'd expect. A finding
+  with no owning step — a workflow- or job-level one like
+  `undocumented-permissions` (about a `permissions:` block, not any one step)
+  — instead anchors to that field's own line (`permissions:`) or, absent a
+  more specific field, the job's own key line (`  build:`). Placing the
+  comment on an unrelated step has no effect there:
 
   ```yaml
   jobs:
-    preview:
-      name: Preview
+    build:
+      runs-on: ubuntu-latest
+      permissions:
+        contents: write
       steps:
-        - name: Publish preview
-          run: pnpm dlx some-tool publish ... # karinto: ignore[use-trusted-publishing] -- has no effect here
+        - run: echo hi # karinto: ignore[undocumented-permissions] -- has no effect here
   ```
 
-  Instead, put it on the job's key line, or — easier to read for a longer
-  job body — on the line directly above it (a "disable next line" comment
-  works the same as one on the key line itself; this only applies to
-  job/workflow-level findings, not step-scoped ones):
+  Instead, put it on the `permissions:` line itself, or — easier to read for
+  a longer block — on the line directly above it (a "disable next line"
+  comment works the same as one on that line itself; this only applies to
+  findings with no owning step):
 
   ```yaml
   jobs:
-    # karinto: ignore[use-trusted-publishing]
-    preview:
-      name: Preview
+    build:
+      runs-on: ubuntu-latest
+      # karinto: ignore[undocumented-permissions]
+      permissions:
+        contents: write
       steps:
-        - name: Publish preview
-          run: pnpm dlx some-tool publish ...
+        - run: echo hi
   ```
 - **ghalint config** — a `ghalint.yaml` `excludes:` list is honoured. Each
   entry's `policy_name` is mapped onto the karinto rule(s) that absorbed it

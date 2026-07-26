@@ -1823,8 +1823,9 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "use-trusted-publishing",
         "severity": "info",
         "message": "PyPI publish uses an API token; prefer OIDC trusted publishing",
-        "pos": { "line": 5, "col": 3 },
+        "pos": { "line": 12, "col": 15 },
         "job": "publish",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1845,6 +1846,27 @@ test "use-trusted-publishing: run-based detection fires on a real npm publish" {
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
   inspect(hits.length(), content="1")
+  // Attributed to the offending step, not left job-only — this is what lets
+  // an inline ignore comment on the step itself suppress it.
+  assert_true(hits[0].job is Some("publish"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+}
+
+///|
+test "use-trusted-publishing: an inline ignore on the offending step itself suppresses it" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks # karinto: ignore[use-trusted-publishing]
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
 }
 
 ///|

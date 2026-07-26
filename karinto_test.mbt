@@ -664,23 +664,25 @@ test "inline ignore: position-less workflow finding honoured file-wide" {
 
 ///|
 test "inline ignore: comment on the line above a job-scoped finding is honoured" {
-  // Job-scoped findings (e.g. `use-trusted-publishing`'s run-based detection)
-  // resolve `pos` to the job's own key line, not whichever step triggered
-  // them. A `# karinto: ignore[...]` placed on the line directly above that
-  // job key — a "disable next line" style — should suppress the finding the
-  // same way placing it on the key line itself does.
+  // Findings with no owning step (e.g. `undocumented-permissions`, which is
+  // about a `permissions:` block, not any one step) resolve `pos` to that
+  // field's own line. A `# karinto: ignore[...]` placed on the line directly
+  // above it — a "disable next line" style — should suppress the finding the
+  // same way placing it on that line itself does.
   let yaml =
     #|on: push
     #|jobs:
-    #|  # karinto: ignore[use-trusted-publishing]
-    #|  publish:
+    #|  build:
     #|    runs-on: ubuntu-latest
+    #|    # karinto: ignore[undocumented-permissions]
     #|    permissions:
-    #|      contents: read
+    #|      contents: write
     #|    steps:
-    #|      - run: pnpm publish
+    #|      - run: echo hi
   let res = @karinto.lint(yaml)
-  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
   assert_eq(hits.length(), 0)
 }
 

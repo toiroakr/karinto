@@ -2100,6 +2100,11 @@ fn perms_has_id_token_write(value : @yaml.Yaml?) -> Bool {
 /// fires; run-based detection is suppressed when the job carries
 /// `permissions.id-token: write` (workflow-level grant alone is enough
 /// for zizmor too, but propagating that here keeps the check tractable).
+/// Registered at the job level so the suppression check can see the job's
+/// own `permissions:`, but each finding is about one concrete step, so it's
+/// stamped with that step's context (via `add_diag_step_field`) rather than
+/// left job-only — that's also what lets an inline ignore comment placed on
+/// the offending step itself (its `uses:`/`run:` line) suppress it.
 fn check_trusted_publishing_job(
   ctx : WalkCtx,
   job : JobInfo,
@@ -2113,18 +2118,30 @@ fn check_trusted_publishing_job(
   let suppress_run = job_id_token || workflow_id_token
   for step in job.steps {
     match trusted_publishing_action_finding(step) {
-      Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+      Some(msg) =>
+        add_diag_step_field(
+          out,
+          ctx,
+          "use-trusted-publishing",
+          Info,
+          msg,
+          step,
+          "uses",
+        )
       None => ()
     }
     if !suppress_run {
       match step.run {
         Some(r) =>
           if run_has_publish_cmd(r) {
-            add_diag(
+            add_diag_step_field(
               out,
+              ctx,
               "use-trusted-publishing",
               Info,
               "publish command uses a long-lived token; prefer OIDC trusted publishing",
+              step,
+              "run",
             )
           }
         None => ()
