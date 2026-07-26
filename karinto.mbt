@@ -331,10 +331,26 @@ pub fn lint(
 }
 
 ///|
-/// Maps a 1-based source line number to the rule-id patterns an inline
-/// `# <tool>: ignore[...]` comment opts out on that line.
-fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
-  let by_line : Map[Int, Array[String]] = {}
+/// Per-line result of `parse_inline_ignores`: the rule-id patterns an inline
+/// `# <tool>: ignore[...]` comment opts out on that line, plus whether the
+/// directive sits on a line that is *only* a comment (nothing but
+/// whitespace before the `#`) as opposed to a trailing comment on a code
+/// line (`run: foo # karinto: ignore[...]`). The distinction matters for the
+/// "disable next line" lookback in `is_inline_ignored`: only a standalone
+/// comment line can safely be treated as belonging to the *following* line,
+/// since a trailing comment is unambiguously anchored to its own code line
+/// and could otherwise be mistaken for a directive meant for whatever
+/// comes after it.
+priv struct InlineIgnoreLine {
+  patterns : Array[String]
+  pure_comment : Bool
+}
+
+///|
+/// Maps a 1-based source line number to the inline `# <tool>: ignore[...]`
+/// directive(s) found there.
+fn parse_inline_ignores(content : String) -> Map[Int, InlineIgnoreLine] {
+  let by_line : Map[Int, InlineIgnoreLine] = {}
   // Only zizmor ships an inline ignore syntax among the upstreams Karinto
   // consolidates; `karinto` is our own alias. actionlint and ghalint opt out
   // via config files, so they have no comment form to scan for.
@@ -350,6 +366,9 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
       lineno = lineno + 1
       continue
     }
+    // Everything strictly before the `#` (cs - 1): if it's blank, this line
+    // is nothing but the comment.
+    let pure_comment = trim_ws(s[0:cs - 1].to_owned()) == ""
     let comment = s[cs:].to_owned()
     for tool in tools {
       let needle = tool + ": ignore["
@@ -361,10 +380,10 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
           match index_of(after, "]") {
             Some(j) => {
               let inner = after[0:j].to_owned()
-              let pats = match by_line.get(lineno) {
+              let entry = match by_line.get(lineno) {
                 Some(existing) => existing
                 None => {
-                  let fresh : Array[String] = []
+                  let fresh = InlineIgnoreLine::{ patterns: [], pure_comment }
                   by_line[lineno] = fresh
                   fresh
                 }
@@ -372,7 +391,7 @@ fn parse_inline_ignores(content : String) -> Map[Int, Array[String]] {
               for part in inner.split(",") {
                 let trimmed = trim_ws(part.to_owned())
                 if trimmed.length() > 0 {
-                  pats.push(trimmed)
+                  entry.patterns.push(trimmed)
                 }
               }
             }
@@ -453,11 +472,11 @@ fn comment_start(s : String) -> Int? {
 /// silently dropping the opt-out because the finding carries no line.
 fn is_inline_ignored(
   d : Diagnostic,
-  inline_ignores : Map[Int, Array[String]],
+  inline_ignores : Map[Int, InlineIgnoreLine],
 ) -> Bool {
   guard d.pos is Some(p) else {
-    for _, pats in inline_ignores {
-      for pat in pats {
+    for _, entry in inline_ignores {
+      for pat in entry.patterns {
         if glob_match(pat, d.rule) {
           return true
         }
@@ -465,27 +484,36 @@ fn is_inline_ignored(
     }
     return false
   }
-  // Findings with no owning step (e.g. `undocumented-permissions`, which is
-  // about a `permissions:` block rather than any one step) resolve `pos` to
-  // that field's own line, or the job's key line (`  build:`) absent a more
-  // specific field. Besides that line itself, also honour a "disable next
-  // line" comment placed on the line directly above it — that reads more
-  // naturally than a trailing comment there and mirrors how many linters'
-  // next-line pragmas work. Step-scoped findings stay strictly same-line: a
-  // step's own line is always the intuitive, unambiguous place, and
-  // consecutive steps commonly trip the same rule, so a look-behind there
-  // would risk suppressing the wrong step.
-  let candidates = if d.step is None { [p.line, p.line - 1] } else { [p.line] }
-  for candidate in candidates {
-    match inline_ignores.get(candidate) {
-      Some(pats) =>
-        for pat in pats {
+  // Same-line always counts, whatever the comment looks like (trailing or
+  // standalone). Additionally honour a "disable next line" comment on the
+  // line directly above — but only when that line is *nothing but* the
+  // comment (`pure_comment`). A trailing comment on a code line unambiguously
+  // belongs to that line; treating it as also covering the *next* line would
+  // make consecutive same-rule findings collide (e.g. two steps in a row
+  // tripping the same rule, the first with its own trailing ignore — that
+  // ignore must not also swallow the second step's finding). A standalone
+  // comment line has no code of its own to be "about", so reading it as
+  // referring to the line below is unambiguous and safe for any finding,
+  // step-scoped or not.
+  match inline_ignores.get(p.line) {
+    Some(entry) =>
+      for pat in entry.patterns {
+        if glob_match(pat, d.rule) {
+          return true
+        }
+      }
+    None => ()
+  }
+  match inline_ignores.get(p.line - 1) {
+    Some(entry) =>
+      if entry.pure_comment {
+        for pat in entry.patterns {
           if glob_match(pat, d.rule) {
             return true
           }
         }
-      None => ()
-    }
+      }
+    None => ()
   }
   false
 }

@@ -1,0 +1,5 @@
+---
+"karinto": patch
+---
+
+Inline `# karinto: ignore[...]` / `# zizmor: ignore[...]` comments now also work as a "disable next line" directive: a comment on its own line (nothing else before the `#`) suppresses a finding on the line directly below it, in addition to same-line placement. A trailing comment on a code line (`run: foo # karinto: ignore[rule]`) still applies only to that line — it never carries over to the next one, so two adjacent findings for the same rule can't collide with each other's ignores. This is most useful for a finding with no owning step (e.g. `undocumented-permissions`, whose `pos` resolves to the `permissions:` field's own line rather than any step), but also works for step-scoped findings when the comment sits on its own line just above the step's `uses:`/`run:` line. The README's "Ignoring findings" section documents this.

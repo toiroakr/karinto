@@ -1870,6 +1870,50 @@ test "use-trusted-publishing: an inline ignore on the offending step itself supp
 }
 
 ///|
+test "use-trusted-publishing: a standalone ignore comment directly above `run:` also suppresses it" {
+  // A comment on its own line (not a trailing comment on code) is treated as
+  // "about" the line right below it — this works for step-scoped findings
+  // too, not just job/workflow-scoped ones, since a comment-only line can
+  // never itself be mistaken for a different finding's own line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - name: Publish
+    #|        # karinto: ignore[use-trusted-publishing]
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a trailing ignore on one step does not swallow the next step's finding" {
+  // A trailing comment (code + `#...`) is anchored to its own line only.
+  // Extending the "line above" lookback to it would make the first step's
+  // own ignore also suppress the second, unrelated step's finding.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks # karinto: ignore[use-trusted-publishing]
+    #|      - run: npm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+///|
 test "use-trusted-publishing: silent on pkg-pr-new preview publish (not an npm registry publish)" {
   let yaml =
     #|on: push

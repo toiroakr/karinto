@@ -134,23 +134,10 @@ Beyond the `disable` glob list (which skips a rule everywhere), karinto honours
 the opt-outs authors already wrote for the upstream tools:
 
 - **Inline comments** — `# karinto: ignore[rule-id]` or
-  `# zizmor: ignore[rule-id]` on a line suppresses findings **on that same
-  line** (line-scoped, not file-global). List several rules with commas
-  (`# zizmor: ignore[a, b]`) and add a free-form note after the bracket
-  (`# zizmor: ignore[a] handled upstream`). This matches
-  [zizmor's inline-ignore syntax](https://docs.zizmor.sh/usage/#inline-ignores);
-  it reads straight from `content`, so it works on every entry point.
-  actionlint and ghalint have no inline-comment form, so karinto recognises
-  only the `karinto` and `zizmor` prefixes.
-
-  Most findings are attributed to the specific step that triggered them (e.g.
-  `use-trusted-publishing`'s run-based detection points at the offending
-  `run:` line), so the comment goes right there as you'd expect. A finding
-  with no owning step — a workflow- or job-level one like
-  `undocumented-permissions` (about a `permissions:` block, not any one step)
-  — instead anchors to that field's own line (`permissions:`) or, absent a
-  more specific field, the job's own key line (`  build:`). Placing the
-  comment on an unrelated step has no effect there:
+  `# zizmor: ignore[rule-id]` suppresses findings **on that same line**
+  (line-scoped, not file-global), whether it's a trailing comment
+  (`run: foo # karinto: ignore[rule]`) or, when the comment sits on its own
+  line with nothing else on it, the line **directly below**:
 
   ```yaml
   jobs:
@@ -159,13 +146,20 @@ the opt-outs authors already wrote for the upstream tools:
       permissions:
         contents: write
       steps:
-        - run: echo hi # karinto: ignore[undocumented-permissions] -- has no effect here
+        - name: Publish
+          # karinto: ignore[use-trusted-publishing]
+          run: pnpm publish
   ```
 
-  Instead, put it on the `permissions:` line itself, or — easier to read for
-  a longer block — on the line directly above it (a "disable next line"
-  comment works the same as one on that line itself; this only applies to
-  findings with no owning step):
+  This "disable next line" form only kicks in for a comment-only line — a
+  trailing comment always applies to its own line alone, never to the line
+  after it, so two adjacent findings for the same rule (e.g. two steps that
+  each run `publish`) don't collide with each other's ignores. It's mainly
+  useful for a finding with no owning step (a workflow- or job-level one like
+  `undocumented-permissions`, about a `permissions:` block rather than any
+  one step), which anchors to that field's own line (`permissions:`) or,
+  absent a more specific field, the job's own key line (`  build:`) — not
+  whichever step happens to be nearby:
 
   ```yaml
   jobs:
@@ -177,6 +171,14 @@ the opt-outs authors already wrote for the upstream tools:
       steps:
         - run: echo hi
   ```
+
+  List several rules with commas (`# zizmor: ignore[a, b]`) and add a
+  free-form note after the bracket (`# zizmor: ignore[a] handled upstream`).
+  This matches
+  [zizmor's inline-ignore syntax](https://docs.zizmor.sh/usage/#inline-ignores);
+  it reads straight from `content`, so it works on every entry point.
+  actionlint and ghalint have no inline-comment form, so karinto recognises
+  only the `karinto` and `zizmor` prefixes.
 - **ghalint config** — a `ghalint.yaml` `excludes:` list is honoured. Each
   entry's `policy_name` is mapped onto the karinto rule(s) that absorbed it
   (via the catalogue's `origins`), and the `workflow_file_path` / `job_name` /

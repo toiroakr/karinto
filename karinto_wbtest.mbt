@@ -58,7 +58,9 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let with_hash =
     #|      - uses: a/b@v1 # zizmor: ignore[unpinned-uses]
   let m1 = parse_inline_ignores(with_hash)
-  assert_true(m1.get(1) is Some(["unpinned-uses"]))
+  assert_true(
+    m1.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: false }),
+  )
   // The same text as a quoted YAML value (no `#`) must NOT be treated as a
   // directive — otherwise keys/values could silently suppress findings.
   let no_hash =
@@ -69,7 +71,7 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let trailing =
     #|    env: { X: 1 } # karinto: ignore[a, b]
   let m3 = parse_inline_ignores(trailing)
-  assert_true(m3.get(1) is Some(["a", "b"]))
+  assert_true(m3.get(1) is Some({ patterns: ["a", "b"], pure_comment: false }))
   // A `#` *inside* a quoted scalar is data, not a comment marker — it must not
   // be treated as a directive even though the text reads like one.
   let hash_in_quotes =
@@ -80,7 +82,18 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let quote_then_comment =
     #|      - run: echo "hi" # zizmor: ignore[unpinned-uses]
   let m5 = parse_inline_ignores(quote_then_comment)
-  assert_true(m5.get(1) is Some(["unpinned-uses"]))
+  assert_true(
+    m5.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: false }),
+  )
+  // A line that is *only* the comment (nothing but whitespace before `#`) is
+  // `pure_comment: true` — the signal that lets `is_inline_ignored` treat it
+  // as referring to the line below.
+  let standalone =
+    #|      # zizmor: ignore[unpinned-uses]
+  let m6 = parse_inline_ignores(standalone)
+  assert_true(
+    m6.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: true }),
+  )
 }
 
 ///|
