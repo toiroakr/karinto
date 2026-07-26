@@ -1902,17 +1902,24 @@ fn is_known_non_registry_dlx_tool(name : String) -> Bool {
 ///|
 /// If `cmd`/`rest` run a package via a dlx-style mechanism (`pnpm dlx`,
 /// `yarn dlx`, `npm exec`), returns the bare (version-stripped) package name
-/// being invoked.
+/// being invoked. Flags between the dlx keyword and the package spec (e.g.
+/// `pnpm dlx -y pkg`, `npm exec --yes -- pkg`) are skipped.
 fn dlx_invoked_tool(cmd : String, rest : Array[String]) -> String? {
-  if (cmd == "pnpm" || cmd == "yarn") && rest.length() > 1 && rest[0] == "dlx" {
-    return Some(strip_pkg_version(rest[1]))
-  }
-  if cmd == "npm" && rest.length() > 1 && rest[0] == "exec" {
-    let idx = if rest[1] == "--" { 2 } else { 1 }
-    if idx < rest.length() {
-      return Some(strip_pkg_version(rest[idx]))
-    }
+  let after_keyword = if (cmd == "pnpm" || cmd == "yarn") &&
+    rest.length() > 0 &&
+    rest[0] == "dlx" {
+    1
+  } else if cmd == "npm" && rest.length() > 0 && rest[0] == "exec" {
+    1
+  } else {
     return None
+  }
+  let mut i = after_keyword
+  while i < rest.length() && rest[i].has_prefix("-") {
+    i = i + 1
+  }
+  if i < rest.length() {
+    return Some(strip_pkg_version(rest[i]))
   }
   None
 }
@@ -2017,6 +2024,44 @@ fn shell_line_is_publish(tokens : Array[String]) -> Bool {
 }
 
 ///|
+/// Splits a shell line on `&&`, `||`, and `;` into independent command
+/// segments, so a line chaining several commands (e.g.
+/// `pnpm dlx pkg-pr-new publish && pnpm publish`) is evaluated per-segment
+/// instead of as one flat token stream — otherwise an early decision about
+/// the first segment (e.g. it's a known non-registry dlx tool) would swallow
+/// a real publish command later on the same line. Heuristic, like the rest
+/// of this shell-line parsing: it doesn't account for quoting.
+fn split_shell_segments(line : String) -> Array[String] {
+  let chars : Array[Char] = []
+  for ch in line {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let segments : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '&' || c == '|') && i + 1 < n && chars[i + 1] == c {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 2
+      continue
+    }
+    if c == ';' {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 1
+      continue
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  segments.push(buf.to_string())
+  segments
+}
+
+///|
 fn run_has_publish_cmd(run : String) -> Bool {
   let normalized = collapse_continuations(run)
   for line in normalized.split("\n") {
@@ -2024,8 +2069,14 @@ fn run_has_publish_cmd(run : String) -> Bool {
     if trimmed.length() == 0 {
       continue
     }
-    if shell_line_is_publish(shell_tokens(trimmed)) {
-      return true
+    for segment in split_shell_segments(trimmed) {
+      let seg_trimmed = trim_ws(segment)
+      if seg_trimmed.length() == 0 {
+        continue
+      }
+      if shell_line_is_publish(shell_tokens(seg_trimmed)) {
+        return true
+      }
     }
   }
   false
@@ -6623,13 +6674,17 @@ fn is_jobs_key_line(trimmed : String) -> Bool {
   if !trimmed.has_prefix(needle) {
     return false
   }
-  let rest = trimmed[needle.length():].to_owned()
-  if rest == "" {
+  let after_trimmed = trim_ws(trimmed[needle.length():].to_owned())
+  if after_trimmed == "" {
     return true
   }
-  let chars = rest.to_array()
-  let c = chars[0]
-  c == ' ' || c == '\t' || c == '#'
+  // Strip a trailing comment; anything else remaining is an inline value
+  // (`jobs: {}`, `jobs: read-all`-shaped garbage, …) — not a block header.
+  let val = match index_of(after_trimmed, "#") {
+    Some(k) => trim_ws(after_trimmed[0:k].to_owned())
+    None => after_trimmed
+  }
+  val == ""
 }
 
 ///|

@@ -1863,3 +1863,42 @@ test "use-trusted-publishing: silent on pkg-pr-new preview publish (not an npm r
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
   inspect(hits.length(), content="0")
 }
+
+///|
+test "use-trusted-publishing: recognizes pkg-pr-new behind a -y/--yes flag" {
+  // `pnpm dlx -y pkg` / `npm exec --yes pkg` skip the install-confirmation
+  // prompt; the flag sits between the dlx keyword and the package spec.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  preview:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx -y pkg-pr-new@0.0.78 publish --compact
+    #|      - run: npm exec --yes pkg-pr-new -- publish --compact
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx still fires" {
+  // A dlx invocation of a known non-registry tool must not swallow detection
+  // of a genuinely separate publish command chained on the same line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx pkg-pr-new@0.0.78 publish --compact && pnpm publish
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}

@@ -105,3 +105,16 @@ test "extract_expr_bodies: `}}` inside a quoted literal does not truncate the bo
   assert_eq(plain.length(), 1)
   assert_eq(plain[0], " github.ref ")
 }
+
+///|
+test "is_jobs_key_line: bare header, spacing variants, and inline values" {
+  assert_true(is_jobs_key_line("jobs:"))
+  assert_true(is_jobs_key_line("jobs: # top-level jobs"))
+  assert_true(is_jobs_key_line("jobs:    # extra spaces before comment"))
+  assert_true(is_jobs_key_line("jobs:#no space before comment"))
+  // An inline value means this isn't a block-mapping header, even though
+  // the first character after the key is whitespace.
+  assert_true(!is_jobs_key_line("jobs: {}"))
+  assert_true(!is_jobs_key_line("jobs: read-all"))
+  assert_true(!is_jobs_key_line("jobsfoo:"))
+}
