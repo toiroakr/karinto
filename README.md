@@ -172,6 +172,19 @@ the opt-outs authors already wrote for the upstream tools:
         - run: echo hi
   ```
 
+  For a step-scoped finding, a standalone comment also works directly above
+  the step's own `- ` line, not just directly above the specific field —
+  handy when a step has several lines (`name:`, then `run:`) and you'd
+  rather annotate the whole step than the one line the finding happens to
+  point at:
+
+  ```yaml
+  steps:
+    # karinto: ignore[use-trusted-publishing]
+    - name: Publish
+      run: pnpm publish
+  ```
+
   List several rules with commas (`# zizmor: ignore[a, b]`) and add a
   free-form note after the bracket (`# zizmor: ignore[a] handled upstream`).
   This matches

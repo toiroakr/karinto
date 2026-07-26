@@ -294,7 +294,12 @@ pub fn lint(
       let ignored : Array[Diagnostic] = []
       let kept : Array[Diagnostic] = []
       for d in diagnostics {
-        if is_inline_ignored(d, inline_ignores) {
+        if is_inline_ignored(
+            d,
+            inline_ignores,
+            lp.position_root,
+            Some(lp.line_counter),
+          ) {
           ignored.push(d)
         } else if ghalint_excludes.length() > 0 &&
           ghalint_excluded(
@@ -463,6 +468,34 @@ fn comment_start(s : String) -> Int? {
 }
 
 ///|
+/// True if line `n` carries an inline ignore matching `rule`. When
+/// `require_pure` is set, only a standalone comment line (nothing but the
+/// comment) counts — used for "disable next line"-style lookbacks, where a
+/// trailing comment on real code must never be read as applying to a
+/// different line.
+fn line_ignores_rule(
+  inline_ignores : Map[Int, InlineIgnoreLine],
+  n : Int,
+  rule : String,
+  require_pure~ : Bool,
+) -> Bool {
+  match inline_ignores.get(n) {
+    Some(entry) => {
+      if require_pure && !entry.pure_comment {
+        return false
+      }
+      for pat in entry.patterns {
+        if glob_match(pat, rule) {
+          return true
+        }
+      }
+      false
+    }
+    None => false
+  }
+}
+
+///|
 /// Whether `d` is suppressed by an inline ignore comment. Positioned findings
 /// are line-scoped: only an ignore on the finding's own line counts. A finding
 /// with no resolved position cannot be line-scoped, so it falls back to a
@@ -473,6 +506,8 @@ fn comment_start(s : String) -> Int? {
 fn is_inline_ignored(
   d : Diagnostic,
   inline_ignores : Map[Int, InlineIgnoreLine],
+  position_root : @yaml.Node?,
+  line_counter : @yaml.LineCounter?,
 ) -> Bool {
   guard d.pos is Some(p) else {
     for _, entry in inline_ignores {
@@ -495,27 +530,36 @@ fn is_inline_ignored(
   // comment line has no code of its own to be "about", so reading it as
   // referring to the line below is unambiguous and safe for any finding,
   // step-scoped or not.
-  match inline_ignores.get(p.line) {
-    Some(entry) =>
-      for pat in entry.patterns {
-        if glob_match(pat, d.rule) {
-          return true
-        }
-      }
-    None => ()
+  if line_ignores_rule(inline_ignores, p.line, d.rule, require_pure=false) {
+    return true
   }
-  match inline_ignores.get(p.line - 1) {
-    Some(entry) =>
-      if entry.pure_comment {
-        for pat in entry.patterns {
-          if glob_match(pat, d.rule) {
-            return true
-          }
-        }
-      }
-    None => ()
+  if line_ignores_rule(inline_ignores, p.line - 1, d.rule, require_pure=true) {
+    return true
   }
-  false
+  // For a step-scoped finding, also honour a standalone comment directly
+  // above the step's own `- ` line — not just above whichever specific field
+  // `pos` resolved to. A step often spans several lines (`name:` then
+  // `run:`), so `pos` (e.g. the `run:` field) can sit a few lines below the
+  // step's own start; annotating "this whole step" from just above its `- `
+  // marker is a natural, common place to write the comment. Safe for the
+  // same reason as above: the line directly above a step's own start can
+  // only be a standalone comment or another step's content, never a code
+  // line that's "about" a different step, so it can't collide.
+  match d.step {
+    Some(s) => {
+      guard position_root is Some(root) else { return false }
+      guard line_counter is Some(lc) else { return false }
+      guard step_node(root, d.job, s.index) is Some(n) else { return false }
+      let (step_line, _) = n.start_pos(lc)
+      line_ignores_rule(
+        inline_ignores,
+        step_line - 1,
+        d.rule,
+        require_pure=true,
+      )
+    }
+    None => false
+  }
 }
 
 ///|

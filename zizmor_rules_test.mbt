@@ -1914,6 +1914,51 @@ test "use-trusted-publishing: a trailing ignore on one step does not swallow the
 }
 
 ///|
+test "use-trusted-publishing: a standalone comment above the step's own `- ` line suppresses it" {
+  // The finding's own `pos` is the `run:` field a couple of lines into the
+  // step, but a standalone comment directly above the step's `- ` marker —
+  // annotating the whole step, not just one field — should work too.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      # karinto: ignore[use-trusted-publishing]
+    #|      - name: Publish
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a comment above the PREVIOUS step's `- ` line does not leak forward" {
+  // The lookback is scoped to each step's own start line, so annotating step
+  // A does not accidentally also cover step B a few lines later.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      # karinto: ignore[use-trusted-publishing]
+    #|      - name: Build
+    #|        run: pnpm build
+    #|      - name: Publish
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+///|
 test "use-trusted-publishing: silent on pkg-pr-new preview publish (not an npm registry publish)" {
   let yaml =
     #|on: push
