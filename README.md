@@ -134,10 +134,60 @@ Beyond the `disable` glob list (which skips a rule everywhere), karinto honours
 the opt-outs authors already wrote for the upstream tools:
 
 - **Inline comments** — `# karinto: ignore[rule-id]` or
-  `# zizmor: ignore[rule-id]` on a line suppresses findings **on that same
-  line** (line-scoped, not file-global). List several rules with commas
-  (`# zizmor: ignore[a, b]`) and add a free-form note after the bracket
-  (`# zizmor: ignore[a] handled upstream`). This matches
+  `# zizmor: ignore[rule-id]` suppresses findings **on that same line**
+  (line-scoped, not file-global), whether it's a trailing comment
+  (`run: foo # karinto: ignore[rule]`) or, when the comment sits on its own
+  line with nothing else on it, the line **directly below**:
+
+  ```yaml
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      permissions:
+        contents: write
+      steps:
+        - name: Publish
+          # karinto: ignore[use-trusted-publishing]
+          run: pnpm publish
+  ```
+
+  This "disable next line" form only kicks in for a comment-only line — a
+  trailing comment always applies to its own line alone, never to the line
+  after it, so two adjacent findings for the same rule (e.g. two steps that
+  each run `publish`) don't collide with each other's ignores. It's mainly
+  useful for a finding with no owning step (a workflow- or job-level one like
+  `undocumented-permissions`, about a `permissions:` block rather than any
+  one step), which anchors to that field's own line (`permissions:`) or,
+  absent a more specific field, the job's own key line (`build:`) — not
+  whichever step happens to be nearby:
+
+  ```yaml
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      # karinto: ignore[undocumented-permissions]
+      permissions:
+        contents: write
+      steps:
+        - run: echo hi
+  ```
+
+  For a step-scoped finding, a standalone comment also works directly above
+  the step's own list-item (`-`) line, not just directly above the specific
+  field — handy when a step has several lines (`name:`, then `run:`) and
+  you'd rather annotate the whole step than the one line the finding happens
+  to point at:
+
+  ```yaml
+  steps:
+    # karinto: ignore[use-trusted-publishing]
+    - name: Publish
+      run: pnpm publish
+  ```
+
+  List several rules with commas (`# zizmor: ignore[a, b]`) and add a
+  free-form note after the bracket (`# zizmor: ignore[a] handled upstream`).
+  This matches
   [zizmor's inline-ignore syntax](https://docs.zizmor.sh/usage/#inline-ignores);
   it reads straight from `content`, so it works on every entry point.
   actionlint and ghalint have no inline-comment form, so karinto recognises

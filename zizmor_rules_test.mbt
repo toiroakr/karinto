@@ -234,7 +234,7 @@ test "bot-conditions: spoofable github.actor bot check" {
         "rule": "bot-conditions",
         "severity": "error",
         "message": "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
-        "pos": { "line": 3, "col": 3 },
+        "pos": { "line": 8, "col": 9 },
         "job": "auto",
       },
     ],
@@ -304,6 +304,9 @@ test "cache-poisoning: cache restore in publish flow" {
         "rule": "cache-poisoning",
         "severity": "error",
         "message": "runtime artifacts potentially vulnerable to a cache poisoning attack",
+        "pos": { "line": 11, "col": 15 },
+        "job": "release",
+        "step": { "index": 0 },
       },
       {
         "rule": "concurrency-limits",
@@ -326,9 +329,65 @@ test "cache-poisoning: cache restore in publish flow" {
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 8, "col": 5 },
+        "job": "release",
       },
     ],
   })
+}
+
+///|
+test "undocumented-permissions: distinguishes multiple per-job blocks by pos/job" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: write
+    #|      actions: write
+    #|    steps:
+    #|      - run: echo hi
+    #|  deploy:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      packages: write
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  inspect(hits.length(), content="2")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].pos is Some({ line: 6, col: 5 }))
+  assert_true(hits[1].job is Some("deploy"))
+  assert_true(hits[1].pos is Some({ line: 14, col: 5 }))
+}
+
+///|
+test "undocumented-permissions: job attribution survives an odd `jobs:` header spacing" {
+  // A `jobs:` header with extra spaces before its trailing comment must
+  // still be recognized so job attribution doesn't silently fall back to
+  // `None`.
+  let yaml =
+    #|on: push
+    #|jobs:    # top-level jobs
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: write
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
 }
 
 ///|
@@ -523,6 +582,8 @@ test "excessive-permissions: workflow without `permissions:` block emits default
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 4 entry/entries without explanatory comments",
+        "pos": { "line": 6, "col": 5 },
+        "job": "build",
       },
     ],
   })
@@ -1065,7 +1126,7 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
         "rule": "overprovisioned-secrets",
         "severity": "warning",
         "message": "`toJSON(secrets)` exposes every secret; reference specific keys",
-        "pos": { "line": 3, "col": 3 },
+        "pos": { "line": 8, "col": 5 },
         "job": "build",
       },
     ],
@@ -1758,14 +1819,293 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
         "rule": "undocumented-permissions",
         "severity": "info",
         "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 8, "col": 5 },
+        "job": "publish",
       },
       {
         "rule": "use-trusted-publishing",
         "severity": "info",
         "message": "PyPI publish uses an API token; prefer OIDC trusted publishing",
-        "pos": { "line": 5, "col": 3 },
+        "pos": { "line": 12, "col": 15 },
         "job": "publish",
+        "step": { "index": 0 },
       },
     ],
   })
+}
+
+///|
+test "use-trusted-publishing: run-based detection fires on a real npm publish" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+  // Attributed to the offending step, not left job-only — this is what lets
+  // an inline ignore comment on the step itself suppress it.
+  assert_true(hits[0].job is Some("publish"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+}
+
+///|
+test "use-trusted-publishing: an inline ignore on the offending step itself suppresses it" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks # karinto: ignore[use-trusted-publishing]
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a standalone ignore comment directly above `run:` also suppresses it" {
+  // A comment on its own line (not a trailing comment on code) is treated as
+  // "about" the line right below it — this works for step-scoped findings
+  // too, not just job/workflow-scoped ones, since a comment-only line can
+  // never itself be mistaken for a different finding's own line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - name: Publish
+    #|        # karinto: ignore[use-trusted-publishing]
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a trailing ignore on one step does not swallow the next step's finding" {
+  // A trailing comment (code + `#...`) is anchored to its own line only.
+  // Extending the "line above" lookback to it would make the first step's
+  // own ignore also suppress the second, unrelated step's finding.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm publish --no-git-checks # karinto: ignore[use-trusted-publishing]
+    #|      - run: npm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "use-trusted-publishing: a standalone comment above the step's own `- ` line suppresses it" {
+  // The finding's own `pos` is the `run:` field a couple of lines into the
+  // step, but a standalone comment directly above the step's `- ` marker —
+  // annotating the whole step, not just one field — should work too.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      # karinto: ignore[use-trusted-publishing]
+    #|      - name: Publish
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a comment above the PREVIOUS step's `- ` line does not leak forward" {
+  // The lookback is scoped to each step's own start line, so annotating step
+  // A does not accidentally also cover step B a few lines later.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      # karinto: ignore[use-trusted-publishing]
+    #|      - name: Build
+    #|        run: pnpm build
+    #|      - name: Publish
+    #|        run: pnpm publish --no-git-checks
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "use-trusted-publishing: silent on pkg-pr-new preview publish (not an npm registry publish)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  preview:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: recognizes pkg-pr-new behind a -y/--yes flag" {
+  // `pnpm dlx -y pkg` / `npm exec --yes pkg` skip the install-confirmation
+  // prompt; the flag sits between the dlx keyword and the package spec.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  preview:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx -y pkg-pr-new@0.0.78 publish --compact
+    #|      - run: npm exec --yes pkg-pr-new -- publish --compact
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx still fires" {
+  // A dlx invocation of a known non-registry tool must not swallow detection
+  // of a genuinely separate publish command chained on the same line.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  publish:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: pnpm dlx pkg-pr-new@0.0.78 publish --compact && pnpm publish
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
+  inspect(hits.length(), content="1")
+}
+
+// ---------------------------------------------------------------------------
+// Attribution regression tests
+//
+// A finding that blames one concrete job or step must carry that job/step (and
+// a `pos` pointing at the field it's actually about), not just say so in its
+// message. Without it the offender can't be located in a multi-job workflow,
+// and an inline `# karinto: ignore[...]` on the offending line has no effect.
+// ---------------------------------------------------------------------------
+
+///|
+test "attribution: insecure-commands names the job/step whose `env:` sets it" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        env:
+    #|          ACTIONS_ALLOW_UNSECURE_COMMANDS: "true"
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "insecure-commands" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: overprovisioned-secrets names the step whose `env:` leaks" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        env:
+    #|          SECRETS: ${{ toJSON(secrets) }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "overprovisioned-secrets"
+  })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: bot-conditions names the step whose `if:` is spoofable" {
+  let yaml =
+    #|on: pull_request
+    #|jobs:
+    #|  auto:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo trust
+    #|        if: github.actor == 'dependabot[bot]'
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "bot-conditions" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("auto"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: unsound-condition names the step whose `if:` is unsound" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        if: yes ${{ success() }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unsound-condition" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
 }

@@ -58,7 +58,9 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let with_hash =
     #|      - uses: a/b@v1 # zizmor: ignore[unpinned-uses]
   let m1 = parse_inline_ignores(with_hash)
-  assert_true(m1.get(1) is Some(["unpinned-uses"]))
+  assert_true(
+    m1.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: false }),
+  )
   // The same text as a quoted YAML value (no `#`) must NOT be treated as a
   // directive — otherwise keys/values could silently suppress findings.
   let no_hash =
@@ -69,7 +71,7 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let trailing =
     #|    env: { X: 1 } # karinto: ignore[a, b]
   let m3 = parse_inline_ignores(trailing)
-  assert_true(m3.get(1) is Some(["a", "b"]))
+  assert_true(m3.get(1) is Some({ patterns: ["a", "b"], pure_comment: false }))
   // A `#` *inside* a quoted scalar is data, not a comment marker — it must not
   // be treated as a directive even though the text reads like one.
   let hash_in_quotes =
@@ -80,7 +82,18 @@ test "parse_inline_ignores requires a `#` comment marker" {
   let quote_then_comment =
     #|      - run: echo "hi" # zizmor: ignore[unpinned-uses]
   let m5 = parse_inline_ignores(quote_then_comment)
-  assert_true(m5.get(1) is Some(["unpinned-uses"]))
+  assert_true(
+    m5.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: false }),
+  )
+  // A line that is *only* the comment (nothing but whitespace before `#`) is
+  // `pure_comment: true` — the signal that lets `is_inline_ignored` treat it
+  // as referring to the line below.
+  let standalone =
+    #|      # zizmor: ignore[unpinned-uses]
+  let m6 = parse_inline_ignores(standalone)
+  assert_true(
+    m6.get(1) is Some({ patterns: ["unpinned-uses"], pure_comment: true }),
+  )
 }
 
 ///|
@@ -104,4 +117,38 @@ test "extract_expr_bodies: `}}` inside a quoted literal does not truncate the bo
   let plain = extract_expr_bodies("${{ github.ref }}")
   assert_eq(plain.length(), 1)
   assert_eq(plain[0], " github.ref ")
+}
+
+///|
+test "is_jobs_key_line: bare header, spacing variants, and inline values" {
+  assert_true(is_jobs_key_line("jobs:"))
+  assert_true(is_jobs_key_line("jobs: # top-level jobs"))
+  assert_true(is_jobs_key_line("jobs:    # extra spaces before comment"))
+  // An inline value means this isn't a block-mapping header, even though
+  // the first character after the key is whitespace.
+  assert_true(!is_jobs_key_line("jobs: {}"))
+  assert_true(!is_jobs_key_line("jobs: read-all"))
+  assert_true(!is_jobs_key_line("jobsfoo:"))
+  // `#` with no preceding whitespace isn't a comment opener in YAML — it's
+  // part of an inline scalar value (`jobs: "#no space before comment"`), so
+  // this must not be mistaken for a bare header either. (This exact input
+  // actually fails to parse as YAML at all in practice — confirmed via
+  // `@karinto.lint` — but `is_jobs_key_line` shouldn't rely on that.)
+  assert_true(!is_jobs_key_line("jobs:#no space before comment"))
+}
+
+///|
+test "build_line_job_map: an indented `jobs:`-looking line before the real header is not mistaken for it" {
+  // `jobs:` is only ever valid at the workflow's top level (indent 0). A
+  // decoy line that happens to start with `jobs:` at a deeper indent — e.g.
+  // inside an earlier top-level field's block-scalar body — must not be
+  // mistaken for the real header, or the state machine loses track of the
+  // real `jobs:` section entirely (see below).
+  let lines = [
+    "name: |", "  jobs:", "  fake example text, not real YAML structure", "on: push",
+    "jobs:", "  build:", "    runs-on: ubuntu-latest",
+  ]
+  let owners = build_line_job_map(lines)
+  assert_true(owners[5] is Some("build"))
+  assert_true(owners[6] is Some("build"))
 }

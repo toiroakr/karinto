@@ -1496,18 +1496,22 @@ fn looks_spoofable_bot(s : String) -> Bool {
 
 ///|
 fn check_bot_conditions(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  let msg = "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify"
   match job.if_cond {
     Some(s) =>
       if looks_spoofable_bot(s) {
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "bot-conditions",
           Error,
-          "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
+          msg,
+          job.name,
+          "if",
         )
         return
       }
@@ -1517,12 +1521,7 @@ fn check_bot_conditions(
     match s.if_cond {
       Some(c) =>
         if looks_spoofable_bot(c) {
-          add_diag(
-            out,
-            "bot-conditions",
-            Error,
-            "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
-          )
+          add_diag_step_field(out, ctx, "bot-conditions", Error, msg, s, "if")
           return
         }
       None => ()
@@ -1643,11 +1642,15 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           } else {
             workflow_persona
           }
-          add_diag(
+          // Job-scoped: name the job in the diagnostic, not just the message.
+          // There's no `permissions:` key to point at (that's the finding), so
+          // `fill_positions` resolves `pos` to the job's own key line.
+          add_diag_job(
             out,
             "excessive-permissions",
             Warning,
             "job `\{job.name}`: default permissions used due to no permissions: block",
+            job.name,
             persona=job_persona,
           )
         }
@@ -1866,6 +1869,65 @@ fn shell_tokens(line : String) -> Array[String] {
 }
 
 ///|
+/// Strips a trailing `@version` (or `@tag`) from a package spec, keeping a
+/// leading scope marker intact (`@scope/pkg@1.0.0` -> `@scope/pkg`).
+fn strip_pkg_version(spec : String) -> String {
+  let chars : Array[Char] = []
+  for ch in spec {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let mut at_idx = -1
+  for i in 1..<n {
+    if chars[i] == '@' {
+      at_idx = i
+    }
+  }
+  if at_idx < 0 {
+    return spec
+  }
+  let buf = StringBuilder::new()
+  for j in 0..<at_idx {
+    buf.write_char(chars[j])
+  }
+  buf.to_string()
+}
+
+///|
+/// Known "ephemeral publish" tools that are commonly run via a package
+/// manager's dlx/exec mechanism but don't push to a long-lived-token-backed
+/// npm registry (e.g. `pkg-pr-new` publishes PR preview builds authenticated
+/// via the job's own `GITHUB_TOKEN`, not an npm auth token).
+fn is_known_non_registry_dlx_tool(name : String) -> Bool {
+  name == "pkg-pr-new"
+}
+
+///|
+/// If `cmd`/`rest` run a package via a dlx-style mechanism (`pnpm dlx`,
+/// `yarn dlx`, `npm exec`), returns the bare (version-stripped) package name
+/// being invoked. Flags between the dlx keyword and the package spec (e.g.
+/// `pnpm dlx -y pkg`, `npm exec --yes -- pkg`) are skipped.
+fn dlx_invoked_tool(cmd : String, rest : Array[String]) -> String? {
+  let after_keyword = if (cmd == "pnpm" || cmd == "yarn") &&
+    rest.length() > 0 &&
+    rest[0] == "dlx" {
+    1
+  } else if cmd == "npm" && rest.length() > 0 && rest[0] == "exec" {
+    1
+  } else {
+    return None
+  }
+  let mut i = after_keyword
+  while i < rest.length() && rest[i].has_prefix("-") {
+    i = i + 1
+  }
+  if i < rest.length() {
+    return Some(strip_pkg_version(rest[i]))
+  }
+  None
+}
+
+///|
 /// Returns true if `tokens` (a single flattened shell command line)
 /// invokes one of upstream zizmor's tracked publishing commands.
 fn shell_line_is_publish(tokens : Array[String]) -> Bool {
@@ -1876,6 +1938,10 @@ fn shell_line_is_publish(tokens : Array[String]) -> Bool {
   let rest : Array[String] = []
   for k in 1..<tokens.length() {
     rest.push(tokens[k])
+  }
+  match dlx_invoked_tool(cmd, rest) {
+    Some(tool) => if is_known_non_registry_dlx_tool(tool) { return false }
+    None => ()
   }
   if cmd == "cargo" {
     return tokens_contain(rest, "publish") &&
@@ -1961,6 +2027,44 @@ fn shell_line_is_publish(tokens : Array[String]) -> Bool {
 }
 
 ///|
+/// Splits a shell line on `&&`, `||`, and `;` into independent command
+/// segments, so a line chaining several commands (e.g.
+/// `pnpm dlx pkg-pr-new publish && pnpm publish`) is evaluated per-segment
+/// instead of as one flat token stream — otherwise an early decision about
+/// the first segment (e.g. it's a known non-registry dlx tool) would swallow
+/// a real publish command later on the same line. Heuristic, like the rest
+/// of this shell-line parsing: it doesn't account for quoting.
+fn split_shell_segments(line : String) -> Array[String] {
+  let chars : Array[Char] = []
+  for ch in line {
+    chars.push(ch)
+  }
+  let n = chars.length()
+  let segments : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '&' || c == '|') && i + 1 < n && chars[i + 1] == c {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 2
+      continue
+    }
+    if c == ';' {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 1
+      continue
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  segments.push(buf.to_string())
+  segments
+}
+
+///|
 fn run_has_publish_cmd(run : String) -> Bool {
   let normalized = collapse_continuations(run)
   for line in normalized.split("\n") {
@@ -1968,8 +2072,14 @@ fn run_has_publish_cmd(run : String) -> Bool {
     if trimmed.length() == 0 {
       continue
     }
-    if shell_line_is_publish(shell_tokens(trimmed)) {
-      return true
+    for segment in split_shell_segments(trimmed) {
+      let seg_trimmed = trim_ws(segment)
+      if seg_trimmed.length() == 0 {
+        continue
+      }
+      if shell_line_is_publish(shell_tokens(seg_trimmed)) {
+        return true
+      }
     }
   }
   false
@@ -1993,6 +2103,11 @@ fn perms_has_id_token_write(value : @yaml.Yaml?) -> Bool {
 /// fires; run-based detection is suppressed when the job carries
 /// `permissions.id-token: write` (workflow-level grant alone is enough
 /// for zizmor too, but propagating that here keeps the check tractable).
+/// Registered at the job level so the suppression check can see the job's
+/// own `permissions:`, but each finding is about one concrete step, so it's
+/// stamped with that step's context (via `add_diag_step_field`) rather than
+/// left job-only — that's also what lets an inline ignore comment placed on
+/// the offending step itself (its `uses:`/`run:` line) suppress it.
 fn check_trusted_publishing_job(
   ctx : WalkCtx,
   job : JobInfo,
@@ -2006,18 +2121,30 @@ fn check_trusted_publishing_job(
   let suppress_run = job_id_token || workflow_id_token
   for step in job.steps {
     match trusted_publishing_action_finding(step) {
-      Some(msg) => add_diag(out, "use-trusted-publishing", Info, msg)
+      Some(msg) =>
+        add_diag_step_field(
+          out,
+          ctx,
+          "use-trusted-publishing",
+          Info,
+          msg,
+          step,
+          "uses",
+        )
       None => ()
     }
     if !suppress_run {
       match step.run {
         Some(r) =>
           if run_has_publish_cmd(r) {
-            add_diag(
+            add_diag_step_field(
               out,
+              ctx,
               "use-trusted-publishing",
               Info,
               "publish command uses a long-lived token; prefer OIDC trusted publishing",
+              step,
+              "run",
             )
           }
         None => ()
@@ -2408,20 +2535,17 @@ fn env_has_unsafe_commands(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let fire = fn() {
-    add_diag(
-      out,
-      "insecure-commands",
-      Warning,
-      "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-    )
-  }
+  let msg = "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands"
+  // Only the workflow-level `env:` is genuinely document-scoped; the job- and
+  // step-level blocks below each blame a concrete `env:` and are attributed
+  // to it, so `pos` lands on the offending block and an inline ignore there
+  // works.
   match ctx.workflow_map {
     Some(m) =>
       match m.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            fire()
+            add_diag(out, "insecure-commands", Warning, msg)
             return
           }
         _ => ()
@@ -2433,7 +2557,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match j.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          fire()
+          add_diag_job_field(
+            out,
+            ctx,
+            "insecure-commands",
+            Warning,
+            msg,
+            j.name,
+            "env",
+          )
           return
         }
       _ => ()
@@ -2442,7 +2574,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match s.raw.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            fire()
+            add_diag_step_field(
+              out,
+              ctx,
+              "insecure-commands",
+              Warning,
+              msg,
+              s,
+              "env",
+            )
             return
           }
         _ => ()
@@ -2454,7 +2594,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match s.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          fire()
+          add_diag_step_field(
+            out,
+            ctx,
+            "insecure-commands",
+            Warning,
+            msg,
+            s,
+            "env",
+          )
           return
         }
       _ => ()
@@ -2821,11 +2969,27 @@ fn check_github_app_limit_repos(
   if !is_github_app_token_step(step) {
     return
   }
-  let has = match step.with_ {
-    Some(w) => w.contains("repositories")
+  // Per ghalint's own ghl-009 doc, omitting both `owner:` and `repositories:`
+  // scopes the token to the current repository and is compliant — only
+  // `owner:` set without `repositories:` spans the whole installation.
+  // "Set" means a non-empty value, matching how the zizmor-derived
+  // `github-app` rule tests the same two inputs — otherwise the two rules
+  // would disagree about `owner: ""` on one and the same `with:` block.
+  let non_empty = fn(w : Map[String, @yaml.Yaml], k : String) -> Bool {
+    match w.get(k) {
+      Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+      None => false
+    }
+  }
+  let has_owner = match step.with_ {
+    Some(w) => non_empty(w, "owner")
     None => false
   }
-  if !has {
+  let has_repos = match step.with_ {
+    Some(w) => non_empty(w, "repositories")
+    None => false
+  }
+  if has_owner && !has_repos {
     add_diag(
       out,
       "github-app-limit-repositories",
@@ -3379,34 +3543,61 @@ fn check_deprecated_workflow_commands(
 
 ///|
 fn check_invalid_env_var_name(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let check_env = fn(env : Map[String, @yaml.Yaml]) -> Unit {
-    env.each(fn(k, _v) {
-      if !is_valid_env_name(k) {
-        add_diag(
-          out,
-          "invalid-env-var-name",
-          Warning,
-          "env name `\{k}` does not match `[A-Za-z_][A-Za-z0-9_]*`",
-        )
-      }
-    })
+  let msg_for = fn(k : String) -> String {
+    "env name `\{k}` does not match `[A-Za-z_][A-Za-z0-9_]*`"
+  }
+  // The scan is shared; the emit differs per scope so each finding carries
+  // the `env:` block it's actually about. Only the workflow-level block is
+  // document-scoped.
+  let scan = fn(
+    env : Map[String, @yaml.Yaml],
+    emit : (String) -> Unit,
+  ) -> Unit {
+    env.each(fn(k, _v) { if !is_valid_env_name(k) { emit(k) } })
   }
   match ctx.workflow_map {
     Some(m) =>
       match m.get("env") {
-        Some(Map(e)) => check_env(e)
+        Some(Map(e)) =>
+          scan(e, fn(k) {
+            add_diag(out, "invalid-env-var-name", Warning, msg_for(k))
+          })
         _ => ()
       }
     None => ()
   }
   for j in ctx.jobs {
     match j.raw.get("env") {
-      Some(Map(e)) => check_env(e)
+      Some(Map(e)) =>
+        scan(e, fn(k) {
+          add_diag_job_field(
+            out,
+            ctx,
+            "invalid-env-var-name",
+            Warning,
+            msg_for(k),
+            j.name,
+            "env",
+          )
+        })
       _ => ()
     }
     for s in j.steps {
       match s.raw.get("env") {
-        Some(Map(e)) => check_env(e)
+        Some(Map(e)) =>
+          // `step_field_pos` splits on the first `.`, so `env.<name>` lands on
+          // the offending entry itself rather than the whole `env:` block.
+          scan(e, fn(k) {
+            add_diag_step_field(
+              out,
+              ctx,
+              "invalid-env-var-name",
+              Warning,
+              msg_for(k),
+              s,
+              "env.\{k}",
+            )
+          })
         _ => ()
       }
     }
@@ -3861,18 +4052,22 @@ fn env_has_tojson_secrets(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_overprovisioned_secrets(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  let msg = "`toJSON(secrets)` exposes every secret; reference specific keys"
   match job.raw.get("env") {
     Some(Map(e)) =>
       if env_has_tojson_secrets(e) {
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "overprovisioned-secrets",
           Warning,
-          "`toJSON(secrets)` exposes every secret; reference specific keys",
+          msg,
+          job.name,
+          "env",
         )
         return
       }
@@ -3882,11 +4077,14 @@ fn check_overprovisioned_secrets(
     match s.raw.get("env") {
       Some(Map(e)) =>
         if env_has_tojson_secrets(e) {
-          add_diag(
+          add_diag_step_field(
             out,
+            ctx,
             "overprovisioned-secrets",
             Warning,
-            "`toJSON(secrets)` exposes every secret; reference specific keys",
+            msg,
+            s,
+            "env",
           )
           return
         }
@@ -4508,6 +4706,11 @@ fn cache_step_should_emit(triggers : CacheTriggers, step : CacheStep) -> Bool {
 }
 
 ///|
+/// Emits at most one finding per workflow, attributed to the first
+/// cache-restoring step that trips it. `classify_cache_aware_step` only ever
+/// matches a `uses:` step, so the finding anchors to that step's `uses:`
+/// line — which is also where an author would naturally place an inline
+/// ignore for it.
 fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let triggers = collect_cache_triggers(ctx)
   let workflow_publishing = !cache_triggers_empty(triggers)
@@ -4519,11 +4722,14 @@ fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     for s in j.steps {
       let usage = classify_cache_aware_step(s)
       if cache_step_should_emit(triggers, usage) {
-        add_diag(
+        add_diag_step_field(
           out,
+          ctx,
           "cache-poisoning",
           Error,
           "runtime artifacts potentially vulnerable to a cache poisoning attack",
+          s,
+          "uses",
         )
         return
       }
@@ -5036,11 +5242,14 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match j.raw.get("needs") {
       Some(String(n)) =>
         if !names.contains(n) {
-          add_diag(
+          add_diag_job_field(
             out,
+            ctx,
             "job-needs-graph",
             Error,
             "job `\{j.name}` needs undefined job `\{n}`",
+            j.name,
+            "needs",
           )
         }
       Some(Array(arr)) =>
@@ -5048,11 +5257,14 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           match v {
             String(n) =>
               if !names.contains(n) {
-                add_diag(
+                add_diag_job_field(
                   out,
+                  ctx,
                   "job-needs-graph",
                   Error,
                   "job `\{j.name}` needs undefined job `\{n}`",
+                  j.name,
+                  "needs",
                 )
               }
             _ => ()
@@ -6551,6 +6763,93 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// True iff `trimmed` is a bare `jobs:` key line — optionally followed by
+/// whitespace and/or a trailing comment, with no inline value (workflows
+/// never give `jobs:` an inline value, so any content after the key besides
+/// a comment means this isn't really the header).
+fn is_jobs_key_line(trimmed : String) -> Bool {
+  let needle = "jobs:"
+  if !trimmed.has_prefix(needle) {
+    return false
+  }
+  // `comment_start` (shared with the inline-ignore scanner) only recognises
+  // `#` as a comment opener when it's preceded by whitespace — `jobs:#x` has
+  // no space before the `#`, so per YAML it's an inline scalar value
+  // (`"#x"`), not a comment, and must not be mistaken for a bare header.
+  // Run it over the whole (already de-indented) line, not just the slice
+  // after `jobs:`, so a leading run of indentation-adjacent spaces is still
+  // correctly attributed as "preceded by whitespace".
+  let val = match comment_start(trimmed) {
+    Some(cs) => trim_ws(trimmed[needle.length():cs - 1].to_owned())
+    None => trim_ws(trimmed[needle.length():].to_owned())
+  }
+  val == ""
+}
+
+///|
+/// Maps each source line to the job it's nested under (by tracking
+/// indentation under the `jobs:` mapping), or `None` for workflow-level
+/// lines. Lets raw-text-scanning rules (e.g. `undocumented-permissions`)
+/// attribute a finding to a job without a positioned YAML parse.
+fn build_line_job_map(lines : Array[String]) -> Array[String?] {
+  let n = lines.length()
+  let owners : Array[String?] = Array::make(n, None)
+  let mut jobs_indent = -1
+  let mut job_key_indent = -1
+  let mut current_job : String? = None
+  let mut i = 0
+  while i < n {
+    let line = lines[i]
+    let trimmed = trim_ws(line)
+    if trimmed == "" || trimmed.has_prefix("#") {
+      owners[i] = current_job
+      i = i + 1
+      continue
+    }
+    let indent = leading_spaces(line)
+    if jobs_indent < 0 {
+      // Not inside `jobs:` yet. Recognize the header itself (with or without
+      // a trailing comment — see `is_jobs_key_line`) and start tracking from
+      // the next line. `jobs:` is only ever valid at the workflow's top
+      // level, so require indent 0 — otherwise a `run: |` script body that
+      // happens to contain a line starting with `jobs:` (e.g. example YAML
+      // in a step's output) could be mistaken for the real header before
+      // it's reached.
+      if indent == 0 && is_jobs_key_line(trimmed) {
+        jobs_indent = indent
+      }
+      owners[i] = None
+      i = i + 1
+      continue
+    }
+    if indent <= jobs_indent {
+      // Back out to workflow level (or a sibling top-level key) — the
+      // `jobs:` mapping has ended.
+      jobs_indent = -1
+      job_key_indent = -1
+      current_job = None
+      owners[i] = None
+      i = i + 1
+      continue
+    }
+    if job_key_indent < 0 {
+      job_key_indent = indent
+    }
+    if indent == job_key_indent {
+      // A job's own key line, e.g. `  build:`.
+      let name = match index_of(trimmed, ":") {
+        Some(k) => trimmed[0:k].to_owned()
+        None => trimmed
+      }
+      current_job = Some(name)
+    }
+    owners[i] = current_job
+    i = i + 1
+  }
+  owners
+}
+
+///|
 /// Mirrors zizmor's `undocumented-permissions` (pedantic persona): a
 /// `permissions:` block whose entries lack explanatory comments is suspect.
 /// We re-scan the raw source because the YAML parser drops comments.
@@ -6561,6 +6860,11 @@ fn check_anonymous_definition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 ///   - Otherwise, every key:value line in the block must have a non-empty
 ///     trailing comment. An empty `#` does not count; any text after `#`
 ///     (including a `zizmor: ignore[...]` directive) does.
+///
+/// Each finding carries the `permissions:` key's own `pos` and, when the
+/// block is nested under a job, that job's `id` — so a workflow with several
+/// per-job `permissions:` blocks can trace each count back to its block
+/// instead of requiring a manual audit of the whole file.
 fn check_undocumented_permissions(
   ctx : WalkCtx,
   out : Array[Diagnostic],
@@ -6573,6 +6877,7 @@ fn check_undocumented_permissions(
     lines.push(v.to_owned())
   }
   let n = lines.length()
+  let line_job = build_line_job_map(lines)
   let mut i = 0
   while i < n {
     let line = lines[i]
@@ -6642,13 +6947,15 @@ fn check_undocumented_permissions(
           }
         }
         if uncommented > 0 {
-          add_diag(
-            out,
-            "undocumented-permissions",
-            Info,
-            "permissions block has \{uncommented} entry/entries without explanatory comments",
-            persona=Pedantic,
-          )
+          out.push(Diagnostic::{
+            rule: "undocumented-permissions",
+            severity: Info,
+            message: "permissions block has \{uncommented} entry/entries without explanatory comments",
+            pos: Some(Position::{ line: i + 1, col: indent + 1 }),
+            job: line_job[i],
+            step: None,
+            persona: Pedantic,
+          })
         }
       }
       i = j
@@ -7618,19 +7925,22 @@ fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       if not(on_defines_inputs(m)) {
         workflow_forbidden.push("inputs")
       }
+      let emit_workflow = fn(msg : String) {
+        add_diag(out, "context-availability", Error, msg)
+      }
       check_avail_in_node(
         m.get("env"),
         "workflow-level `env`",
         workflow_forbidden,
         seen,
-        out,
+        emit_workflow,
       )
       check_avail_in_node(
         m.get("concurrency"),
         "workflow-level `concurrency`",
         workflow_forbidden,
         seen,
-        out,
+        emit_workflow,
       )
     }
     None => ()
@@ -7642,30 +7952,53 @@ fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       "job `\{j.name}` `env`",
       ["steps"],
       seen,
-      out,
+      fn(msg) {
+        add_diag_job_field(
+          out,
+          ctx,
+          "context-availability",
+          Error,
+          msg,
+          j.name,
+          "env",
+        )
+      },
     )
     check_avail_in_node(
       j.raw.get("if"),
       "job `\{j.name}` `if`",
       ["steps"],
       seen,
-      out,
+      fn(msg) {
+        add_diag_job_field(
+          out,
+          ctx,
+          "context-availability",
+          Error,
+          msg,
+          j.name,
+          "if",
+        )
+      },
     )
   }
 }
 
 ///|
+/// `emit` takes the finished message and attaches whatever scope the caller
+/// has in hand — plain (workflow-level) or job-attributed — so a job-scoped
+/// finding points at the offending `env:`/`if:` rather than nothing.
 fn check_avail_in_node(
   node : @yaml.Yaml?,
   location : String,
   forbidden : Array[String],
   seen : Map[String, Bool],
-  out : Array[Diagnostic],
+  emit : (String) -> Unit,
 ) -> Unit {
   match node {
     Some(y) =>
       walk_strings(y, fn(s) {
-        check_avail_in_string(s, location, forbidden, seen, out)
+        check_avail_in_string(s, location, forbidden, seen, emit)
       })
     None => ()
   }
@@ -7677,7 +8010,7 @@ fn check_avail_in_string(
   location : String,
   forbidden : Array[String],
   seen : Map[String, Bool],
-  out : Array[Diagnostic],
+  emit : (String) -> Unit,
 ) -> Unit {
   if !s.contains("${{") {
     return
@@ -7688,12 +8021,7 @@ fn check_avail_in_string(
         let key = "\{location}|\{ctx_name}"
         if !seen.contains(key) {
           seen[key] = true
-          add_diag(
-            out,
-            "context-availability",
-            Error,
-            "context `\{ctx_name}` is not available in \{location}",
-          )
+          emit("context `\{ctx_name}` is not available in \{location}")
         }
       }
     }
@@ -8024,11 +8352,14 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match job.if_cond {
       Some(s) =>
         if if_condition_is_unsound(s) {
-          add_diag(
+          add_diag_job_field(
             out,
+            ctx,
             "unsound-condition",
             Warning,
             "job `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+            job.name,
+            "if",
           )
         }
       None => ()
@@ -8037,11 +8368,14 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match step.if_cond {
         Some(s) =>
           if if_condition_is_unsound(s) {
-            add_diag(
+            add_diag_step_field(
               out,
+              ctx,
               "unsound-condition",
               Warning,
               "step `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+              step,
+              "if",
             )
           }
         None => ()
