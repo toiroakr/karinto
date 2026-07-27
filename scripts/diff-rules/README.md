@@ -81,11 +81,18 @@ doubt, ask whether a release could ever make the diff go away for good — if
 not, the rule is permanent.
 
 `lint.yml` runs `node scripts/replay.mjs --check-rules`, which fails when a rule
-module cannot be imported or omits `prunable`. Run it locally before pushing:
+module cannot be imported, omits `prunable`, or does not export a `matches`
+function. Run it locally before pushing:
 
 ```sh
 node scripts/replay.mjs --check-rules
 ```
+
+**Every `.mjs` in this directory must be a rule** — the loader ignores files that
+export no `matches`, so a typo there (`matche`) would leave a file that looks
+like a rule and suppresses nothing: its intended diff resurfaces as an
+unexpected diff, failing `replay` on every PR and blocking the pruner. Put
+shared helpers outside this directory.
 
 ## Rules must not throw
 

@@ -230,14 +230,21 @@ async function fetchCaptures(env, limit) {
 // Replay + diff
 // ---------------------------------------------------------------------------
 
+// Returns { rules, skipped }. `skipped` lists .mjs files that imported cleanly
+// but export no `matches` function. Every .mjs in this directory is supposed to
+// be a rule (see the README), so a skipped file is a rule that silently does
+// nothing: its intended diff resurfaces as "unexpected", which fails replay on
+// every PR and — via the pruner's unexpected == 0 gate — blocks pruning too.
+// Callers surface it rather than letting it pass as "no rules to apply".
 async function loadRules(dir) {
   let entries;
   try {
     entries = await readdir(dir);
   } catch {
-    return [];
+    return { rules: [], skipped: [] };
   }
   const rules = [];
+  const skipped = [];
   for (const f of entries.sort()) {
     if (!f.endsWith(".mjs")) continue;
     let mod;
@@ -250,7 +257,10 @@ async function loadRules(dir) {
         { cause: e },
       );
     }
-    if (typeof mod.matches !== "function") continue;
+    if (typeof mod.matches !== "function") {
+      skipped.push(f);
+      continue;
+    }
     rules.push({
       id: mod.id || f.replace(/\.mjs$/, ""),
       file: f,
@@ -268,7 +278,7 @@ async function loadRules(dir) {
       matches: mod.matches,
     });
   }
-  return rules;
+  return { rules, skipped };
 }
 
 async function replayOne(targetUrl, request) {
@@ -529,17 +539,30 @@ async function main() {
   // and the pruner's importer guard is a grep heuristic — without this check a
   // hole in that heuristic would ship a PR whose replay dies at rule-load time.
   if (args.checkRules) {
-    const rules = await loadRules(RULES_DIR);
+    const { rules, skipped } = await loadRules(RULES_DIR);
     console.log(`loaded ${rules.length} ignore rule(s)`);
     for (const r of rules) {
       console.log(`  ${r.id}\t(${r.file})\tprunable=${r.prunable}`);
     }
+    const problems = [];
+    // A file that imports but exports no `matches` is not "no rule" — it is a
+    // rule that silently never fires, and it would slip past the `prunable`
+    // check below too because it never reaches the loaded set.
+    if (skipped.length > 0) {
+      problems.push(
+        `exports no \`matches\` function: ${skipped.join(", ")} — every .mjs in ` +
+          `scripts/diff-rules must be a rule`,
+      );
+    }
     const undeclared = rules.filter((r) => r.prunable === null);
     if (undeclared.length > 0) {
-      console.error(
-        `missing \`prunable\` declaration: ${undeclared.map((r) => r.file).join(", ")} ` +
-          `— see scripts/diff-rules/README.md`,
+      problems.push(
+        `missing \`prunable\` declaration: ${undeclared.map((r) => r.file).join(", ")}`,
       );
+    }
+    if (problems.length > 0) {
+      for (const p of problems) console.error(p);
+      console.error("see scripts/diff-rules/README.md");
       process.exit(1);
     }
     return;
@@ -562,8 +585,17 @@ async function main() {
   }
   env.endpoint = `https://${env.accountId}.r2.cloudflarestorage.com`;
 
-  const rules = await loadRules(RULES_DIR);
+  const { rules, skipped } = await loadRules(RULES_DIR);
   console.log(`loaded ${rules.length} ignore rule(s)`);
+  if (skipped.length > 0) {
+    // Loud but non-fatal here: lint.yml's `--check-rules` is what rejects this
+    // at authoring time, and a replay run is more useful reporting the diffs
+    // than refusing to start.
+    console.error(
+      `WARNING: ignoring ${skipped.join(", ")} — exports no \`matches\` function, ` +
+        `so it suppresses nothing. Run \`node scripts/replay.mjs --check-rules\`.`,
+    );
+  }
 
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);
