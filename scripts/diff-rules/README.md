@@ -103,8 +103,10 @@ exception. Guard against missing fields instead of assuming shape (`capture?.x`,
   severity — not just "anything new".
 - **Date-prefix the filename** (`YYYY-MM-<slug>.mjs`) so older rules are
   obvious and easy to clean up.
-- **Declare `prunable`** — see "Prunability" above. Omitting it opts the rule
-  out of automatic cleanup and produces a CI warning.
+- **Declare `prunable`** — see "Prunability" above. `lint.yml` fails the PR when
+  it is missing. Should one slip in anyway (a direct push to `main`), the rule is
+  silently excluded from automatic cleanup, and `prune-diff-rules.yml` warns
+  about it only on a run where the rule actually matches.
 - **Deletion is usually automatic.** For a `prunable = true` rule,
   `prune-diff-rules.yml` opens the removal PR itself once the fix is live on
   prod; merging it triggers `rebaseline-captures.yml`, which refreshes the
