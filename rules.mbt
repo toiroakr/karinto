@@ -2720,7 +2720,9 @@ fn check_misfeature_step(
 /// `days = 7`.
 ///
 /// Upstream 1.28.0 dropped the pedantic "`multi-ecosystem-group` with an
-/// effective cooldown" finding, so karinto no longer emits it either.
+/// effective cooldown" finding, so karinto no longer emits it either, and
+/// promoted the remaining findings to `Warning` — matching upstream, where
+/// every arm of this audit is now a Medium/High-confidence `warning`.
 fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let threshold = 7
   // GitHub applies this cooldown when an update entry configures none of
@@ -2738,13 +2740,14 @@ fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           _ => None
         }
         match dd_int {
-          None => add_diag(out, "dependabot-cooldown", Info, implicit_message)
+          None =>
+            add_diag(out, "dependabot-cooldown", Warning, implicit_message)
           Some(n) =>
             if n < threshold.to_int64() {
               add_diag(
                 out,
                 "dependabot-cooldown",
-                Info,
+                Warning,
                 "insufficient default-days configured (less than \{threshold})",
               )
             }
@@ -2752,7 +2755,7 @@ fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
       // No `cooldown:` block at all (or a non-map one): the implicit
       // default applies.
-      _ => add_diag(out, "dependabot-cooldown", Info, implicit_message)
+      _ => add_diag(out, "dependabot-cooldown", Warning, implicit_message)
     }
   }
 }

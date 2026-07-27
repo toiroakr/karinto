@@ -496,7 +496,7 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
     "diagnostics": [
       {
         "rule": "dependabot-cooldown",
-        "severity": "info",
+        "severity": "warning",
         "message": "insufficient implicit default-days (less than 7)",
       },
     ],

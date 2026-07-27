@@ -628,7 +628,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Zizmor,
       ["zizmor:dependabot-cooldown"],
       SupplyChain,
-      Info,
+      Warning,
       Low,
       Implemented,
       false,
