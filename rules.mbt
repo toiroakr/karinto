@@ -1496,18 +1496,22 @@ fn looks_spoofable_bot(s : String) -> Bool {
 
 ///|
 fn check_bot_conditions(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  let msg = "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify"
   match job.if_cond {
     Some(s) =>
       if looks_spoofable_bot(s) {
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "bot-conditions",
           Error,
-          "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
+          msg,
+          job.name,
+          "if",
         )
         return
       }
@@ -1517,12 +1521,7 @@ fn check_bot_conditions(
     match s.if_cond {
       Some(c) =>
         if looks_spoofable_bot(c) {
-          add_diag(
-            out,
-            "bot-conditions",
-            Error,
-            "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
-          )
+          add_diag_step_field(out, ctx, "bot-conditions", Error, msg, s, "if")
           return
         }
       None => ()
@@ -1643,11 +1642,15 @@ fn check_excessive_permissions(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           } else {
             workflow_persona
           }
-          add_diag(
+          // Job-scoped: name the job in the diagnostic, not just the message.
+          // There's no `permissions:` key to point at (that's the finding), so
+          // `fill_positions` resolves `pos` to the job's own key line.
+          add_diag_job(
             out,
             "excessive-permissions",
             Warning,
             "job `\{job.name}`: default permissions used due to no permissions: block",
+            job.name,
             persona=job_persona,
           )
         }
@@ -2532,20 +2535,17 @@ fn env_has_unsafe_commands(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let fire = fn() {
-    add_diag(
-      out,
-      "insecure-commands",
-      Warning,
-      "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands",
-    )
-  }
+  let msg = "`ACTIONS_ALLOW_UNSECURE_COMMANDS=true` re-enables legacy workflow commands"
+  // Only the workflow-level `env:` is genuinely document-scoped; the job- and
+  // step-level blocks below each blame a concrete `env:` and are attributed
+  // to it, so `pos` lands on the offending block and an inline ignore there
+  // works.
   match ctx.workflow_map {
     Some(m) =>
       match m.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            fire()
+            add_diag(out, "insecure-commands", Warning, msg)
             return
           }
         _ => ()
@@ -2557,7 +2557,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match j.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          fire()
+          add_diag_job_field(
+            out,
+            ctx,
+            "insecure-commands",
+            Warning,
+            msg,
+            j.name,
+            "env",
+          )
           return
         }
       _ => ()
@@ -2566,7 +2574,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match s.raw.get("env") {
         Some(Map(env)) =>
           if env_has_unsafe_commands(env) {
-            fire()
+            add_diag_step_field(
+              out,
+              ctx,
+              "insecure-commands",
+              Warning,
+              msg,
+              s,
+              "env",
+            )
             return
           }
         _ => ()
@@ -2578,7 +2594,15 @@ fn check_insecure_commands(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match s.raw.get("env") {
       Some(Map(env)) =>
         if env_has_unsafe_commands(env) {
-          fire()
+          add_diag_step_field(
+            out,
+            ctx,
+            "insecure-commands",
+            Warning,
+            msg,
+            s,
+            "env",
+          )
           return
         }
       _ => ()
@@ -3510,34 +3534,61 @@ fn check_deprecated_workflow_commands(
 
 ///|
 fn check_invalid_env_var_name(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
-  let check_env = fn(env : Map[String, @yaml.Yaml]) -> Unit {
-    env.each(fn(k, _v) {
-      if !is_valid_env_name(k) {
-        add_diag(
-          out,
-          "invalid-env-var-name",
-          Warning,
-          "env name `\{k}` does not match `[A-Za-z_][A-Za-z0-9_]*`",
-        )
-      }
-    })
+  let msg_for = fn(k : String) -> String {
+    "env name `\{k}` does not match `[A-Za-z_][A-Za-z0-9_]*`"
+  }
+  // The scan is shared; the emit differs per scope so each finding carries
+  // the `env:` block it's actually about. Only the workflow-level block is
+  // document-scoped.
+  let scan = fn(
+    env : Map[String, @yaml.Yaml],
+    emit : (String) -> Unit,
+  ) -> Unit {
+    env.each(fn(k, _v) { if !is_valid_env_name(k) { emit(k) } })
   }
   match ctx.workflow_map {
     Some(m) =>
       match m.get("env") {
-        Some(Map(e)) => check_env(e)
+        Some(Map(e)) =>
+          scan(e, fn(k) {
+            add_diag(out, "invalid-env-var-name", Warning, msg_for(k))
+          })
         _ => ()
       }
     None => ()
   }
   for j in ctx.jobs {
     match j.raw.get("env") {
-      Some(Map(e)) => check_env(e)
+      Some(Map(e)) =>
+        scan(e, fn(k) {
+          add_diag_job_field(
+            out,
+            ctx,
+            "invalid-env-var-name",
+            Warning,
+            msg_for(k),
+            j.name,
+            "env",
+          )
+        })
       _ => ()
     }
     for s in j.steps {
       match s.raw.get("env") {
-        Some(Map(e)) => check_env(e)
+        Some(Map(e)) =>
+          // `step_field_pos` splits on the first `.`, so `env.<name>` lands on
+          // the offending entry itself rather than the whole `env:` block.
+          scan(e, fn(k) {
+            add_diag_step_field(
+              out,
+              ctx,
+              "invalid-env-var-name",
+              Warning,
+              msg_for(k),
+              s,
+              "env.\{k}",
+            )
+          })
         _ => ()
       }
     }
@@ -3992,18 +4043,22 @@ fn env_has_tojson_secrets(env : Map[String, @yaml.Yaml]) -> Bool {
 
 ///|
 fn check_overprovisioned_secrets(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
+  let msg = "`toJSON(secrets)` exposes every secret; reference specific keys"
   match job.raw.get("env") {
     Some(Map(e)) =>
       if env_has_tojson_secrets(e) {
-        add_diag(
+        add_diag_job_field(
           out,
+          ctx,
           "overprovisioned-secrets",
           Warning,
-          "`toJSON(secrets)` exposes every secret; reference specific keys",
+          msg,
+          job.name,
+          "env",
         )
         return
       }
@@ -4013,11 +4068,14 @@ fn check_overprovisioned_secrets(
     match s.raw.get("env") {
       Some(Map(e)) =>
         if env_has_tojson_secrets(e) {
-          add_diag(
+          add_diag_step_field(
             out,
+            ctx,
             "overprovisioned-secrets",
             Warning,
-            "`toJSON(secrets)` exposes every secret; reference specific keys",
+            msg,
+            s,
+            "env",
           )
           return
         }
@@ -4639,6 +4697,11 @@ fn cache_step_should_emit(triggers : CacheTriggers, step : CacheStep) -> Bool {
 }
 
 ///|
+/// Emits at most one finding per workflow, attributed to the first
+/// cache-restoring step that trips it. `classify_cache_aware_step` only ever
+/// matches a `uses:` step, so the finding anchors to that step's `uses:`
+/// line — which is also where an author would naturally place an inline
+/// ignore for it.
 fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let triggers = collect_cache_triggers(ctx)
   let workflow_publishing = !cache_triggers_empty(triggers)
@@ -4650,11 +4713,14 @@ fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     for s in j.steps {
       let usage = classify_cache_aware_step(s)
       if cache_step_should_emit(triggers, usage) {
-        add_diag(
+        add_diag_step_field(
           out,
+          ctx,
           "cache-poisoning",
           Error,
           "runtime artifacts potentially vulnerable to a cache poisoning attack",
+          s,
+          "uses",
         )
         return
       }
@@ -5167,11 +5233,14 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match j.raw.get("needs") {
       Some(String(n)) =>
         if !names.contains(n) {
-          add_diag(
+          add_diag_job_field(
             out,
+            ctx,
             "job-needs-graph",
             Error,
             "job `\{j.name}` needs undefined job `\{n}`",
+            j.name,
+            "needs",
           )
         }
       Some(Array(arr)) =>
@@ -5179,11 +5248,14 @@ fn check_job_needs_graph(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           match v {
             String(n) =>
               if !names.contains(n) {
-                add_diag(
+                add_diag_job_field(
                   out,
+                  ctx,
                   "job-needs-graph",
                   Error,
                   "job `\{j.name}` needs undefined job `\{n}`",
+                  j.name,
+                  "needs",
                 )
               }
             _ => ()
@@ -7844,19 +7916,22 @@ fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       if not(on_defines_inputs(m)) {
         workflow_forbidden.push("inputs")
       }
+      let emit_workflow = fn(msg : String) {
+        add_diag(out, "context-availability", Error, msg)
+      }
       check_avail_in_node(
         m.get("env"),
         "workflow-level `env`",
         workflow_forbidden,
         seen,
-        out,
+        emit_workflow,
       )
       check_avail_in_node(
         m.get("concurrency"),
         "workflow-level `concurrency`",
         workflow_forbidden,
         seen,
-        out,
+        emit_workflow,
       )
     }
     None => ()
@@ -7868,30 +7943,53 @@ fn check_context_availability(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       "job `\{j.name}` `env`",
       ["steps"],
       seen,
-      out,
+      fn(msg) {
+        add_diag_job_field(
+          out,
+          ctx,
+          "context-availability",
+          Error,
+          msg,
+          j.name,
+          "env",
+        )
+      },
     )
     check_avail_in_node(
       j.raw.get("if"),
       "job `\{j.name}` `if`",
       ["steps"],
       seen,
-      out,
+      fn(msg) {
+        add_diag_job_field(
+          out,
+          ctx,
+          "context-availability",
+          Error,
+          msg,
+          j.name,
+          "if",
+        )
+      },
     )
   }
 }
 
 ///|
+/// `emit` takes the finished message and attaches whatever scope the caller
+/// has in hand — plain (workflow-level) or job-attributed — so a job-scoped
+/// finding points at the offending `env:`/`if:` rather than nothing.
 fn check_avail_in_node(
   node : @yaml.Yaml?,
   location : String,
   forbidden : Array[String],
   seen : Map[String, Bool],
-  out : Array[Diagnostic],
+  emit : (String) -> Unit,
 ) -> Unit {
   match node {
     Some(y) =>
       walk_strings(y, fn(s) {
-        check_avail_in_string(s, location, forbidden, seen, out)
+        check_avail_in_string(s, location, forbidden, seen, emit)
       })
     None => ()
   }
@@ -7903,7 +8001,7 @@ fn check_avail_in_string(
   location : String,
   forbidden : Array[String],
   seen : Map[String, Bool],
-  out : Array[Diagnostic],
+  emit : (String) -> Unit,
 ) -> Unit {
   if !s.contains("${{") {
     return
@@ -7914,12 +8012,7 @@ fn check_avail_in_string(
         let key = "\{location}|\{ctx_name}"
         if !seen.contains(key) {
           seen[key] = true
-          add_diag(
-            out,
-            "context-availability",
-            Error,
-            "context `\{ctx_name}` is not available in \{location}",
-          )
+          emit("context `\{ctx_name}` is not available in \{location}")
         }
       }
     }
@@ -8250,11 +8343,14 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     match job.if_cond {
       Some(s) =>
         if if_condition_is_unsound(s) {
-          add_diag(
+          add_diag_job_field(
             out,
+            ctx,
             "unsound-condition",
             Warning,
             "job `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+            job.name,
+            "if",
           )
         }
       None => ()
@@ -8263,11 +8359,14 @@ fn check_unsound_condition(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       match step.if_cond {
         Some(s) =>
           if if_condition_is_unsound(s) {
-            add_diag(
+            add_diag_step_field(
               out,
+              ctx,
               "unsound-condition",
               Warning,
               "step `if:` mixes plaintext with `${{ ... }}` (or has a trailing newline from a `|`/`>` block scalar) — GitHub Actions stringifies the value and tests non-emptiness, so the condition is always truthy",
+              step,
+              "if",
             )
           }
         None => ()

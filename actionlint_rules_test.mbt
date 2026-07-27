@@ -1285,6 +1285,8 @@ test "job-needs-graph: dependency on undefined job" {
         "rule": "job-needs-graph",
         "severity": "error",
         "message": "job `build` needs undefined job `missing`",
+        "pos": { "line": 4, "col": 12 },
+        "job": "build",
       },
       {
         "rule": "concurrency-limits",
@@ -2171,4 +2173,76 @@ test "yaml-anchor-issues: silent when anchor is aliased" {
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "yaml-anchor-issues" })
   inspect(hits.length(), content="0")
+}
+
+// ---------------------------------------------------------------------------
+// Attribution regression tests — see the matching block in
+// zizmor_rules_test.mbt for the rationale.
+// ---------------------------------------------------------------------------
+
+///|
+test "attribution: invalid-env-var-name names the step and the offending entry" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        env:
+    #|          BAD-NAME: x
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-env-var-name" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  // Resolves to the offending entry itself, not the whole `env:` block.
+  assert_true(hits[0].pos is Some({ line: 10, .. }))
+}
+
+///|
+test "attribution: context-availability names the job whose `env:` is at fault" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    env:
+    #|      OUT: ${{ steps.foo.outputs.bar }}
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "context-availability" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].pos is Some({ line: 7, .. }))
+}
+
+///|
+test "attribution: job-needs-graph names the job and its `needs:` value" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  first:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  second:
+    #|    needs: nope
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "job-needs-graph" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("second"))
+  assert_true(hits[0].pos is Some({ line: 10, .. }))
 }

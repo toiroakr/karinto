@@ -201,6 +201,8 @@ test "job-permissions-required: missing job permissions" {
         "rule": "excessive-permissions",
         "severity": "warning",
         "message": "job `build`: default permissions used due to no permissions: block",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
       },
       {
         "rule": "concurrency-limits",
@@ -637,12 +639,54 @@ test "inline ignore: karinto alias and trailing explanation" {
 
 ///|
 test "inline ignore: position-less workflow finding honoured file-wide" {
-  // `cache-poisoning` is a workflow-scoped finding emitted without a source
-  // position. zizmor attributes it to the cache-restoring step, so authors
-  // place the opt-out there. Because the finding has no resolvable line, a
-  // strictly line-scoped match would never honour it; position-less findings
-  // fall back to a file-wide inline ignore.
+  // `concurrency-limits` is about the *absence* of a `concurrency:` block, so
+  // there is no line to anchor it to and `pos` stays `None`. A strictly
+  // line-scoped match would never honour an opt-out for it, so position-less
+  // findings fall back to a file-wide inline ignore — the comment can sit
+  // anywhere in the file.
   let yaml =
+    #|on:
+    #|  push:
+    #|    tags: ["v*"] # zizmor: ignore[concurrency-limits]
+    #|jobs:
+    #|  release:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: write
+    #|    steps:
+    #|      - run: ./publish.sh
+  let res = @karinto.lint(yaml)
+  let cl = res.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" })
+  assert_eq(cl.length(), 0)
+}
+
+///|
+test "cache-poisoning: attributed to the cache-restoring step, ignorable on its own line" {
+  // The rule pinpoints the cache-restoring step, so the finding carries that
+  // step's context and an inline ignore belongs on that step's `uses:` line —
+  // which is where zizmor's own docs put it too.
+  let yaml =
+    #|on:
+    #|  push:
+    #|    tags: ["v*"]
+    #|jobs:
+    #|  release:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: write
+    #|    steps:
+    #|      - uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2
+    #|        with:
+    #|          path: dist
+    #|          key: build
+    #|      - run: ./publish.sh
+  let baseline = @karinto.lint(yaml)
+  let hits = baseline.diagnostics.filter(fn(d) { d.rule == "cache-poisoning" })
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].job is Some("release"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 10, .. }))
+  let ignored =
     #|on:
     #|  push:
     #|    tags: ["v*"]
@@ -657,9 +701,11 @@ test "inline ignore: position-less workflow finding honoured file-wide" {
     #|          path: dist
     #|          key: build
     #|      - run: ./publish.sh
-  let res = @karinto.lint(yaml)
-  let cp = res.diagnostics.filter(fn(d) { d.rule == "cache-poisoning" })
-  assert_eq(cp.length(), 0)
+  let res = @karinto.lint(ignored)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "cache-poisoning" }).length(),
+    0,
+  )
 }
 
 ///|

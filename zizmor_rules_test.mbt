@@ -234,7 +234,7 @@ test "bot-conditions: spoofable github.actor bot check" {
         "rule": "bot-conditions",
         "severity": "error",
         "message": "`github.actor` is spoofable; use `github.event.pull_request.user.login` and verify",
-        "pos": { "line": 3, "col": 3 },
+        "pos": { "line": 8, "col": 9 },
         "job": "auto",
       },
     ],
@@ -304,6 +304,9 @@ test "cache-poisoning: cache restore in publish flow" {
         "rule": "cache-poisoning",
         "severity": "error",
         "message": "runtime artifacts potentially vulnerable to a cache poisoning attack",
+        "pos": { "line": 11, "col": 15 },
+        "job": "release",
+        "step": { "index": 0 },
       },
       {
         "rule": "concurrency-limits",
@@ -1123,7 +1126,7 @@ test "overprovisioned-secrets: whole `secrets` context injected" {
         "rule": "overprovisioned-secrets",
         "severity": "warning",
         "message": "`toJSON(secrets)` exposes every secret; reference specific keys",
-        "pos": { "line": 3, "col": 3 },
+        "pos": { "line": 8, "col": 5 },
         "job": "build",
       },
     ],
@@ -2012,4 +2015,97 @@ test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx stil
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
   inspect(hits.length(), content="1")
+}
+
+// ---------------------------------------------------------------------------
+// Attribution regression tests
+//
+// A finding that blames one concrete job or step must carry that job/step (and
+// a `pos` pointing at the field it's actually about), not just say so in its
+// message. Without it the offender can't be located in a multi-job workflow,
+// and an inline `# karinto: ignore[...]` on the offending line has no effect.
+// ---------------------------------------------------------------------------
+
+///|
+test "attribution: insecure-commands names the job/step whose `env:` sets it" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        env:
+    #|          ACTIONS_ALLOW_UNSECURE_COMMANDS: "true"
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "insecure-commands" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: overprovisioned-secrets names the step whose `env:` leaks" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        env:
+    #|          SECRETS: ${{ toJSON(secrets) }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "overprovisioned-secrets"
+  })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: bot-conditions names the step whose `if:` is spoofable" {
+  let yaml =
+    #|on: pull_request
+    #|jobs:
+    #|  auto:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo trust
+    #|        if: github.actor == 'dependabot[bot]'
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "bot-conditions" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("auto"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "attribution: unsound-condition names the step whose `if:` is unsound" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|        if: yes ${{ success() }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unsound-condition" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].job is Some("build"))
+  assert_true(hits[0].step is Some({ index: 0, .. }))
+  assert_true(hits[0].pos is Some({ line: 9, .. }))
 }
