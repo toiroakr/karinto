@@ -478,17 +478,28 @@ PR adds the rule       ──▶  merged, unreleased  ──▶  release ships t
                                           replays captures ◀────┘   release.yml)
                                           against prod
                                                 │
-                    matchCount > 0 AND prunable == true?
+                    all four gates pass? (see the workflow header)
+                      unexpected == 0, matchCount > 0,
+                      threwCount == 0, prunable == true
                         │                          │
-                       yes                         no ──▶ warn only; nothing removed
-                        │                                 (permanent or undeclared rule)
+                       yes                         no ──▶ nothing removed; warns,
+                        │                                 or fails on unexplained drift
                         ▼
+              `replay.mjs --check-rules` proves the rest still import
+                        │
               opens `chore/prune-diff-rules` PR deleting the rule
                         │
                      a human merges it  ──▶  rebaseline-captures.yml fires on the
                      ("bake this in")        `main` push, rewrites the captures
                                              from current prod, diffs gone
 ```
+
+The pruner **refuses to act** while the detection replay reports unexplained
+diffs. `rebaseline-captures.mjs` does not consult the diff-rules — it overwrites
+every capture whose prod response differs — so merging a pruning PR during
+unexplained drift would bake a prod regression into the baseline. Resolve the
+drift (add a rule, or fix the regression) before pruning; `dry_run: true` lets
+you inspect meanwhile.
 
 The `replay` check on the pruning PR itself is expected to be red — the rule is
 gone but the captures are still stale. It clears for later PRs as soon as the

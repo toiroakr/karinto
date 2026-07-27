@@ -1,9 +1,15 @@
 name: lint
 
-# Lint this repo's own GitHub Actions workflows with the same three upstream
-# linters the project benchmarks against (actionlint / zizmor / ghalint). The
-# binaries are pinned in mise.toml and installed via mise-action, mirroring
-# upstream-parity.yml.
+# Static checks that need no build. Two groups:
+#
+#   * This repo's own GitHub Actions workflows, linted with the same three
+#     upstream linters the project benchmarks against (actionlint / zizmor /
+#     ghalint). The binaries are pinned in mise.toml and installed via
+#     mise-action, mirroring upstream-parity.yml.
+#   * The dark-launch ignore rules under scripts/diff-rules, checked with
+#     `replay.mjs --check-rules` so a rule that fails to import, or that omits
+#     the `prunable` declaration prune-diff-rules.yml gates on, is caught here
+#     rather than at release time.
 #
 # `lint` is a required status check, so the workflow must report a check run
 # on every PR — a trigger-level `paths:` filter would leave non-matching PRs
@@ -18,6 +24,8 @@ on:
       - .github/workflows/**
       - mise.toml
       - ghalint.yaml
+      - scripts/diff-rules/**
+      - scripts/replay.mjs
 
 # Default to no privileges; each job opts into exactly what it needs.
 permissions: {}
@@ -40,6 +48,8 @@ jobs:
               - '.github/workflows/**'
               - 'mise.toml'
               - 'ghalint.yaml'
+              - 'scripts/diff-rules/**'
+              - 'scripts/replay.mjs'
 
   lint:
     needs: changes
@@ -78,3 +88,18 @@ jobs:
           # Enables zizmor's online audits (e.g. known-vulnerable-actions).
           GH_TOKEN: ${{ github.token }}
         run: mise exec -- zizmor .github/workflows/
+
+      # No `cache:` input, and this job builds and publishes nothing — it only
+      # imports the rule modules — so there is no runtime cache surface to
+      # poison.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 # zizmor: ignore[cache-poisoning]
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      # Fails when a rule module can't be imported or omits `prunable`, the
+      # field prune-diff-rules.yml needs to tell a transient "shipped fix" rule
+      # from a permanent one. Catching it here keeps the release-time pruner
+      # from having to refuse to act on an incomplete report.
+      - name: diff-rules
+        run: node scripts/replay.mjs --check-rules

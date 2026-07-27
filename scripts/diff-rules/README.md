@@ -80,6 +80,22 @@ out-of-band refresh reopens it with no rule left to suppress it. When in
 doubt, ask whether a release could ever make the diff go away for good — if
 not, the rule is permanent.
 
+`lint.yml` runs `node scripts/replay.mjs --check-rules`, which fails when a rule
+module cannot be imported or omits `prunable`. Run it locally before pushing:
+
+```sh
+node scripts/replay.mjs --check-rules
+```
+
+## Rules must not throw
+
+`matches()` is called inside a `try`: a rule that throws is logged, suppresses
+nothing, and its diffs resurface as unexpected. Because the failure looks like
+"the rule didn't apply", `prune-diff-rules.yml` excludes any rule that threw
+from pruning entirely — it cannot tell shipped from unshipped through an
+exception. Guard against missing fields instead of assuming shape (`capture?.x`,
+`x.message ?? ""`).
+
 ## Guidelines
 
 - **Be specific.** A rule that returns `true` for everything makes the
