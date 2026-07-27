@@ -5,13 +5,29 @@ name: prune-diff-rules
 # prod now serves the new behaviour while the frozen captures still carry the
 # old one, so the rule is actively suppressing a *real* diff. This job replays
 # the stored captures against prod, detects which rules are in that "fix has
-# shipped" state (matchCount > 0 in the replay report), and opens a PR removing
-# exactly those.
+# shipped" state, and opens a PR removing exactly those.
 #
-# Merging that PR is the human "bake this in" signal that rebaseline-captures.yml
-# keys off at the next release: it overwrites the captures with the current prod
-# responses and clears the diffs for good. The removal PR is review-gated on
-# purpose — a human decides when to bake each change in.
+# Detection needs BOTH conditions from the replay report, not just the first:
+#
+#   1. matchCount > 0 — the rule actually suppressed a prod-vs-capture diff.
+#   2. prunable == true — the rule declares itself transient.
+#
+# (1) alone is unsound. A *permanent* rule (`prunable = false`, e.g.
+# `2026-05-archived-uses-baseline.mjs`) masks drift that no release can ship —
+# the `archived:list` KV set simply differs between capture time and replay time
+# — so it also reports matchCount > 0 and would be deleted as "shipped". That
+# deletion is unrecoverable by design: a rebaseline clears only the current
+# drift, and the next refresh-archived run reopens it with no rule left to
+# suppress it. A rule with no `prunable` declaration is treated as unprunable
+# and warned about, so forgetting the field degrades to "needs manual cleanup"
+# rather than "CI is red forever".
+#
+# Merging the PR this job opens is the human "bake this in" signal:
+# rebaseline-captures.yml watches `main` for `scripts/diff-rules/**` deletions
+# and rebaselines as soon as the merge lands, so the window where the rule is
+# gone but the captures are still stale lasts one rebaseline run rather than
+# until the next release. The removal PR is review-gated on purpose — a human
+# decides when to bake each change in.
 
 on:
   release:
@@ -28,9 +44,13 @@ on:
         default: false
 
 concurrency:
-  # Serialise with itself so two releases can't open competing PRs on the same
-  # branch. Never cancel a run mid-flight.
-  group: prune-diff-rules
+  # Shared with rebaseline-captures.yml on purpose: this job READS the stored
+  # captures to attribute per-rule matches, and rebaseline OVERWRITES them.
+  # Overlapping runs would compute matchCount from a half-rewritten baseline, so
+  # the two must never be in flight together. Serialising on one group also
+  # keeps this job from racing itself, so two releases can't open competing PRs
+  # on the same branch. Never cancel a run mid-flight.
+  group: captures-baseline
   cancel-in-progress: false
 
 # Default to no privileges; the job opts into exactly what it needs.
@@ -81,9 +101,10 @@ jobs:
             exit 1
           fi
 
-      # Select the rules whose fix has shipped (matchCount > 0), git rm them, and
-      # build the PR body. Sets removed=<count> so the PR step is skipped when
-      # nothing is removable.
+      # Select the rules whose fix has shipped (matchCount > 0 AND
+      # prunable == true — see the header comment for why matchCount alone is
+      # unsound), git rm them, and build the PR body. Sets removed=<count> so the
+      # PR step is skipped when nothing is removable.
       #
       # Guard: a candidate is skipped (not removed) if a rule file that is NOT
       # itself being removed still `import`s it — composite rules delegate to
@@ -98,14 +119,24 @@ jobs:
           BODY: ${{ github.workspace }}/pr-body.md
         run: |
           set -euo pipefail
-          CANDIDATE_COUNT=$(jq '[.rules[] | select(.matchCount > 0)] | length' "$REPORT")
+
+          # Surface every rule that matched but is held back by the prunable
+          # gate. `prunable == false` is the intended steady state for permanent
+          # rules; a null (undeclared) prunable is an authoring omission that
+          # would otherwise silently opt the rule out of pruning forever.
+          jq -r '.rules[]
+                 | select(.matchCount > 0 and .prunable != true)
+                 | "::warning::scripts/diff-rules/\(.file) suppressed \(.matchCount) prod diff(s) but was not pruned: \(if .prunable == false then "declared `prunable = false` (permanent rule — expected)" else "no `prunable` declaration; add one, see scripts/diff-rules/README.md" end)"' \
+            "$REPORT"
+
+          CANDIDATE_COUNT=$(jq '[.rules[] | select(.matchCount > 0 and .prunable == true)] | length' "$REPORT")
           if [ "$CANDIDATE_COUNT" -eq 0 ]; then
             echo "removed=0" >> "$GITHUB_OUTPUT"
-            echo "No diff-rules are in the shipped state; nothing to prune."
+            echo "No prunable diff-rules are in the shipped state; nothing to prune."
             exit 0
           fi
 
-          mapfile -t CANDIDATES < <(jq -r '.rules[] | select(.matchCount > 0) | .file' "$REPORT")
+          mapfile -t CANDIDATES < <(jq -r '.rules[] | select(.matchCount > 0 and .prunable == true) | .file' "$REPORT")
 
           is_in() {
             local name="$1"
@@ -203,14 +234,16 @@ jobs:
               printf -- "- \`scripts/diff-rules/%s\`\n" "${SKIPPED[@]}"
             fi
             echo
-            echo "After this merges, the next \`release: published\` triggers"
-            echo "\`rebaseline-captures.yml\`, which overwrites the stored captures with the"
-            echo "current prod responses and clears the diffs for good."
+            echo "Merging this PR triggers \`rebaseline-captures.yml\` — it watches \`main\` for"
+            echo "\`scripts/diff-rules/**\` deletions — which overwrites the stored captures with"
+            echo "the current prod responses and clears the diffs for good. Nothing else needs to"
+            echo "happen; no release is required."
             echo
-            echo "> The dark-launch \`replay\` check is *expected* to go red for these captures"
-            echo "> until that rebaseline runs — they still carry the pre-fix findings the rule"
-            echo "> was suppressing. That red is the signal the rule was still doing real work,"
-            echo "> not a regression."
+            echo "> The dark-launch \`replay\` check **on this PR** is *expected* to go red for the"
+            echo "> captures listed above: the rule is gone but the captures still carry the"
+            echo "> pre-fix findings it was suppressing. That red is the signal the rule was still"
+            echo "> doing real work, not a regression. It clears for subsequent PRs as soon as the"
+            echo "> post-merge rebaseline finishes."
             if [ "$UNEXPECTED" -gt 0 ]; then
               echo
               echo "> ⚠️ The detection replay also saw $UNEXPECTED unmatched diff(s) against prod"

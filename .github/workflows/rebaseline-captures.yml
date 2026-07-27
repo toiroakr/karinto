@@ -10,15 +10,27 @@ name: rebaseline-captures
 # Re-baselining the whole bucket is exactly what replay exists to guard
 # against, so it must only happen when a human has signalled that the shipped
 # change is intentional. The signal is the DELETION of the matching
-# expected-diff ignore rule (`scripts/diff-rules/*.mjs`) in the release range:
-# removing the opt-out is the explicit "bake this in" gesture. Absent that
-# signal the job is a no-op, so an ordinary release never silently rewrites the
-# baseline. `workflow_dispatch` with `force: true` bypasses the gate for manual
-# recovery.
+# expected-diff ignore rule (`scripts/diff-rules/*.mjs`): removing the opt-out
+# is the explicit "bake this in" gesture. Absent that signal the job is a no-op,
+# so an ordinary push never silently rewrites the baseline.
+# `workflow_dispatch` with `force: true` bypasses the gate for manual recovery.
+#
+# The signal is read at MERGE time, from the pushed commit range on `main` —
+# not from the next release's tag range. Once the deletion lands, `main` no
+# longer carries the rule while the captures still carry the pre-fix responses,
+# so every PR opened in between gets a red `replay` check for diffs that are
+# already shipped. Keying off the merge collapses that window to a single
+# rebaseline run; keying off the next release left it open for however long the
+# next release happened to take (and pruning PRs are `skip-changeset`, so they
+# do not produce one themselves). `workflow_dispatch` without `force` still
+# falls back to the release-tag range as a manual net if a merge-time run was
+# missed.
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/diff-rules/**'
   workflow_dispatch:
     inputs:
       force:
@@ -35,9 +47,12 @@ on:
         default: "https://karinto.toiroakr.workers.dev"
 
 concurrency:
-  # Serialise with itself: overlapping runs would race on R2 writes. Never
-  # cancel a run mid-flight — a half-written rebaseline is worse than a delay.
-  group: rebaseline-captures
+  # Serialise with itself: overlapping runs would race on R2 writes. Shared with
+  # prune-diff-rules.yml, which READS the same captures to attribute per-rule
+  # matches — a rebaseline landing mid-replay would have it compute matchCount
+  # from a half-rewritten baseline. Never cancel a run mid-flight — a
+  # half-written rebaseline is worse than a delay.
+  group: captures-baseline
   cancel-in-progress: false
 
 # Default to no privileges; the job opts into exactly what it needs.
@@ -58,59 +73,80 @@ jobs:
       TARGET: ${{ github.event.inputs.target || 'https://karinto.toiroakr.workers.dev' }}
       DRY_RUN: ${{ github.event.inputs.dry_run }}
     steps:
-      # fetch-depth: 0 brings every tag so the signal step can diff across the
-      # release range. persist-credentials: false — the job only reads the repo
-      # and talks to prod / R2 over their own credentials.
+      # fetch-depth: 0 brings full history and every tag so the signal step can
+      # diff across the pushed range (even a force-pushed one) or the release
+      # range. persist-credentials: false — the job only reads the repo and talks
+      # to prod / R2 over their own credentials.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      # Signal gate: a `scripts/diff-rules/*.mjs` file was REMOVED between the
-      # previous canonical tag and this release. That deletion is the human
-      # "bake this in" signal. workflow_dispatch with force=true skips the gate.
+      # Signal gate: a `scripts/diff-rules/*.mjs` file was REMOVED. On `push` the
+      # range is the pushed commits — i.e. the merge that landed the pruning PR,
+      # which is the earliest moment the signal exists. On `workflow_dispatch`
+      # it falls back to the previous-tag..latest-tag range, a manual net for a
+      # merge-time run that was missed. Either way the deletion is the human
+      # "bake this in" signal; force=true skips the gate entirely.
       - name: Detect rebaseline signal
         id: signal
         env:
           # Pass GitHub-context values through env (never interpolate them into
           # the shell directly) to avoid script injection — see the workflow
-          # injection guidance. tag_name / force come from our own release flow
-          # and dispatchers with write access, but defence in depth is cheap.
+          # injection guidance. `before` is GitHub's own SHA and force / tag_name
+          # come from dispatchers with write access, but defence in depth is
+          # cheap.
           EVENT_NAME: ${{ github.event_name }}
           FORCE: ${{ github.event.inputs.force }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE" = "true" ]; then
+          set -euo pipefail
+
+          if [ "${EVENT_NAME:-}" = "workflow_dispatch" ] && [ "${FORCE:-}" = "true" ]; then
             echo "Manual force dispatch — bypassing the diff-rule signal gate."
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          CURRENT_TAG="$RELEASE_TAG"
-          if [ -z "$CURRENT_TAG" ]; then
-            CURRENT_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
-          fi
-          # Previous canonical (dotted) tag; dashed pointer tags (v0-8-4) are
-          # excluded by the glob so they don't break the ordering.
-          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V \
-            | awk -v cur="$CURRENT_TAG" '$0==cur{print prev; exit} {prev=$0}')
-          echo "current tag: ${CURRENT_TAG:-<none>}"
-          echo "previous tag: ${PREV_TAG:-<none>}"
+          if [ "${EVENT_NAME:-}" = "push" ]; then
+            # `before` is all-zeros on a branch's first push and can name a
+            # commit that no longer exists after a force-push; fall back to the
+            # pushed commit's first parent so the range always resolves.
+            FROM="${PUSH_BEFORE:-}"
+            if [ -z "$FROM" ] || ! git cat-file -e "${FROM}^{commit}" 2>/dev/null; then
+              FROM="${GITHUB_SHA}^"
+            fi
+            TO="$GITHUB_SHA"
+          else
+            CURRENT_TAG="${RELEASE_TAG:-}"
+            if [ -z "$CURRENT_TAG" ]; then
+              CURRENT_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+            fi
+            # Previous canonical (dotted) tag; dashed pointer tags (v0-8-4) are
+            # excluded by the glob so they don't break the ordering.
+            PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V \
+              | awk -v cur="$CURRENT_TAG" '$0==cur{print prev; exit} {prev=$0}')
+            echo "current tag: ${CURRENT_TAG:-<none>}"
+            echo "previous tag: ${PREV_TAG:-<none>}"
 
-          if [ -z "$PREV_TAG" ] || [ -z "$CURRENT_TAG" ]; then
-            echo "No tag range to diff; nothing to bake in."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            if [ -z "$PREV_TAG" ] || [ -z "$CURRENT_TAG" ]; then
+              echo "No tag range to diff; nothing to bake in."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            FROM="$PREV_TAG"
+            TO="$CURRENT_TAG"
           fi
 
-          REMOVED=$(git diff --diff-filter=D --name-only "$PREV_TAG".."$CURRENT_TAG" -- scripts/diff-rules/ \
+          REMOVED=$(git diff --diff-filter=D --name-only "$FROM" "$TO" -- scripts/diff-rules/ \
             | grep -E '\.mjs$' || true)
           if [ -n "$REMOVED" ]; then
-            echo "Removed diff-rule(s) in ${PREV_TAG}..${CURRENT_TAG}:"
+            echo "Removed diff-rule(s) in ${FROM}..${TO}:"
             echo "$REMOVED"
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No diff-rule removed in ${PREV_TAG}..${CURRENT_TAG}; skipping rebaseline."
+            echo "No diff-rule removed in ${FROM}..${TO}; skipping rebaseline."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 

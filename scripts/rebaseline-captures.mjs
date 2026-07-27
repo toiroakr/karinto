@@ -21,9 +21,10 @@
 //
 // Overwriting the baseline is exactly what replay exists to guard against, so
 // this must run ONLY when a human has signalled that the shipped change is
-// intentional — by deleting the corresponding expected-diff ignore rule in the
-// release. The workflow (`.github/workflows/rebaseline-captures.yml`) gates on
-// that signal (a removed `scripts/diff-rules/*.mjs` file); this script trusts
+// intentional — by merging the deletion of the corresponding expected-diff
+// ignore rule into `main`. The workflow
+// (`.github/workflows/rebaseline-captures.yml`) gates on that signal (a removed
+// `scripts/diff-rules/*.mjs` file in the pushed range); this script trusts
 // it and refreshes the whole bucket. It never invents findings: a capture is
 // rewritten only when prod returns an `ok` response that differs from the
 // stored one, so a prod outage cannot bake an error into the baseline.
@@ -45,7 +46,7 @@ import { appendFile, writeFile } from "node:fs/promises";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
-// No cap by default: a release rebaseline must refresh the WHOLE bucket so no
+// No cap by default: a signalled rebaseline must refresh the WHOLE bucket so no
 // capture is left carrying the pre-release response. `--limit N` is only for
 // emergency partial runs. MAX_LIST_PAGES still bounds a runaway listing.
 const DEFAULT_LIMIT = Infinity;

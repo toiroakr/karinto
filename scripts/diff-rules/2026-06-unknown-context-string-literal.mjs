@@ -1,4 +1,7 @@
 export const id = "unknown-context-string-literal-fix";
+// Transient "shipped fix" rule — safe for prune-diff-rules.yml to remove once
+// it matches against prod (prod serves the fix, the captures are just stale).
+export const prunable = true;
 export const reason =
   "PR #55 fixes a false positive where single-quoted string literals containing a dot (e.g. hashFiles('replay-summary.md'), a bare 'a.b') were misread as `<head>.<member>` context access, so the literal's head (`replay-summary`, `a`, …) was reported as an `unknown context`. Prod still serves the pre-fix worker, so captures — regardless of capture date — still carry those spurious findings; replaying them against the fixed worker drops them. This rule suppresses a diff only when every moving diagnostic is an `unknown-context-or-function` finding that the PR *removed*: `onlyInReplayed` must be empty (the fix only deletes false positives, it never adds findings), and every removed diagnostic must be a context finding (message starts with \"unknown context `\"). A legitimate unknown context (e.g. a real `githab` typo) is unaffected by the literal fix and stays in both responses, so it never appears in the diff. No capture-date gate: unlike the PR #46 rule, this fix has not shipped yet, so even at/after-cutoff captures legitimately carry the bug. Delete once the fix has shipped and prod captures roll over (~30 days post-release).";
 

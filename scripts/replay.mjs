@@ -253,6 +253,16 @@ async function loadRules(dir) {
       id: mod.id || f.replace(/\.mjs$/, ""),
       file: f,
       reason: mod.reason || "",
+      // Prunability declaration, consumed by prune-diff-rules.yml:
+      //   true  — transient "shipped fix" rule. Once prod serves the new
+      //           behaviour the rule only masks stale captures, so the pruner
+      //           may open a PR deleting it.
+      //   false — permanent rule masking drift that no code change causes
+      //           (e.g. the out-of-band `archived:list` KV set). It matches
+      //           against prod indefinitely and must never be pruned.
+      //   null  — undeclared. Treated as unprunable; the pruner warns so the
+      //           omission is visible instead of silently disabling pruning.
+      prunable: typeof mod.prunable === "boolean" ? mod.prunable : null,
       matches: mod.matches,
     });
   }
@@ -573,8 +583,12 @@ async function main() {
   }
 
   // Machine-readable per-rule attribution for prune-diff-rules.yml. A rule with
-  // matchCount > 0 actively suppressed a real prod-vs-capture diff this run — so
-  // when the target is prod, that rule's fix has shipped and it can be removed.
+  // matchCount > 0 actively suppressed a real prod-vs-capture diff this run —
+  // so when the target is prod and the rule declares `prunable = true`, that
+  // rule's fix has shipped and it can be removed. `matchCount > 0` alone is NOT
+  // sufficient: a permanent rule (`prunable = false`) also matches against prod
+  // whenever its out-of-band state has drifted, and deleting one of those would
+  // break replay for good. The pruner gates on both fields.
   // Written regardless of exit code so the pruner can act on the matched rules
   // even when there are also unmatched (drift) diffs.
   if (process.env.REPLAY_REPORT_PATH) {
@@ -588,7 +602,12 @@ async function main() {
       matched: summary.matched,
       ignored: summary.ignored,
       unexpected: summary.unexpected.length,
-      rules: rules.map((r) => ({ id: r.id, file: r.file, matchCount: byRule.get(r.id) || 0 })),
+      rules: rules.map((r) => ({
+        id: r.id,
+        file: r.file,
+        matchCount: byRule.get(r.id) || 0,
+        prunable: r.prunable,
+      })),
     };
     await writeFile(process.env.REPLAY_REPORT_PATH, JSON.stringify(report, null, 2));
   }

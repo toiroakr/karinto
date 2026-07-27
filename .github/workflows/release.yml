@@ -73,20 +73,23 @@ jobs:
           PINNED_KEEP_RECENT: ${{ vars.PINNED_KEEP_RECENT }}
 
       - name: Trigger release-published workflows
-        # prune-diff-rules and rebaseline-captures declare
-        # `on: release: published`, but the GitHub Release above is created by
-        # changesets/action with GITHUB_TOKEN, and token-created events never
-        # start other workflows — so those triggers can't fire from a real
-        # release. Dispatch them explicitly instead (dispatching with
-        # GITHUB_TOKEN is allowed; only event *creation* is suppressed).
-        # Requires the workflow-level `actions: write`. Both are safe to
-        # dispatch unconditionally: prune no-ops into "no removable rules",
-        # and rebaseline's signal gate re-derives the release tag range
-        # itself and no-ops without a removed diff-rule.
+        # prune-diff-rules declares `on: release: published`, but the GitHub
+        # Release above is created by changesets/action with GITHUB_TOKEN, and
+        # token-created events never start other workflows — so that trigger
+        # can't fire from a real release. Dispatch it explicitly instead
+        # (dispatching with GITHUB_TOKEN is allowed; only event *creation* is
+        # suppressed). Requires the workflow-level `actions: write`. Safe to
+        # dispatch unconditionally: prune no-ops into "no removable rules".
+        #
+        # rebaseline-captures is deliberately NOT dispatched here. It now fires
+        # on the `main` push that deletes a `scripts/diff-rules/**` rule, which
+        # is strictly earlier than the next release and is what closes the window
+        # where the rule is gone but the captures are still stale. Dispatching it
+        # again per release would rewrite the whole bucket a second time for the
+        # same, already-consumed signal.
         if: steps.changesets.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           gh workflow run prune-diff-rules --repo "$REPO"
-          gh workflow run rebaseline-captures --repo "$REPO"
