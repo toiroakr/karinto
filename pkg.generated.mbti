@@ -86,12 +86,6 @@ pub(all) struct Position {
   col : Int
 } derive(Eq, ToJson, @debug.Debug)
 
-pub(all) enum Priority {
-  High
-  Medium
-  Low
-} derive(Eq, @debug.Debug)
-
 pub(all) struct Rule {
   id : String
   title : String
@@ -108,7 +102,6 @@ pub(all) struct RuleSpec {
   origins : Array[String]
   category : Category
   default_severity : Severity
-  priority : Priority
   status : Status
   applies_to_workflow : Bool
   applies_to_action : Bool

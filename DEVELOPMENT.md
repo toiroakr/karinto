@@ -84,7 +84,7 @@ captured by `wrangler tail`:
 
 `rules_catalog.mbt` is the source of truth for what karinto checks. Each
 entry carries an ID, human-readable title, source family (actionlint /
-zizmor / ghalint), upstream origins, category, severity, priority,
+zizmor / ghalint), upstream origins, category, severity,
 implementation status, and which file kinds it applies to.
 
 Of 83 catalogued rules, 68 are implemented; 8 are `Planned` — scaffolded as
