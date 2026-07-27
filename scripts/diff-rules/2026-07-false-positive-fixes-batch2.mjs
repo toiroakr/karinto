@@ -1,4 +1,7 @@
 export const id = "false-positive-fixes-batch2";
+// Transient "shipped fix" rule — safe for prune-diff-rules.yml to remove once
+// it matches against prod (prod serves the fix, the captures are just stale).
+export const prunable = true;
 export const reason =
   "This PR fixes two false positives: `use-trusted-publishing`'s run-based detection no longer fires on pkg-pr-new invoked via pnpm dlx/yarn dlx/npm exec (not an npm registry publish), and `github-app-limit-repositories` no longer fires when a GitHub App token request omits both `owner:` and `repositories:` (ghalint's own ghl-009 doc treats that as compliant — token scoped to the current repository). Captures first seen before FIX_CUTOFF (2026-08-04T00:00:00Z, a conservative post-rollout bound) still carry those findings, so replaying them against the fixed worker drops them. This rule suppresses a diff only when (a) the capture predates FIX_CUTOFF and (b) every moving diagnostic is one of those two specific findings, or (c) — for a capture that also predates the still-active `excessive-permissions-default-perms-gating` rule's own FIX_CUTOFF — that rule's exact artifact (duplicated here, not imported, so each rule's expiry stays independent). Self-expiring: once the pre-fix captures roll out of the 30-day window it matches nothing, and any capture at/after FIX_CUTOFF (a real regression) is never suppressed.";
 

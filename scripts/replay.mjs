@@ -15,8 +15,9 @@
 //
 // Usage:
 //   node scripts/replay.mjs --target <url> [--limit N]
+//   node scripts/replay.mjs --check-rules      # load-only; no target, no R2
 //
-// Required env:
+// Required env (not needed for --check-rules):
 //   R2_ACCESS_KEY_ID      R2 bucket-scoped access key
 //   R2_SECRET_ACCESS_KEY  matching secret
 //   R2_ACCOUNT_ID         Cloudflare account ID (for the S3 endpoint host)
@@ -50,7 +51,8 @@ function parseArgs(argv) {
         throw new Error(`--limit must be a positive integer (got ${JSON.stringify(raw)})`);
       }
       args.limit = n;
-    } else if (a === "--help" || a === "-h") args.help = true;
+    } else if (a === "--check-rules") args.checkRules = true;
+    else if (a === "--help" || a === "-h") args.help = true;
   }
   return args;
 }
@@ -228,14 +230,21 @@ async function fetchCaptures(env, limit) {
 // Replay + diff
 // ---------------------------------------------------------------------------
 
+// Returns { rules, skipped }. `skipped` lists .mjs files that imported cleanly
+// but export no `matches` function. Every .mjs in this directory is supposed to
+// be a rule (see the README), so a skipped file is a rule that silently does
+// nothing: its intended diff resurfaces as "unexpected", which fails replay on
+// every PR and — via the pruner's unexpected == 0 gate — blocks pruning too.
+// Callers surface it rather than letting it pass as "no rules to apply".
 async function loadRules(dir) {
   let entries;
   try {
     entries = await readdir(dir);
   } catch {
-    return [];
+    return { rules: [], skipped: [] };
   }
   const rules = [];
+  const skipped = [];
   for (const f of entries.sort()) {
     if (!f.endsWith(".mjs")) continue;
     let mod;
@@ -244,19 +253,32 @@ async function loadRules(dir) {
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
+        `scripts/diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
         { cause: e },
       );
     }
-    if (typeof mod.matches !== "function") continue;
+    if (typeof mod.matches !== "function") {
+      skipped.push(f);
+      continue;
+    }
     rules.push({
       id: mod.id || f.replace(/\.mjs$/, ""),
       file: f,
       reason: mod.reason || "",
+      // Prunability declaration, consumed by prune-diff-rules.yml:
+      //   true  — transient "shipped fix" rule. Once prod serves the new
+      //           behaviour the rule only masks stale captures, so the pruner
+      //           may open a PR deleting it.
+      //   false — permanent rule masking drift that no code change causes
+      //           (e.g. the out-of-band `archived:list` KV set). It matches
+      //           against prod indefinitely and must never be pruned.
+      //   null  — undeclared. Treated as unprunable; the pruner warns so the
+      //           omission is visible instead of silently disabling pruning.
+      prunable: typeof mod.prunable === "boolean" ? mod.prunable : null,
       matches: mod.matches,
     });
   }
-  return rules;
+  return { rules, skipped };
 }
 
 async function replayOne(targetUrl, request) {
@@ -490,13 +512,64 @@ async function writeSummary(path, summary) {
     lines.push("If these are intentional, add an ignore rule under `scripts/diff-rules/`.");
   }
 
+  // A rule that throws stops suppressing without saying so — its diffs just
+  // resurface as "unexpected". Surface it in the comment rather than leaving it
+  // buried in stderr, since the fix is to repair the rule, not to add another.
+  if (summary.threwByRule.size > 0) {
+    lines.push("");
+    lines.push("### Rules that errored");
+    lines.push("");
+    for (const [id, count] of summary.threwByRule) {
+      lines.push(`- **${id}** threw on ${count} capture(s) — it suppressed nothing there.`);
+    }
+    lines.push("");
+    lines.push("Fix the rule; see the job log for the thrown message.");
+  }
+
   await writeFile(path, lines.join("\n"));
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  // Load-only mode: verify every rule module still imports and exposes the
+  // expected shape, then exit. Needs no target and no R2 credentials.
+  // prune-diff-rules.yml runs this after deleting rule files, because
+  // `loadRules` throws when a surviving rule still imports a deleted delegate
+  // and the pruner's importer guard is a grep heuristic — without this check a
+  // hole in that heuristic would ship a PR whose replay dies at rule-load time.
+  if (args.checkRules) {
+    const { rules, skipped } = await loadRules(RULES_DIR);
+    console.log(`loaded ${rules.length} ignore rule(s)`);
+    for (const r of rules) {
+      console.log(`  ${r.id}\t(${r.file})\tprunable=${r.prunable}`);
+    }
+    const problems = [];
+    // A file that imports but exports no `matches` is not "no rule" — it is a
+    // rule that silently never fires, and it would slip past the `prunable`
+    // check below too because it never reaches the loaded set.
+    if (skipped.length > 0) {
+      problems.push(
+        `exports no \`matches\` function: ${skipped.join(", ")} — every .mjs in ` +
+          `scripts/diff-rules must be a rule`,
+      );
+    }
+    const undeclared = rules.filter((r) => r.prunable === null);
+    if (undeclared.length > 0) {
+      problems.push(
+        `missing \`prunable\` declaration: ${undeclared.map((r) => r.file).join(", ")}`,
+      );
+    }
+    if (problems.length > 0) {
+      for (const p of problems) console.error(p);
+      console.error("see scripts/diff-rules/README.md");
+      process.exit(1);
+    }
+    return;
+  }
+
   if (args.help || !args.target) {
-    console.error("usage: replay.mjs --target <url> [--limit N]");
+    console.error("usage: replay.mjs --target <url> [--limit N] | --check-rules");
     process.exit(args.help ? 0 : 2);
   }
 
@@ -512,8 +585,17 @@ async function main() {
   }
   env.endpoint = `https://${env.accountId}.r2.cloudflarestorage.com`;
 
-  const rules = await loadRules(RULES_DIR);
+  const { rules, skipped } = await loadRules(RULES_DIR);
   console.log(`loaded ${rules.length} ignore rule(s)`);
+  if (skipped.length > 0) {
+    // Loud but non-fatal here: lint.yml's `--check-rules` is what rejects this
+    // at authoring time, and a replay run is more useful reporting the diffs
+    // than refusing to start.
+    console.error(
+      `WARNING: ignoring ${skipped.join(", ")} — exports no \`matches\` function, ` +
+        `so it suppresses nothing. Run \`node scripts/replay.mjs --check-rules\`.`,
+    );
+  }
 
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);
@@ -525,6 +607,10 @@ async function main() {
     ignored: 0,
     ignoredEntries: [],
     unexpected: [],
+    // ruleId -> how many captures its `matches()` threw on. A rule that throws
+    // silently stops suppressing, and its match counts become meaningless — so
+    // the pruner must not read "shipped" or "not shipped" out of them.
+    threwByRule: new Map(),
   };
 
   for (const cap of captures) {
@@ -536,16 +622,31 @@ async function main() {
       continue;
     }
 
+    // Evaluate EVERY rule rather than stopping at the first match. The first
+    // match still decides suppression and the display attribution, but the
+    // report consumed by prune-diff-rules.yml needs every rule that explains
+    // the diff: rules are tried in filename (date) order, so an older, broader
+    // rule absorbs a newer one's captures, the newer rule reports matchCount 0,
+    // and the pruner wrongly concludes its fix has not shipped — leaving a
+    // stale rule masking real regressions indefinitely.
     let matchedRule = null;
+    const matchedIds = [];
     for (const r of rules) {
+      let isMatch = false;
       try {
-        if (r.matches(cap, replayed, diff)) {
-          matchedRule = r;
-          break;
-        }
+        isMatch = r.matches(cap, replayed, diff);
       } catch (e) {
-        console.error(`rule ${r.id} threw: ${e.message}`);
+        // `String(e)` rather than `e.message`: a rule that throws a non-Error
+        // (`throw null`) would otherwise make this catch block itself throw,
+        // killing the whole replay run instead of isolating the broken rule.
+        const reason = e instanceof Error ? e.message : String(e);
+        summary.threwByRule.set(r.id, (summary.threwByRule.get(r.id) || 0) + 1);
+        console.error(`rule ${r.id} threw: ${reason}`);
+        continue;
       }
+      if (!isMatch) continue;
+      matchedIds.push(r.id);
+      if (!matchedRule) matchedRule = r;
     }
 
     if (matchedRule) {
@@ -554,8 +655,13 @@ async function main() {
         hash: cap.hash,
         ruleId: matchedRule.id,
         reason: matchedRule.reason,
+        matchedRuleIds: matchedIds,
       });
-      console.log(`  ignore  ${cap.hash.slice(0, 12)}  via ${matchedRule.id}`);
+      const alsoBy = matchedIds.filter((id) => id !== matchedRule.id);
+      console.log(
+        `  ignore  ${cap.hash.slice(0, 12)}  via ${matchedRule.id}` +
+          (alsoBy.length > 0 ? `  (also explained by ${alsoBy.join(", ")})` : ""),
+      );
     } else {
       summary.unexpected.push({ hash: cap.hash, diff, request: cap.request });
       console.log(`  DIFF    ${cap.hash.slice(0, 12)}`);
@@ -572,15 +678,29 @@ async function main() {
     await writeSummary(process.env.REPLAY_SUMMARY_PATH, summary);
   }
 
-  // Machine-readable per-rule attribution for prune-diff-rules.yml. A rule with
-  // matchCount > 0 actively suppressed a real prod-vs-capture diff this run — so
-  // when the target is prod, that rule's fix has shipped and it can be removed.
-  // Written regardless of exit code so the pruner can act on the matched rules
+  // Machine-readable per-rule attribution for prune-diff-rules.yml.
+  //
+  // `matchCount` counts every capture whose diff the rule EXPLAINS, including
+  // ones another rule was credited with suppressing — see the all-rules loop
+  // above for why first-match attribution would undercount.
+  //
+  // A rule with matchCount > 0 explains a real prod-vs-capture diff this run,
+  // so when the target is prod and the rule declares `prunable = true`, its fix
+  // has shipped and it can be removed. matchCount > 0 alone is NOT sufficient:
+  // a permanent rule (`prunable = false`) also matches against prod whenever
+  // its out-of-band state has drifted, and deleting one of those would break
+  // replay for good. `threwCount > 0` means the rule errored on at least one
+  // capture, so neither its match count nor its silence says anything about
+  // whether the fix shipped. The pruner gates on all three fields.
+  //
+  // Written regardless of exit code so the pruner can report the matched rules
   // even when there are also unmatched (drift) diffs.
   if (process.env.REPLAY_REPORT_PATH) {
     const byRule = new Map(rules.map((r) => [r.id, 0]));
     for (const e of summary.ignoredEntries) {
-      byRule.set(e.ruleId, (byRule.get(e.ruleId) || 0) + 1);
+      for (const id of e.matchedRuleIds) {
+        byRule.set(id, (byRule.get(id) || 0) + 1);
+      }
     }
     const report = {
       target: summary.target,
@@ -588,7 +708,13 @@ async function main() {
       matched: summary.matched,
       ignored: summary.ignored,
       unexpected: summary.unexpected.length,
-      rules: rules.map((r) => ({ id: r.id, file: r.file, matchCount: byRule.get(r.id) || 0 })),
+      rules: rules.map((r) => ({
+        id: r.id,
+        file: r.file,
+        matchCount: byRule.get(r.id) || 0,
+        threwCount: summary.threwByRule.get(r.id) || 0,
+        prunable: r.prunable,
+      })),
     };
     await writeFile(process.env.REPLAY_REPORT_PATH, JSON.stringify(report, null, 2));
   }

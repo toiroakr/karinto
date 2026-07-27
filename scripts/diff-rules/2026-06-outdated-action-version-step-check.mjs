@@ -1,4 +1,7 @@
 export const id = "outdated-action-version-step-check";
+// Transient "shipped fix" rule — safe for prune-diff-rules.yml to remove once
+// it matches against prod (prod serves the fix, the captures are just stale).
+export const prunable = true;
 export const reason =
   "PR #64 extends the `outdated-action-version` rule to workflow step `uses:` references. Previously the rule only checked action.yml `runs.using` fields; step-level references to known-outdated actions (e.g. actions/checkout@v3, actions/setup-go@v3) were silently ignored. Captures taken before this PR shipped do not carry these findings, so replaying them against the PR worker produces new `outdated-action-version` diagnostics. This rule suppresses those diffs. Self-expiring: once prod captures roll over (~30 days after release) all captures will already contain these findings and no diff is produced.";
 

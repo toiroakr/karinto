@@ -160,7 +160,10 @@ two synced places and the work is split:
   > Because the baseline lives in KV out-of-band, `archived-uses` findings are
   > excluded from the dark-launch replay diff (see
   > `scripts/diff-rules/2026-05-archived-uses-baseline.mjs`): the KV set can
-  > differ between capture and replay independently of any code change.
+  > differ between capture and replay independently of any code change. That
+  > makes it a **permanent** ignore rule (`prunable = false`) — unlike the
+  > per-change rules, no release ever makes it unnecessary, so
+  > `prune-diff-rules.yml` must never delete it.
 
 The D1 database backing `pending` (binding `DB`, `karinto-archived`) must be
 provisioned once. Its `database_id` is **not** committed: `cf/wrangler.jsonc`
@@ -457,6 +460,51 @@ npx wrangler deploy --config wrangler.maintenance.jsonc
 When a PR deliberately changes linter output (new rule, message rewording,
 severity change, etc.), add a `scripts/diff-rules/*.mjs` file in the same PR.
 See `scripts/diff-rules/README.md` for the rule contract and conventions.
+
+Every rule must export `prunable` (see the README's "Prunability" section):
+`true` for the usual transient rule that only masks stale captures, `false` for
+a rule masking drift no release can fix (`archived-uses-baseline`). The field is
+what stops the automatic pruner from deleting a permanent rule.
+
+### Lifecycle of an ignore rule
+
+```
+PR adds the rule       ──▶  merged, unreleased  ──▶  release ships the fix to prod
+(reviewed alongside          (rule masks the         (captures now carry the OLD
+ the behaviour change)        preview-vs-capture      response — the rule now masks
+                              diff)                   a prod-vs-capture diff)
+                                                                │
+                                          prune-diff-rules.yml  │  (dispatched by
+                                          replays captures ◀────┘   release.yml)
+                                          against prod
+                                                │
+                    all four gates pass? (see the workflow header)
+                      unexpected == 0, matchCount > 0,
+                      threwCount == 0, prunable == true
+                        │                          │
+                       yes                         no ──▶ nothing removed; warns,
+                        │                                 or fails on unexplained drift
+                        ▼
+              `replay.mjs --check-rules` proves the rest still import
+                        │
+              opens `chore/prune-diff-rules` PR deleting the rule
+                        │
+                     a human merges it  ──▶  rebaseline-captures.yml fires on the
+                     ("bake this in")        `main` push, rewrites the captures
+                                             from current prod, diffs gone
+```
+
+The pruner **refuses to act** while the detection replay reports unexplained
+diffs. `rebaseline-captures.mjs` does not consult the diff-rules — it overwrites
+every capture whose prod response differs — so merging a pruning PR during
+unexplained drift would bake a prod regression into the baseline. Resolve the
+drift (add a rule, or fix the regression) before pruning; `dry_run: true` lets
+you inspect meanwhile.
+
+The `replay` check on the pruning PR itself is expected to be red — the rule is
+gone but the captures are still stale. It clears for later PRs as soon as the
+post-merge rebaseline finishes. A rule can also just be deleted by hand; the
+same push trigger picks it up.
 
 ### Triggering a replay on a PR
 
