@@ -110,25 +110,31 @@ jobs:
           fi
 
           if [ "${EVENT_NAME:-}" = "push" ]; then
-            # `before` is all-zeros on a branch's first push and can name a
-            # commit that no longer exists after a force-push; fall back to the
-            # pushed commit's first parent. Verify each candidate rather than
-            # assuming it resolves — an unresolvable range would otherwise make
-            # the `git diff` below fail and be swallowed into "no signal",
-            # silently skipping a rebaseline that was actually asked for.
+            # `before` is the branch tip prior to the push, so `before`..`sha`
+            # covers exactly the pushed commits. Comparing the two trees (git
+            # diff, not git log) also stays correct across a force-push, where
+            # the question is still "does the branch no longer have the rule".
+            #
+            # There is deliberately no guessed fallback. `${GITHUB_SHA}^` would
+            # narrow the range to the tip commit alone, so a deletion in an
+            # earlier commit of the same push would silently produce "no
+            # signal" and skip the rebaseline — the exact stale-capture window
+            # this trigger exists to close. `before` is unusable only when the
+            # branch was just created (all-zeros) or its old objects are gone,
+            # both abnormal on `main`; fail loudly and let an operator use the
+            # documented `workflow_dispatch` + `force: true` recovery path.
             FROM="${PUSH_BEFORE:-}"
-            if [ -z "$FROM" ] || ! git cat-file -e "${FROM}^{commit}" 2>/dev/null; then
-              if ! git rev-parse --verify --quiet "${GITHUB_SHA}^{commit}" >/dev/null; then
-                echo "::error::pushed commit $GITHUB_SHA is not in the checkout; cannot derive a range."
-                exit 1
-              fi
-              if ! git rev-parse --verify --quiet "${GITHUB_SHA}^" >/dev/null; then
-                # Root commit: it has no parent, so it cannot have deleted a rule.
+            if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ] \
+               || ! git cat-file -e "${FROM}^{commit}" 2>/dev/null; then
+              if git rev-parse --verify --quiet "${GITHUB_SHA}^{commit}" >/dev/null \
+                 && ! git rev-parse --verify --quiet "${GITHUB_SHA}^" >/dev/null; then
+                # Root commit: it has no parent, so it provably deleted nothing.
                 echo "$GITHUB_SHA is a root commit; nothing can have been removed."
                 echo "run=false" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
-              FROM="${GITHUB_SHA}^"
+              echo "::error::cannot determine the pushed range: event.before (${FROM:-<empty>}) is absent or unreachable, and narrowing to the tip commit would miss a deletion made earlier in the same push. If a bake-in was intended, dispatch rebaseline-captures manually with force=true."
+              exit 1
             fi
             TO="$GITHUB_SHA"
           else

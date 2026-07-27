@@ -253,7 +253,7 @@ async function loadRules(dir) {
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
+        `scripts/diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
         { cause: e },
       );
     }
