@@ -158,7 +158,7 @@ the opt-outs authors already wrote for the upstream tools:
   useful for a finding with no owning step (a workflow- or job-level one like
   `undocumented-permissions`, about a `permissions:` block rather than any
   one step), which anchors to that field's own line (`permissions:`) or,
-  absent a more specific field, the job's own key line (`  build:`) — not
+  absent a more specific field, the job's own key line (`build:`) — not
   whichever step happens to be nearby:
 
   ```yaml
@@ -173,10 +173,10 @@ the opt-outs authors already wrote for the upstream tools:
   ```
 
   For a step-scoped finding, a standalone comment also works directly above
-  the step's own `- ` line, not just directly above the specific field —
-  handy when a step has several lines (`name:`, then `run:`) and you'd
-  rather annotate the whole step than the one line the finding happens to
-  point at:
+  the step's own list-item (`-`) line, not just directly above the specific
+  field — handy when a step has several lines (`name:`, then `run:`) and
+  you'd rather annotate the whole step than the one line the finding happens
+  to point at:
 
   ```yaml
   steps:

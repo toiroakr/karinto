@@ -249,6 +249,38 @@ test "github-app-limit-repositories: silent when both owner and repositories are
 }
 
 ///|
+test "github-app-limit-repositories: an empty `owner:` counts as omitted" {
+  // "Set" means a non-empty value — the same test the zizmor-derived
+  // `github-app` rule applies to these two inputs. Treating a bare `owner: ""`
+  // as set would make the two rules disagree about one and the same `with:`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+    #|        with:
+    #|          app-id: ${{ vars.APP_ID }}
+    #|          private-key: ${{ secrets.PRIVATE_KEY }}
+    #|          owner: ""
+    #|          permission-issues: write
+  let res = @karinto.lint(yaml)
+  let limit_hits = res.diagnostics.filter(fn(d) {
+    d.rule == "github-app-limit-repositories"
+  })
+  inspect(limit_hits.length(), content="0")
+  // …and the `github-app` rule agrees: no "owner without repositories" finding.
+  let owner_hits = res.diagnostics.filter(fn(d) {
+    d.rule == "github-app" && d.message.contains("`owner` set without")
+  })
+  inspect(owner_hits.length(), content="0")
+}
+
+///|
 test "github-app-limit-permissions: GitHub App token requests no permissions" {
   let yaml =
     #|on: push

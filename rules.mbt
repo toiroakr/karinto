@@ -2972,12 +2972,21 @@ fn check_github_app_limit_repos(
   // Per ghalint's own ghl-009 doc, omitting both `owner:` and `repositories:`
   // scopes the token to the current repository and is compliant — only
   // `owner:` set without `repositories:` spans the whole installation.
+  // "Set" means a non-empty value, matching how the zizmor-derived
+  // `github-app` rule tests the same two inputs — otherwise the two rules
+  // would disagree about `owner: ""` on one and the same `with:` block.
+  let non_empty = fn(w : Map[String, @yaml.Yaml], k : String) -> Bool {
+    match w.get(k) {
+      Some(v) => trim_ws(yaml_scalar_text(v)) != ""
+      None => false
+    }
+  }
   let has_owner = match step.with_ {
-    Some(w) => w.contains("owner")
+    Some(w) => non_empty(w, "owner")
     None => false
   }
   let has_repos = match step.with_ {
-    Some(w) => w.contains("repositories")
+    Some(w) => non_empty(w, "repositories")
     None => false
   }
   if has_owner && !has_repos {
