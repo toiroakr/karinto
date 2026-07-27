@@ -112,9 +112,22 @@ jobs:
           if [ "${EVENT_NAME:-}" = "push" ]; then
             # `before` is all-zeros on a branch's first push and can name a
             # commit that no longer exists after a force-push; fall back to the
-            # pushed commit's first parent so the range always resolves.
+            # pushed commit's first parent. Verify each candidate rather than
+            # assuming it resolves — an unresolvable range would otherwise make
+            # the `git diff` below fail and be swallowed into "no signal",
+            # silently skipping a rebaseline that was actually asked for.
             FROM="${PUSH_BEFORE:-}"
             if [ -z "$FROM" ] || ! git cat-file -e "${FROM}^{commit}" 2>/dev/null; then
+              if ! git rev-parse --verify --quiet "${GITHUB_SHA}^{commit}" >/dev/null; then
+                echo "::error::pushed commit $GITHUB_SHA is not in the checkout; cannot derive a range."
+                exit 1
+              fi
+              if ! git rev-parse --verify --quiet "${GITHUB_SHA}^" >/dev/null; then
+                # Root commit: it has no parent, so it cannot have deleted a rule.
+                echo "$GITHUB_SHA is a root commit; nothing can have been removed."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               FROM="${GITHUB_SHA}^"
             fi
             TO="$GITHUB_SHA"
@@ -139,8 +152,16 @@ jobs:
             TO="$CURRENT_TAG"
           fi
 
-          REMOVED=$(git diff --diff-filter=D --name-only "$FROM" "$TO" -- scripts/diff-rules/ \
-            | grep -E '\.mjs$' || true)
+          # Keep the diff and the match separate: `git diff ... | grep || true`
+          # collapses "the range is broken" and "nothing was removed" into the
+          # same silent no-op, which would skip a requested rebaseline without a
+          # trace. Fail loudly on the former; `|| true` covers only grep's
+          # no-match exit.
+          if ! DIFFED=$(git diff --diff-filter=D --name-only "$FROM" "$TO" -- scripts/diff-rules/); then
+            echo "::error::git diff ${FROM}..${TO} failed; cannot determine the rebaseline signal."
+            exit 1
+          fi
+          REMOVED=$(printf '%s\n' "$DIFFED" | grep -E '\.mjs$' || true)
           if [ -n "$REMOVED" ]; then
             echo "Removed diff-rule(s) in ${FROM}..${TO}:"
             echo "$REMOVED"

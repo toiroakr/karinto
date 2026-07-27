@@ -604,8 +604,12 @@ async function main() {
       try {
         isMatch = r.matches(cap, replayed, diff);
       } catch (e) {
+        // `String(e)` rather than `e.message`: a rule that throws a non-Error
+        // (`throw null`) would otherwise make this catch block itself throw,
+        // killing the whole replay run instead of isolating the broken rule.
+        const reason = e instanceof Error ? e.message : String(e);
         summary.threwByRule.set(r.id, (summary.threwByRule.get(r.id) || 0) + 1);
-        console.error(`rule ${r.id} threw: ${e.message}`);
+        console.error(`rule ${r.id} threw: ${reason}`);
         continue;
       }
       if (!isMatch) continue;
