@@ -4,12 +4,12 @@
     {
       "name": "zizmor",
       "repo": "zizmorcore/zizmor",
-      "from": "1.26.1",
-      "to": "1.27.0",
-      "tag": "v1.27.0",
-      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.27.0",
-      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.26.1...v1.27.0",
-      "notes": "## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-feartures)\r\n\r\n- zizmor now has experimental support for workflows that specify parallel steps. See [Usage - Parallel steps](https://docs.zizmor.sh/usage/#parallel-steps) for more information ([#2153](https://github.com/zizmorcore/zizmor/issues/2153))\r\nEnhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)\r\n\r\n- zizmor's handling of paths is now more consistent, particularly when run on Windows ([#2163](https://github.com/zizmorcore/zizmor/issues/2163))\r\n\r\n- zizmor now emits a helpful warning when being run in implicit offline mode ([#2180](https://github.com/zizmorcore/zizmor/issues/2180))\r\n\r\n## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)\r\n\r\n- Fixed a bug where the [secrets-outside-env](https://docs.zizmor.sh/audits/#secrets-outside-env) audit would not honor ignore comments within the same job scope ([#2157](https://github.com/zizmorcore/zizmor/issues/2157))\r\n\r\n- Fixed a bug where the [ref-version-mismatch](https://docs.zizmor.sh/audits/#ref-version-mismatch) audit would not honor ignore comments within the same steps scope ([#2177](https://github.com/zizmorcore/zizmor/issues/2177))\r\n\r\n- Fixed a bug where `--collect=[MODE]` was not correctly handled when auditing remote inputs ([#2185](https://github.com/zizmorcore/zizmor/issues/2185))"
+      "from": "1.27.0",
+      "to": "1.28.0",
+      "tag": "v1.28.0",
+      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.28.0",
+      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.27.0...v1.28.0",
+      "notes": "## Security 🔒[🔗](https://docs.zizmor.sh/release-notes/#security)\r\n\r\n- v1.27.0 contained a logging defect that would print any configured GitHub credentials as part of zizmor's cleartext logging. No versions other than v1.27.0 were affected. See [GHSA-f42p-wjw5-97qh](https://github.com/zizmorcore/zizmor/security/advisories/GHSA-f42p-wjw5-97qh) for full information.\r\n\r\n    Many thanks to [@shaanmajid](https://github.com/shaanmajid) for finding and reporting this vulnerability.\r\n\r\n## Enhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)\r\n\r\n- The JSON (v1) output format now includes metadata for each finding's fixes, if the finding has fixes ([#2186](https://github.com/zizmorcore/zizmor/issues/2186))\r\n\r\n- The [dependabot-cooldown](https://docs.zizmor.sh/audits/#dependabot-cooldown) audit is now aware of GitHub's new three-day default cooldown ([#2193](https://github.com/zizmorcore/zizmor/issues/2193))\r\n\r\n- sbt is now recognized as a package-ecosystem in dependabot.yml ([#2211](https://github.com/zizmorcore/zizmor/issues/2211))\r\n\r\n## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)\r\n\r\n- Fixed a bug where the [template-injection](https://docs.zizmor.sh/audits/#template-injection) audit would incorrectly flag `steps.*.outcome` and `steps.*.conclusion` as injection risks in the default persona ([#2199](https://github.com/zizmorcore/zizmor/issues/2199))\r\n\r\n- Fixed a bug where the [github-env](https://docs.zizmor.sh/audits/#github-env) audit would i\n\n…(truncated — see release link)"
     }
   ]
 }

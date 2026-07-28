@@ -2713,22 +2713,25 @@ fn check_misfeature_step(
 
 ///|
 /// Mirrors zizmor's `dependabot-cooldown`: each `updates:` entry is
-/// inspected independently and may produce up to four findings
-/// (missing block / no default-days / insufficient default-days /
-/// multi-ecosystem-group with effective cooldown). Threshold matches
-/// upstream's default `days = 7`.
+/// inspected independently and may produce one finding — either the
+/// explicit `default-days` is below the threshold, or the entry falls back
+/// to GitHub's implicit default cooldown (three days since zizmor 1.28.0),
+/// which is itself below it. Threshold matches upstream's default
+/// `days = 7`.
+///
+/// Upstream 1.28.0 dropped the pedantic "`multi-ecosystem-group` with an
+/// effective cooldown" finding, so karinto no longer emits it either, and
+/// promoted the remaining findings to `Warning` — matching upstream, where
+/// every arm of this audit is now a Medium/High-confidence `warning`.
 fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   let threshold = 7
+  // GitHub applies this cooldown when an update entry configures none of
+  // its own; below the threshold, so an entry without an explicit
+  // `default-days` still gets flagged — just with the implicit wording.
+  let implicit_message = "insufficient implicit default-days (less than \{threshold})"
   for um in ctx.updates {
     let cooldown = um.get("cooldown")
     match cooldown {
-      None =>
-        add_diag(
-          out,
-          "dependabot-cooldown",
-          Info,
-          "missing cooldown configuration",
-        )
       Some(@yaml.Yaml::Map(c)) => {
         let dd = c.get("default-days")
         let dd_int = match dd {
@@ -2738,58 +2741,23 @@ fn check_dependabot_cooldown(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         }
         match dd_int {
           None =>
-            add_diag(
-              out,
-              "dependabot-cooldown",
-              Info,
-              "no default-days configured",
-            )
+            add_diag(out, "dependabot-cooldown", Warning, implicit_message)
           Some(n) =>
             if n < threshold.to_int64() {
               add_diag(
                 out,
                 "dependabot-cooldown",
-                Info,
+                Warning,
                 "insufficient default-days configured (less than \{threshold})",
               )
             }
         }
-        // multi-ecosystem-group with effective cooldown (pedantic).
-        if um.contains("multi-ecosystem-group") && cooldown_is_effective(c) {
-          add_diag(
-            out,
-            "dependabot-cooldown",
-            Info,
-            "multi-ecosystem-group cooldowns do not batch updates correctly",
-          )
-        }
       }
-      _ =>
-        add_diag(
-          out,
-          "dependabot-cooldown",
-          Info,
-          "missing cooldown configuration",
-        )
+      // No `cooldown:` block at all (or a non-map one): the implicit
+      // default applies.
+      _ => add_diag(out, "dependabot-cooldown", Warning, implicit_message)
     }
   }
-}
-
-///|
-/// Returns true when the cooldown block has any positive day budget,
-/// matching zizmor's `Cooldown::effective`.
-fn cooldown_is_effective(c : Map[String, @yaml.Yaml]) -> Bool {
-  let fields = [
-    "default-days", "semver-major-days", "semver-minor-days", "semver-patch-days",
-  ]
-  for k in fields {
-    match c.get(k) {
-      Some(@yaml.Yaml::Integer(n)) => if n > 0L { return true }
-      Some(@yaml.Yaml::Real(d, repr=_)) => if d > 0.0 { return true }
-      _ => ()
-    }
-  }
-  false
 }
 
 ///|

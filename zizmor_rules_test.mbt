@@ -496,11 +496,33 @@ test "dependabot-cooldown: dependabot.yml missing cooldown" {
     "diagnostics": [
       {
         "rule": "dependabot-cooldown",
-        "severity": "info",
-        "message": "missing cooldown configuration",
+        "severity": "warning",
+        "message": "insufficient implicit default-days (less than 7)",
       },
     ],
   })
+}
+
+///|
+/// zizmor 1.28.0 dropped the pedantic "`multi-ecosystem-group` cooldowns do
+/// not batch updates correctly" finding, so an entry that groups ecosystems
+/// but configures a sufficient cooldown must now be silent.
+test "dependabot-cooldown: multi-ecosystem-group with sufficient cooldown is silent" {
+  let yaml =
+    #|version: 2
+    #|multi-ecosystem-groups:
+    #|  all:
+    #|    schedule:
+    #|      interval: weekly
+    #|updates:
+    #|  - package-ecosystem: github-actions
+    #|    directory: /
+    #|    multi-ecosystem-group: all
+    #|    cooldown:
+    #|      default-days: 7
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dependabot-cooldown" })
+  inspect(hits.length(), content="0")
 }
 
 ///|

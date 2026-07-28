@@ -1,2 +1,2 @@
-zizmorcore/zizmor@v1.27.0
+zizmorcore/zizmor@v1.28.0
 vendored: crates/zizmor/tests -> tests
