@@ -1,5 +1,35 @@
 # karinto
 
+## 0.9.5
+
+### Patch Changes
+
+- [#93](https://github.com/toiroakr/karinto/pull/93) [`65d6953`](https://github.com/toiroakr/karinto/commit/65d6953c005d6ae50a51467fe84ef1fddfea8a87) Thanks [@github-actions](https://github.com/apps/github-actions)! - `dependabot-cooldown` now tracks zizmor 1.28.0, which taught the audit about GitHub's new implicit three-day default cooldown ([zizmorcore/zizmor#2193](https://github.com/zizmorcore/zizmor/issues/2193)).
+
+  Three behavioural changes:
+
+  - The pedantic-only "`multi-ecosystem-group` cooldowns do not batch updates correctly" finding is **gone**. An `updates:` entry that joins a `multi-ecosystem-group` while configuring a sufficient cooldown is now silent, matching upstream.
+  - An entry with no `cooldown:` block, or one without `default-days`, now reports `insufficient implicit default-days (less than 7)` instead of `missing cooldown configuration` / `no default-days configured` — the entry does get a cooldown, GitHub's implicit one, it's just shorter than the threshold.
+  - The rule's severity moves from `info` to `warning`, mirroring upstream: zizmor 1.28.0 promoted the too-short `default-days` case from `help` to `warning`, making every arm of the audit a `warning`. This also changes the SARIF `level` reported for the rule.
+
+  An explicit `default-days` below 7 keeps its existing `insufficient default-days configured (less than 7)` wording.
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`e57bc46`](https://github.com/toiroakr/karinto/commit/e57bc46926878dea94f5b5defa57717647c65c90) Thanks [@toiroakr](https://github.com/toiroakr)! - Findings that blame one concrete job or step now carry that attribution instead of only mentioning it in their message. Previously several rules identified the exact offender and then discarded it, emitting a diagnostic with no `job`, `step`, or `pos` — so in a multi-job workflow you couldn't tell which one tripped, and an inline `# karinto: ignore[...]` on the offending line had no effect (it had nowhere to match against).
+
+  Fixed across: `cache-poisoning` (the cache-restoring step), `excessive-permissions` (the per-job "default permissions used" finding, which was the only arm of its own `match` still unattributed), `bot-conditions` (the job's or step's `if:`), `insecure-commands` (the job's or step's `env:`), `invalid-env-var-name` (down to the offending `env:` entry), `overprovisioned-secrets` (the job's or step's `env:`), `job-needs-graph` (the job's `needs:`), `context-availability` (the job's `env:`/`if:`), and `unsound-condition` (the job's or step's `if:`). Workflow-level findings that are genuinely about the document — or about something's _absence_, like `concurrency-limits` — correctly stay unpositioned and keep their file-wide inline-ignore fallback.
+
+  Rule ids, severities, and message text are unchanged; only the location metadata is newly populated.
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`c72bb66`](https://github.com/toiroakr/karinto/commit/c72bb6627d57586525a7891e6fa2ee67e7b3705c) Thanks [@toiroakr](https://github.com/toiroakr)! - Fix `github-app-limit-repositories` to no longer flag a GitHub App token request that omits both `owner:` and `repositories:`. Per ghalint's own `ghl-009` doc, omitting both scopes the token to the current repository, which is compliant — the finding now only fires when `owner:` is set without `repositories:` (token spans the whole installation).
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`c72bb66`](https://github.com/toiroakr/karinto/commit/c72bb6627d57586525a7891e6fa2ee67e7b3705c) Thanks [@toiroakr](https://github.com/toiroakr)! - Fix `use-trusted-publishing`'s run-based detection to no longer false-positive on `pkg-pr-new` invoked via `pnpm dlx`/`yarn dlx`/`npm exec` (e.g. `pnpm dlx pkg-pr-new@0.0.78 publish ...`). It publishes throwaway preview builds authenticated via the job's own `GITHUB_TOKEN`, not a long-lived npm registry token.
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`e9ba6fc`](https://github.com/toiroakr/karinto/commit/e9ba6fc4248641d0cf88ba6fdac31894cdbf54a7) Thanks [@toiroakr](https://github.com/toiroakr)! - Inline `# karinto: ignore[...]` / `# zizmor: ignore[...]` comments now also work as a "disable next line" directive: a comment on its own line (nothing else before the `#`) suppresses a finding on the line directly below it, in addition to same-line placement. A trailing comment on a code line (`run: foo # karinto: ignore[rule]`) still applies only to that line — it never carries over to the next one, so two adjacent findings for the same rule can't collide with each other's ignores. This is most useful for a finding with no owning step (e.g. `undocumented-permissions`, whose `pos` resolves to the `permissions:` field's own line rather than any step), but also works for step-scoped findings when the comment sits on its own line just above the step's `uses:`/`run:` line. For a step-scoped finding, a standalone comment directly above the step's own list-item (`-`) line works too, not just above the specific field `pos` resolves to — useful when a step spans several lines and you'd rather annotate the whole step. The README's "Ignoring findings" section documents both forms.
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`c72bb66`](https://github.com/toiroakr/karinto/commit/c72bb6627d57586525a7891e6fa2ee67e7b3705c) Thanks [@toiroakr](https://github.com/toiroakr)! - `undocumented-permissions` findings now carry `pos` (pointing at the `permissions:` key) and, when the block is nested under a job, that job's `job` id — so a workflow with several per-job `permissions:` blocks can trace each finding back to its specific block instead of requiring a manual audit of the whole file.
+
+- [#92](https://github.com/toiroakr/karinto/pull/92) [`6409093`](https://github.com/toiroakr/karinto/commit/640909318caf2f10f117fa2cd5aed61f39c40549) Thanks [@toiroakr](https://github.com/toiroakr)! - `use-trusted-publishing` findings in workflow files are now attributed to the specific step that triggered them (`job` + `step`, with `pos` pointing at that step's `uses:`/`run:` line) instead of only the owning job. This lets an inline `# karinto: ignore[...]` / `# zizmor: ignore[...]` comment placed on the offending step itself suppress the finding, which previously had no effect — the comment had to go on the job's own key line instead.
+
 ## 0.9.4
 
 ### Patch Changes
