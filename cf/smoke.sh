@@ -77,9 +77,19 @@ CHECKS_DEADLINE=$((SECONDS + 480))
 http_probe() {
   local out=$1
   shift
-  local attempt budget max_time code=''
+  local attempt budget delay max_time code=''
   for attempt in $(seq 0 "$RETRIES"); do
-    [ "$attempt" -eq 0 ] || sleep "$RETRY_DELAY"
+    if [ "$attempt" -gt 0 ]; then
+      # Consult the budget *before* backing off, not after. An exhausted budget
+      # means there is nothing left to wait for, so stop instead of spending a
+      # delay on an attempt whose curl would be clamped to a second anyway; and
+      # cap the delay itself so a backoff started just inside the budget cannot
+      # overshoot the deadline it is meant to respect.
+      delay=$((CHECKS_DEADLINE - SECONDS))
+      if [ "$delay" -le 0 ]; then break; fi
+      if [ "$delay" -gt "$RETRY_DELAY" ]; then delay=$RETRY_DELAY; fi
+      sleep "$delay"
+    fi
     budget=$((CHECKS_DEADLINE - SECONDS))
     if [ "$budget" -lt 1 ]; then budget=1; fi
     max_time=$MAX_TIME
@@ -89,7 +99,6 @@ http_probe() {
       404 | 5?? | 000) ;;
       *) break ;;
     esac
-    if [ "$SECONDS" -ge "$CHECKS_DEADLINE" ]; then break; fi
   done
   printf '%s' "$code"
 }
