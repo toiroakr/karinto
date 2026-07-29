@@ -17,6 +17,10 @@ printf 'smoke-testing %s\n' "$URL"
 # the jq-based checks below. So wait for both code paths to return their
 # *expected* codes (yaml body → 200, empty body → 400) three times in a row
 # before asserting anything. 36 × 5s ≈ 3 min total budget.
+#
+# The streak is necessary but not sufficient — propagation has been observed to
+# flap again *after* it is satisfied — so the checks themselves retry too, via
+# the `http_probe` / `get_ok` wrappers defined below.
 streak=0
 for attempt in $(seq 1 36); do
   body_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data 'name: t' "$URL" || true)
@@ -37,6 +41,78 @@ if [ "$streak" -lt 3 ]; then
   exit 1
 fi
 
+failed=0
+ok()  { printf "  ok   %s\n" "$1"; }
+bad() { printf "  fail %s\n" "$1"; failed=1; }
+
+# A request issued after the readiness streak can still land on a colo that has
+# not picked up the route. Every check therefore goes through one of the two
+# wrappers below rather than calling curl directly, and neither of them aborts
+# the script: a bare `curl -f` under `set -e` turns a transient 404 into exit 22
+# and kills the run outright — no `fail` line, no summary, just `curl: (22)` —
+# which is exactly how a flap once took down a deploy-preview job.
+#
+# 3 retries rather than more because every probe now retries, not just the ones
+# that used to run under `curl -f`. Observed flaps have always cleared within a
+# single 5s readiness tick.
+RETRIES=3
+RETRY_DELAY=3
+MAX_TIME=20
+
+# Per-probe worst case is 4 × 20s + 3 × 3s ≈ 89s, and there are up to 15 probes
+# below — far more than the workflow's 15-minute job timeout would allow. A job
+# killed on timeout prints no summary, which is the very failure mode this file
+# is trying to eliminate, so the assertion phase gets its own wall-clock budget.
+# Past it, `http_probe` stops retrying and collapses curl's timeout to a second,
+# letting the remaining checks fail fast and the summary still run. The readiness
+# gate above can burn 3 of the job's 15 minutes; 8 leaves margin for the build
+# and deploy steps that precede this script.
+CHECKS_DEADLINE=$((SECONDS + 480))
+
+# `http_probe <body-file> <curl args...>` writes the response body to
+# <body-file> and echoes the status code. Retries while the edge answers 404,
+# 5xx, or 000 (curl's placeholder for a request that never completed) — the
+# shapes an unpropagated route produces. No check below expects any of those,
+# so retrying can never mask a real regression. The URL must come last.
+http_probe() {
+  local out=$1
+  shift
+  local attempt budget max_time code=''
+  for attempt in $(seq 0 "$RETRIES"); do
+    [ "$attempt" -eq 0 ] || sleep "$RETRY_DELAY"
+    budget=$((CHECKS_DEADLINE - SECONDS))
+    if [ "$budget" -lt 1 ]; then budget=1; fi
+    max_time=$MAX_TIME
+    if [ "$max_time" -gt "$budget" ]; then max_time=$budget; fi
+    code=$(curl -sS --max-time "$max_time" -o "$out" -w '%{http_code}' "$@" || true)
+    case "$code" in
+      404 | 5?? | 000) ;;
+      *) break ;;
+    esac
+    if [ "$SECONDS" -ge "$CHECKS_DEADLINE" ]; then break; fi
+  done
+  printf '%s' "$code"
+}
+
+# `get_ok <curl args...>` echoes the response body for the checks that only ever
+# expect a 2xx. It never aborts: on any other status it echoes a deliberately
+# non-JSON marker instead, so the caller's own jq assertion fails and reports it
+# through `bad` — the remaining checks still run and the summary is still
+# printed. It cannot call `bad` itself: callers use `$(get_ok ...)`, so both the
+# message and the `failed=1` would be trapped in the substitution's subshell.
+get_ok() {
+  local url=${*: -1}
+  local out body code
+  out=$(mktemp)
+  code=$(http_probe "$out" "$@")
+  body=$(cat "$out")
+  rm -f "$out"
+  case "$code" in
+    2??) printf '%s' "$body" ;;
+    *)   printf 'HTTP %s from %s: %s' "$code" "$url" "$body" ;;
+  esac
+}
+
 YAML='name: ci
 on: push
 permissions: write-all
@@ -46,12 +122,8 @@ jobs:
     steps:
       - run: echo hi'
 
-failed=0
-ok()  { printf "  ok   %s\n" "$1"; }
-bad() { printf "  fail %s\n" "$1"; failed=1; }
-
 # 1. POST raw YAML -> result includes permissions-write-all-forbidden
-res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
+res=$(get_ok -X POST --data-binary "$YAML" "$URL")
 if jq -e '.ok and (.result.diagnostics | map(.rule) | any(. == "permissions-write-all-forbidden"))' >/dev/null <<<"$res"; then
   ok "POST yaml body -> permissions-write-all-forbidden"
 else
@@ -59,7 +131,7 @@ else
 fi
 
 # 2. disable=permissions-* suppresses every permissions-* rule
-res=$(curl -fsS --data-urlencode "content=$YAML" --data "disable=permissions-*" "$URL")
+res=$(get_ok --data-urlencode "content=$YAML" --data "disable=permissions-*" "$URL")
 if jq -e '.ok and (.result.diagnostics | map(.rule) | all(startswith("permissions-") | not))' >/dev/null <<<"$res"; then
   ok "disable=permissions-* suppresses permissions-* rules"
 else
@@ -67,7 +139,7 @@ else
 fi
 
 # 3. empty body -> 400
-code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data '' "$URL")
+code=$(http_probe /dev/null -X POST --data '' "$URL")
 if [ "$code" = "400" ]; then
   ok "empty body -> 400"
 else
@@ -78,7 +150,7 @@ fi
 # the REPO_MODE_ENABLED deployment variable. Detect the deployment's setting
 # with a request that can't trigger any GitHub fetch — an invalid repo slug: a
 # disabled deployment 403s at the gate, an enabled one reaches validation (400).
-gate=$(curl -sS -o /dev/null -w '%{http_code}' "$URL?repo=not-a-slug")
+gate=$(http_probe /dev/null "$URL?repo=not-a-slug")
 case "$gate" in
   403) REPO_MODE=off ;;
   400) REPO_MODE=on ;;
@@ -89,7 +161,7 @@ printf '  repo mode: %s (gate probe -> %s)\n' "$REPO_MODE" "$gate"
 if [ "$REPO_MODE" = off ]; then
   # 4. repo mode disabled -> 403 with an explanatory error.
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  code=$(http_probe "$res_body" "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "403" ] && jq -e '.ok == false and (.error | test("repo mode is disabled"))' >/dev/null <<<"$res"; then
     ok "repo mode disabled -> 403 at the gate"
@@ -99,7 +171,7 @@ if [ "$REPO_MODE" = off ]; then
 elif [ "$REPO_MODE" = on ]; then
   # 4. repo without commit -> 400
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&targets=action.yml")
+  code=$(http_probe "$res_body" "$URL?repo=actions/checkout&targets=action.yml")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("`commit` or `ref` is required"))' >/dev/null <<<"$res"; then
     ok "repo without commit/ref -> 400"
@@ -109,7 +181,7 @@ elif [ "$REPO_MODE" = on ]; then
 
   # 5. repo + non-hex commit (branch name) -> 400
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&commit=main&targets=action.yml")
+  code=$(http_probe "$res_body" "$URL?repo=actions/checkout&commit=main&targets=action.yml")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid commit"))' >/dev/null <<<"$res"; then
     ok "repo + branch name commit -> 400"
@@ -118,7 +190,7 @@ elif [ "$REPO_MODE" = on ]; then
   fi
 
   # 6. path /<owner>/<repo>/<commit>/<target> resolves to a real lint
-  res=$(curl -fsS "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  res=$(get_ok "$URL/actions/checkout/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
   if jq -e '.ok and .repo == "actions/checkout" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
     ok "path /owner/repo/commit/target -> repo lint"
   else
@@ -127,7 +199,7 @@ elif [ "$REPO_MODE" = on ]; then
 
   # 7. path-traversal in targets -> 400 (must not escape the pinned commit prefix)
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=../main/action.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+  code=$(http_probe "$res_body" --data-urlencode 'targets=../main/action.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
     ok "targets with .. segment -> 400"
@@ -137,7 +209,7 @@ elif [ "$REPO_MODE" = on ]; then
 
   # 8. percent-encoded path-traversal -> 400 (defense-in-depth)
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' --data-urlencode 'targets=%2e%2e%2fmain%2faction.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
+  code=$(http_probe "$res_body" --data-urlencode 'targets=%2e%2e%2fmain%2faction.yml' "$URL?repo=actions/checkout&commit=b4ffde65f46336ab88eb53be808477a3936bae11")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid target path"))' >/dev/null <<<"$res"; then
     ok "percent-encoded traversal -> 400"
@@ -148,7 +220,7 @@ elif [ "$REPO_MODE" = on ]; then
   # 9. domain-swapped GitHub blob URL (`/owner/repo/blob/<ref>/<path>`) resolves
   #    to a lint. Pinned to a SHA so the lint output is stable; response carries
   #    both `ref` and the echoed `commit`.
-  res=$(curl -fsS "$URL/actions/checkout/blob/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
+  res=$(get_ok "$URL/actions/checkout/blob/b4ffde65f46336ab88eb53be808477a3936bae11/action.yml")
   if jq -e '.ok and .ref == "b4ffde65f46336ab88eb53be808477a3936bae11" and .commit == "b4ffde65f46336ab88eb53be808477a3936bae11" and (.files | length) == 1' >/dev/null <<<"$res"; then
     ok "blob URL form /owner/repo/blob/<sha>/target -> repo lint"
   else
@@ -157,7 +229,7 @@ elif [ "$REPO_MODE" = on ]; then
 
   # 10. branch ref via `ref=` lints the branch's latest commit. The response
   #     carries `ref` but no `commit` (no SHA resolved on the hot path).
-  res=$(curl -fsS "$URL?repo=actions/checkout&ref=main&targets=action.yml")
+  res=$(get_ok "$URL?repo=actions/checkout&ref=main&targets=action.yml")
   if jq -e '.ok and .ref == "main" and (has("commit") | not) and (.files | length) == 1' >/dev/null <<<"$res"; then
     ok "ref=main -> latest-commit lint, no echoed commit"
   else
@@ -166,7 +238,7 @@ elif [ "$REPO_MODE" = on ]; then
 
   # 11. ref with a `..` traversal segment -> 400 (can't escape into another path).
   res_body=$(mktemp)
-  code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL?repo=actions/checkout&ref=../main&targets=action.yml")
+  code=$(http_probe "$res_body" "$URL?repo=actions/checkout&ref=../main&targets=action.yml")
   res=$(cat "$res_body"); rm -f "$res_body"
   if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("invalid ref"))' >/dev/null <<<"$res"; then
     ok "ref with .. segment -> 400"
@@ -181,7 +253,7 @@ fi
 #     falls through to the standard `missing content or repo` 400 regardless
 #     of the repo-mode setting (a 1-segment path is never repo mode).
 res_body=$(mktemp)
-code=$(curl -sS -o "$res_body" -w '%{http_code}' "$URL/favicon.ico")
+code=$(http_probe "$res_body" "$URL/favicon.ico")
 res=$(cat "$res_body"); rm -f "$res_body"
 if [ "$code" = "400" ] && jq -e '.ok == false and (.error | test("missing"))' >/dev/null <<<"$res"; then
   ok "non-repo path falls through to missing-content 400"
@@ -199,17 +271,19 @@ fi
 
 # 13. every response carries a non-empty `engine_version` so CI can pin /
 #     assert the deployed engine (present on both success and error paths).
-res=$(curl -fsS -X POST --data-binary "$YAML" "$URL")
+res=$(get_ok -X POST --data-binary "$YAML" "$URL")
 if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then
   ok "response carries engine_version ($(jq -r '.engine_version' <<<"$res"))"
 else
   bad "engine_version missing on success: $res"
 fi
-res=$(curl -sS -X POST --data '' "$URL")
+res_body=$(mktemp)
+code=$(http_probe "$res_body" -X POST --data '' "$URL")
+res=$(cat "$res_body"); rm -f "$res_body"
 if jq -e '(.engine_version | type == "string" and length > 0)' >/dev/null <<<"$res"; then
   ok "engine_version present on error path"
 else
-  bad "engine_version missing on error: $res"
+  bad "engine_version missing on error (status=$code): $res"
 fi
 
 exit "$failed"
