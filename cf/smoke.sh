@@ -52,13 +52,22 @@ bad() { printf "  fail %s\n" "$1"; failed=1; }
 # and kills the run outright — no `fail` line, no summary, just `curl: (22)` —
 # which is exactly how a flap once took down a deploy-preview job.
 #
-# 3 retries rather than more because every probe now retries (not just the ones
-# that used to run under `curl -f`), and the worst case has to stay clear of the
-# workflow's 15-minute job timeout: 4 × 20s + 3 × 3s ≈ 89s per probe. Observed
-# flaps have always cleared within a single 5s readiness tick.
+# 3 retries rather than more because every probe now retries, not just the ones
+# that used to run under `curl -f`. Observed flaps have always cleared within a
+# single 5s readiness tick.
 RETRIES=3
 RETRY_DELAY=3
 MAX_TIME=20
+
+# Per-probe worst case is 4 × 20s + 3 × 3s ≈ 89s, and there are up to 15 probes
+# below — far more than the workflow's 15-minute job timeout would allow. A job
+# killed on timeout prints no summary, which is the very failure mode this file
+# is trying to eliminate, so the assertion phase gets its own wall-clock budget.
+# Past it, `http_probe` stops retrying and collapses curl's timeout to a second,
+# letting the remaining checks fail fast and the summary still run. The readiness
+# gate above can burn 3 of the job's 15 minutes; 8 leaves margin for the build
+# and deploy steps that precede this script.
+CHECKS_DEADLINE=$((SECONDS + 480))
 
 # `http_probe <body-file> <curl args...>` writes the response body to
 # <body-file> and echoes the status code. Retries while the edge answers 404,
@@ -68,14 +77,19 @@ MAX_TIME=20
 http_probe() {
   local out=$1
   shift
-  local attempt code=
+  local attempt budget max_time code=''
   for attempt in $(seq 0 "$RETRIES"); do
     [ "$attempt" -eq 0 ] || sleep "$RETRY_DELAY"
-    code=$(curl -sS --max-time "$MAX_TIME" -o "$out" -w '%{http_code}' "$@" || true)
+    budget=$((CHECKS_DEADLINE - SECONDS))
+    if [ "$budget" -lt 1 ]; then budget=1; fi
+    max_time=$MAX_TIME
+    if [ "$max_time" -gt "$budget" ]; then max_time=$budget; fi
+    code=$(curl -sS --max-time "$max_time" -o "$out" -w '%{http_code}' "$@" || true)
     case "$code" in
       404 | 5?? | 000) ;;
       *) break ;;
     esac
+    if [ "$SECONDS" -ge "$CHECKS_DEADLINE" ]; then break; fi
   done
   printf '%s' "$code"
 }
