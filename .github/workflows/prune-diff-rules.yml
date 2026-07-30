@@ -12,15 +12,26 @@ name: prune-diff-rules
 #
 #   1. report.unexpected == 0 — no diff against prod that no rule explains.
 #      Merging a pruning PR triggers a whole-bucket rebaseline, and
-#      scripts/rebaseline-captures.mjs does not consult the diff-rules at all —
-#      it overwrites every capture whose prod response differs. Pruning while
-#      unexplained drift exists would therefore bake a prod regression into the
-#      baseline and destroy its evidence, via a PR that claims to only delete
-#      dead rules. This gate fails the job rather than opening such a PR.
+#      scripts/rebaseline-captures.mjs decides what to overwrite purely from the
+#      prod-vs-capture response comparison — it never treats a diff as expected
+#      just because some rule matches it. Pruning while unexplained drift exists
+#      would therefore bake a prod regression into the baseline and destroy its
+#      evidence, via a PR that claims to only delete dead rules. This gate fails
+#      the job rather than opening such a PR.
 #   2. matchCount > 0 — the rule explains a real prod-vs-capture diff. Counted
 #      over ALL matching rules, not just the first one to match: rules are tried
 #      in filename order, so first-match attribution lets an older broad rule
 #      absorb a newer rule's captures and the newer rule looks unshipped forever.
+#
+#      This gate is also why this job cannot clean up after a rebaseline. A
+#      rebaseline clears EVERY prod-vs-capture diff, so the other transient rules
+#      stop matching and become invisible here — and matchCount == 0 cannot be
+#      read as "dead", because it equally means "the fix has not shipped yet"
+#      (prod and captures both still serve the old behaviour), where the rule is
+#      about to become necessary. Nothing available at this point distinguishes
+#      the two, so rebaseline-captures.mjs reports the rules it invalidates at
+#      the moment it destroys their evidence; see its header and DEVELOPMENT.md
+#      § "Collateral rules".
 #   3. threwCount == 0 — the rule's `matches()` never errored. A rule that
 #      throws suppresses nothing, so neither its count nor its silence says
 #      anything about whether its fix shipped.
@@ -140,8 +151,8 @@ jobs:
 
           # Refuse to prune while the detection replay saw diffs no rule
           # explains. Merging a pruning PR triggers a WHOLE-BUCKET rebaseline,
-          # and scripts/rebaseline-captures.mjs does not consult the diff-rules
-          # at all — it overwrites every capture whose prod response differs.
+          # and scripts/rebaseline-captures.mjs overwrites every capture whose
+          # prod response differs — a rule matching a diff does not exempt it.
           # So an unexplained prod regression sitting in `unexpected` would be
           # baked into the baseline and its evidence destroyed, by a PR that
           # claims to be doing nothing but deleting dead rules. Unexplained

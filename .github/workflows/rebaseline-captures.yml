@@ -187,8 +187,13 @@ jobs:
           node-version: '22'
 
       - name: Rebaseline captures
+        id: rebaseline
         if: steps.signal.outputs.run == 'true'
         env:
+          # Per-rule attribution of the rules this bake-in invalidates, read by
+          # the next step. See the "Which rules a rebaseline kills" section in
+          # scripts/rebaseline-captures.mjs.
+          REBASELINE_REPORT_PATH: ${{ github.workspace }}/rebaseline-report.json
           # Both candidate credential pairs are passed in; the pair is chosen in
           # the shell below (an `||` per variable could mix a write key id with a
           # legacy secret, which fails later as an opaque signature error).
@@ -232,3 +237,61 @@ jobs:
           DRY_FLAG=""
           if [ "${DRY_RUN:-}" = "true" ]; then DRY_FLAG="--dry-run"; fi
           node scripts/rebaseline-captures.mjs --target "$TARGET" $DRY_FLAG
+
+      # Surface the rules this bake-in just killed as run annotations. The
+      # markdown table is already in the step summary (the script appends it to
+      # GITHUB_STEP_SUMMARY); this exists so the names appear at the top of the
+      # run page instead of only inside the summary, because nothing else will
+      # ever point at them again: a rebaseline destroys the very evidence
+      # prune-diff-rules.yml gates on, so those rules become invisible to the
+      # pruner the moment this step finishes.
+      #
+      # Deliberately report-only — it does not open the deletion PR. The
+      # deletion path in prune-diff-rules.yml owns guards this job does not have
+      # (the importer check for composite rules, and the post-deletion
+      # `replay.mjs --check-rules`), and reimplementing them here is exactly the
+      # duplication that would let the two drift. Sharing them properly means
+      # extracting that job into a `workflow_call` workflow both can invoke,
+      # which is a larger change than this one.
+      - name: Report invalidated ignore rules
+        if: steps.signal.outputs.run == 'true'
+        env:
+          REPORT: ${{ github.workspace }}/rebaseline-report.json
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::no attribution report at $REPORT; the rebaseline ran but the invalidated-rule report is missing."
+            exit 0
+          fi
+
+          if [ "$(jq -r '.attributionAvailable' "$REPORT")" != "true" ]; then
+            REASON=$(jq -r '.attributionUnavailableReason // "unknown"' "$REPORT")
+            echo "::warning::invalidated-rule attribution was unavailable this run: ${REASON}. The rebaseline itself completed."
+            exit 0
+          fi
+
+          # `deletable` already encodes every gate: the rule explained a diff
+          # this run destroyed, never threw, declares prunable = true, and the
+          # run covered the whole bucket. Do not widen it here.
+          # Distinguish "nothing was invalidated" from "something was, but none of
+          # it is safe to delete". The second case is the normal outcome for a
+          # permanent rule, a --limit run, or a rule whose matches() threw, and
+          # reporting it as "nothing invalidated" would hide a rule that a human
+          # may still need to look at.
+          TOTAL=$(jq '.rules | length' "$REPORT")
+          COUNT=$(jq '[.rules[] | select(.deletable)] | length' "$REPORT")
+          if [ "$COUNT" = "0" ]; then
+            if [ "$TOTAL" = "0" ]; then
+              echo "No ignore rule was invalidated by this run."
+            else
+              echo "${TOTAL} ignore rule(s) were invalidated, but none is proposed for deletion:"
+              jq -r '.rules[] | "kept: \(.id) — \(.verdict)"' "$REPORT"
+            fi
+            exit 0
+          fi
+
+          jq -r '.rules[] | select(.deletable)
+                 | "::notice::scripts/diff-rules/\(.file) is now dead — it explained \(.invalidatedCount) capture diff(s) that this rebaseline baked in. prune-diff-rules.yml can no longer detect it (its matchCount > 0 evidence is gone); delete it by hand."' \
+            "$REPORT"
+          jq -r '.rules[] | select(.deletable | not) | "kept: \(.id) — \(.verdict)"' "$REPORT"

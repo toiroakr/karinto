@@ -502,14 +502,52 @@ PR adds the rule       ──▶  merged, unreleased  ──▶  release ships t
                      a human merges it  ──▶  rebaseline-captures.yml fires on the
                      ("bake this in")        `main` push, rewrites the captures
                                              from current prod, diffs gone
+                                                        │
+                                     ...and reports which OTHER rules it
+                                     killed doing so — see "Collateral
+                                     rules" below
 ```
 
 The pruner **refuses to act** while the detection replay reports unexplained
-diffs. `rebaseline-captures.mjs` does not consult the diff-rules — it overwrites
-every capture whose prod response differs — so merging a pruning PR during
-unexplained drift would bake a prod regression into the baseline. Resolve the
-drift (add a rule, or fix the regression) before pruning; `dry_run: true` lets
-you inspect meanwhile.
+diffs. The rebaseline decides what to overwrite purely from the prod-vs-capture
+response comparison, without asking whether any rule considers a diff expected —
+so merging a pruning PR during unexplained drift would bake a prod regression
+into the baseline. Resolve the drift (add a rule, or fix the regression) before
+pruning; `dry_run: true` lets you inspect meanwhile.
+
+#### Collateral rules
+
+A rebaseline refreshes the **whole bucket**, so it clears every prod-vs-capture
+diff — not just the one belonging to the rule that was pruned. Every other
+transient rule that was masking a diff therefore stops matching, and the pruner
+can no longer find those rules at all: it gates on `matchCount > 0` as proof the
+fix shipped, and that evidence is exactly what the rebaseline destroyed.
+
+Relaxing that gate is not the fix. `matchCount == 0` conflates two opposite
+states:
+
+| state | meaning | correct action |
+| --- | --- | --- |
+| the fix has not shipped yet | prod and captures both serve the old behaviour, so no diff exists | **keep** — the rule is about to become necessary |
+| the captures are already fresh | the diff has been baked in | delete |
+
+A gate keyed on age, or on absence of match, cannot tell these apart and would
+delete rules whose release is still pending.
+
+So `rebaseline-captures.mjs` names them itself. Before overwriting a capture it
+asks which rules explain the diff it is about to destroy; a rule in that set was
+demonstrably suppressing a real prod-vs-capture diff — the pruner's own evidence
+standard — captured at the one moment it still exists. A not-yet-shipped rule
+matches nothing pre-write and is correctly left out.
+
+The result lands in the run's step summary and as `::notice::` annotations naming
+each dead rule file. It is **report-only**: deleting them is a manual commit,
+because the deletion path in `prune-diff-rules.yml` owns guards this job does not
+have (the importer check for composite rules, and the post-deletion
+`replay.mjs --check-rules`). A rule is only proposed for deletion when it
+explained at least one destroyed diff, never threw while doing so, declares
+`prunable = true`, and the run covered the whole bucket — a `--limit` run has not
+seen enough to conclude anything and says so.
 
 The `replay` check on the pruning PR itself is expected to be red — the rule is
 gone but the captures are still stale. It clears for later PRs as soon as the

@@ -80,6 +80,25 @@ out-of-band refresh reopens it with no rule left to suppress it. When in
 doubt, ask whether a release could ever make the diff go away for good — if
 not, the rule is permanent.
 
+### After a rebaseline, the pruner goes blind
+
+A rebaseline refreshes the whole bucket, so it clears every prod-vs-capture
+diff — not only the one belonging to the rule whose deletion triggered it. Any
+other `prunable = true` rule that was masking a diff stops matching, and
+`prune-diff-rules.yml` can no longer see it: that job gates on `matchCount > 0`
+as proof the fix shipped, and the rebaseline just destroyed that evidence.
+
+The gate cannot simply be relaxed, because `matchCount == 0` means two opposite
+things — *the fix has not shipped yet* (keep the rule; its diff is about to
+appear) and *the captures are already fresh* (delete it). Age or absence of a
+match cannot distinguish them.
+
+Instead `rebaseline-captures.mjs` reports it: before overwriting a capture it
+asks which rules explain the diff it is about to destroy, and lists them in the
+run's step summary and as `::notice::` annotations. Deleting them stays a manual
+commit. So if you see such a notice, delete the named files — nothing else will
+remind you. See DEVELOPMENT.md § "Collateral rules".
+
 `lint.yml` runs `node scripts/replay.mjs --check-rules`, which fails when a rule
 module cannot be imported, omits `prunable`, or does not export a `matches`
 function. Run it locally before pushing:
@@ -114,10 +133,13 @@ exception. Guard against missing fields instead of assuming shape (`capture?.x`,
   it is missing. Should one slip in anyway (a direct push to `main`), the rule is
   silently excluded from automatic cleanup, and `prune-diff-rules.yml` warns
   about it only on a run where the rule actually matches.
-- **Deletion is usually automatic.** For a `prunable = true` rule,
-  `prune-diff-rules.yml` opens the removal PR itself once the fix is live on
-  prod; merging it triggers `rebaseline-captures.yml`, which refreshes the
+- **Deletion is usually automatic — for the first rule.** For a `prunable = true`
+  rule, `prune-diff-rules.yml` opens the removal PR itself once the fix is live
+  on prod; merging it triggers `rebaseline-captures.yml`, which refreshes the
   captures so no manual ~30-day wait is needed. Deleting by hand is still
-  fine — the same merge-time rebaseline picks it up.
+  fine — the same merge-time rebaseline picks it up. But that rebaseline also
+  kills every *other* transient rule, and those the pruner cannot find; the
+  rebaseline run names them instead and you delete them by hand. See "After a
+  rebaseline, the pruner goes blind" above.
 - **One rule per PR**. If a PR introduces two unrelated behavioural
   changes, write two rule files.

@@ -28,12 +28,19 @@
 //                         (consumed by prune-diff-rules.yml)
 
 import { createHash, createHmac } from "node:crypto";
-import { readdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { writeFile } from "node:fs/promises";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const RULES_DIR = join(__dirname, "diff-rules");
+// Response comparison and rule evaluation are shared with
+// scripts/rebaseline-captures.mjs — the rule contract is written against the
+// diff shapes produced there, so both scripts must use one implementation.
+import {
+  RULES_DIR,
+  computeDiff,
+  loadRules,
+  matchRules,
+  normalize,
+} from "./lib/replay-diff.mjs";
+
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
 
@@ -230,57 +237,6 @@ async function fetchCaptures(env, limit) {
 // Replay + diff
 // ---------------------------------------------------------------------------
 
-// Returns { rules, skipped }. `skipped` lists .mjs files that imported cleanly
-// but export no `matches` function. Every .mjs in this directory is supposed to
-// be a rule (see the README), so a skipped file is a rule that silently does
-// nothing: its intended diff resurfaces as "unexpected", which fails replay on
-// every PR and — via the pruner's unexpected == 0 gate — blocks pruning too.
-// Callers surface it rather than letting it pass as "no rules to apply".
-async function loadRules(dir) {
-  let entries;
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return { rules: [], skipped: [] };
-  }
-  const rules = [];
-  const skipped = [];
-  for (const f of entries.sort()) {
-    if (!f.endsWith(".mjs")) continue;
-    let mod;
-    try {
-      mod = await import(pathToFileURL(join(dir, f)).href);
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(
-        `scripts/diff-rules/${f} failed to load (broken import? a delegate rule file may have been pruned out from under it): ${reason}`,
-        { cause: e },
-      );
-    }
-    if (typeof mod.matches !== "function") {
-      skipped.push(f);
-      continue;
-    }
-    rules.push({
-      id: mod.id || f.replace(/\.mjs$/, ""),
-      file: f,
-      reason: mod.reason || "",
-      // Prunability declaration, consumed by prune-diff-rules.yml:
-      //   true  — transient "shipped fix" rule. Once prod serves the new
-      //           behaviour the rule only masks stale captures, so the pruner
-      //           may open a PR deleting it.
-      //   false — permanent rule masking drift that no code change causes
-      //           (e.g. the out-of-band `archived:list` KV set). It matches
-      //           against prod indefinitely and must never be pruned.
-      //   null  — undeclared. Treated as unprunable; the pruner warns so the
-      //           omission is visible instead of silently disabling pruning.
-      prunable: typeof mod.prunable === "boolean" ? mod.prunable : null,
-      matches: mod.matches,
-    });
-  }
-  return { rules, skipped };
-}
-
 async function replayOne(targetUrl, request) {
   const body = new URLSearchParams();
   if (request.type) body.set("type", request.type);
@@ -309,163 +265,6 @@ async function replayOne(targetUrl, request) {
   } catch {
     return { ok: false, error: `non-JSON response (status=${res.status}): ${text.slice(0, 200)}` };
   }
-}
-
-function normalize(resp) {
-  if (!resp || typeof resp !== "object") return resp;
-  const out = { ok: !!resp.ok };
-  if (resp.error) out.error = resp.error;
-  if (resp.result) {
-    out.result = {
-      kind: resp.result.kind,
-      stats: resp.result.stats,
-      diagnostics: sortDiagnostics(resp.result.diagnostics || []),
-    };
-  }
-  if (Array.isArray(resp.files)) {
-    out.files = resp.files.map((f) => ({
-      path: f.path,
-      ok: f.ok,
-      error: f.error,
-      result: f.result
-        ? {
-            kind: f.result.kind,
-            stats: f.result.stats,
-            diagnostics: sortDiagnostics(f.result.diagnostics || []),
-          }
-        : undefined,
-    }));
-  }
-  return out;
-}
-
-function sortDiagnostics(diags) {
-  return [...diags].sort((a, b) => {
-    const ra = a.rule || "";
-    const rb = b.rule || "";
-    if (ra !== rb) return ra < rb ? -1 : 1;
-    const sa = a.severity || "";
-    const sb = b.severity || "";
-    if (sa !== sb) return sa < sb ? -1 : 1;
-    const ma = a.message || "";
-    const mb = b.message || "";
-    if (ma !== mb) return ma < mb ? -1 : 1;
-    return 0;
-  });
-}
-
-function computeDiff(captured, replayed) {
-  const diffs = [];
-  if (captured.ok !== replayed.ok) {
-    diffs.push({ kind: "ok-mismatch", captured: captured.ok, replayed: replayed.ok });
-  }
-
-  // Diagnostic comparison uses count maps so a duplicate diagnostic
-  // appearing N times in one side and M times in the other is treated as
-  // a real diff (Set-based comparison would collapse multiplicity).
-  const cap = collectDiagnostics(captured);
-  const rep = collectDiagnostics(replayed);
-  const onlyInCaptured = multisetSubtract(cap, rep);
-  const onlyInReplayed = multisetSubtract(rep, cap);
-  if (onlyInCaptured.length || onlyInReplayed.length) {
-    diffs.push({ kind: "diagnostics", onlyInCaptured, onlyInReplayed });
-  }
-
-  // Catch-all for everything else `normalize()` exposes — result.kind,
-  // result.stats, per-file ok/error, parse-error details, etc. Without this
-  // a PR could regress documented response metadata without failing here.
-  const capMeta = stripDiagnostics(captured);
-  const repMeta = stripDiagnostics(replayed);
-  // Use a canonical stringify (sorted object keys) so a different insertion
-  // order between prod and PR does not register as a metadata diff — we only
-  // want to flag semantic differences.
-  if (canonicalJson(capMeta) !== canonicalJson(repMeta)) {
-    diffs.push({ kind: "metadata", captured: capMeta, replayed: repMeta });
-  }
-  return diffs;
-}
-
-// Stable stringify for metadata diff comparison. The main purpose is to sort
-// object keys so insertion order doesn't show up as a diff. Inside objects we
-// drop `undefined` values (matching JSON.stringify) so `{a:1, b:undefined}`
-// canonicalizes identically to `{a:1}`. Inside arrays — and at the top level —
-// we emit `"null"` instead of JSON.stringify's literal `undefined`/`null`
-// asymmetry, so any pair of inputs always produces a comparable string.
-function canonicalJson(value) {
-  if (value === undefined) return "null";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalJson).join(",") + "]";
-  }
-  const parts = [];
-  for (const k of Object.keys(value).sort()) {
-    const v = value[k];
-    if (v === undefined) continue;
-    parts.push(JSON.stringify(k) + ":" + canonicalJson(v));
-  }
-  return "{" + parts.join(",") + "}";
-}
-
-function stripDiagnostics(resp) {
-  if (!resp || typeof resp !== "object") return resp;
-  const out = { ...resp };
-  if (out.result) {
-    const { diagnostics: _d, ...rest } = out.result;
-    out.result = rest;
-  }
-  if (Array.isArray(out.files)) {
-    out.files = out.files.map((f) => {
-      if (!f.result) return f;
-      const { diagnostics: _d, ...rest } = f.result;
-      return { ...f, result: rest };
-    });
-  }
-  return out;
-}
-
-function multisetSubtract(left, right) {
-  const counts = new Map();
-  for (const item of right) {
-    const k = diagKey(item);
-    counts.set(k, (counts.get(k) || 0) + 1);
-  }
-  const out = [];
-  for (const item of left) {
-    const k = diagKey(item);
-    const c = counts.get(k) || 0;
-    if (c > 0) counts.set(k, c - 1);
-    else out.push(item);
-  }
-  return out;
-}
-
-function collectDiagnostics(resp) {
-  if (resp.result?.diagnostics) {
-    return resp.result.diagnostics.map((d) => ({
-      rule: d.rule,
-      severity: d.severity,
-      message: d.message,
-    }));
-  }
-  if (Array.isArray(resp.files)) {
-    const out = [];
-    for (const f of resp.files) {
-      for (const d of f.result?.diagnostics || []) {
-        out.push({
-          file: f.path,
-          rule: d.rule,
-          severity: d.severity,
-          message: d.message,
-        });
-      }
-    }
-    return out;
-  }
-  return [];
-}
-
-function diagKey(d) {
-  return JSON.stringify([d.file || "", d.rule, d.severity, d.message]);
 }
 
 async function writeSummary(path, summary) {
@@ -622,32 +421,17 @@ async function main() {
       continue;
     }
 
-    // Evaluate EVERY rule rather than stopping at the first match. The first
-    // match still decides suppression and the display attribution, but the
-    // report consumed by prune-diff-rules.yml needs every rule that explains
-    // the diff: rules are tried in filename (date) order, so an older, broader
-    // rule absorbs a newer one's captures, the newer rule reports matchCount 0,
-    // and the pruner wrongly concludes its fix has not shipped — leaving a
-    // stale rule masking real regressions indefinitely.
-    let matchedRule = null;
-    const matchedIds = [];
-    for (const r of rules) {
-      let isMatch = false;
-      try {
-        isMatch = r.matches(cap, replayed, diff);
-      } catch (e) {
-        // `String(e)` rather than `e.message`: a rule that throws a non-Error
-        // (`throw null`) would otherwise make this catch block itself throw,
-        // killing the whole replay run instead of isolating the broken rule.
-        const reason = e instanceof Error ? e.message : String(e);
-        summary.threwByRule.set(r.id, (summary.threwByRule.get(r.id) || 0) + 1);
-        console.error(`rule ${r.id} threw: ${reason}`);
-        continue;
-      }
-      if (!isMatch) continue;
-      matchedIds.push(r.id);
-      if (!matchedRule) matchedRule = r;
+    // Every rule is evaluated, not just the first to match — see matchRules for
+    // why first-match attribution would undercount the report that
+    // prune-diff-rules.yml consumes. The first match still decides suppression
+    // and the display attribution.
+    const { matched, threw } = matchRules(rules, cap, replayed, diff);
+    for (const t of threw) {
+      summary.threwByRule.set(t.rule.id, (summary.threwByRule.get(t.rule.id) || 0) + 1);
+      console.error(`rule ${t.rule.id} threw: ${t.reason}`);
     }
+    const matchedRule = matched[0] || null;
+    const matchedIds = matched.map((r) => r.id);
 
     if (matchedRule) {
       summary.ignored++;
