@@ -438,10 +438,13 @@ npx wrangler r2 bucket create karinto-captures
 #    b) **Read-write** ("Object Read & Write") — used only by
 #       rebaseline-captures.yml, which runs on main after a human merges
 #       a diff-rule deletion.
-gh secret set R2_ACCESS_KEY_ID           -b "<read-only access key id>"
-gh secret set R2_SECRET_ACCESS_KEY       -b "<read-only secret access key>"
-gh secret set R2_WRITE_ACCESS_KEY_ID     -b "<read-write access key id>"
-gh secret set R2_WRITE_SECRET_ACCESS_KEY -b "<read-write secret access key>"
+#
+#    Set each one with no `-b` so the value is typed at the prompt instead of
+#    landing in shell history and `ps` output:
+gh secret set R2_ACCESS_KEY_ID            # read-only access key id
+gh secret set R2_SECRET_ACCESS_KEY        # read-only secret access key
+gh secret set R2_WRITE_ACCESS_KEY_ID      # read-write access key id
+gh secret set R2_WRITE_SECRET_ACCESS_KEY  # read-write secret access key
 
 # 5. Provision the D1 worklist and stash its id in the D1_DATABASE_ID repo
 #    variable (NOT in wrangler.jsonc — see "Environments and release flow"):

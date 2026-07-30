@@ -185,17 +185,25 @@ async function verifyWriteAccess(env) {
   const headers = sigv4Headers("PUT", url, env.accessKey, env.secretKey, body);
   headers["content-type"] = "application/json";
   const res = await fetchWithTimeout(url, { method: "PUT", headers, body });
-  if (res.status === 403) {
-    throw new Error(
-      `R2 write preflight failed (403 AccessDenied). The configured token has ` +
-        `read-only access. Create a token scoped to "Object Read & Write" on the ` +
-        `${env.bucket} bucket and set R2_WRITE_ACCESS_KEY_ID / R2_WRITE_SECRET_ACCESS_KEY ` +
-        `as repo secrets. See DEVELOPMENT.md § "Dark-launch (capture & replay)" for details.`,
-    );
-  }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`R2 write preflight failed (${res.status}): ${text}`);
+    // R2 answers 403 for several distinct auth failures: AccessDenied (the token
+    // lacks the permission), SignatureDoesNotMatch (secret is wrong / mangled),
+    // NotEntitled (account not subscribed to R2). Only the first means "grant
+    // write scope" — telling an operator to widen a token that is already
+    // correct would send them chasing the wrong fix, so key off the error code.
+    const code = text.match(/<Code>([^<]*)<\/Code>/)?.[1] ?? "";
+    if (res.status === 403 && code === "AccessDenied") {
+      throw new Error(
+        `R2 write preflight failed (403 AccessDenied). The configured token has ` +
+          `read-only access. Create a token scoped to "Object Read & Write" on the ` +
+          `${env.bucket} bucket and set R2_WRITE_ACCESS_KEY_ID / R2_WRITE_SECRET_ACCESS_KEY ` +
+          `as repo secrets. See DEVELOPMENT.md § "Dark-launch (capture & replay)" for details.`,
+      );
+    }
+    throw new Error(
+      `R2 write preflight failed (${res.status}${code ? ` ${code}` : ""}): ${text}`,
+    );
   }
   console.log("write preflight: OK");
 }
