@@ -181,7 +181,7 @@ async function r2Get(env, key) {
 async function verifyWriteAccess(env) {
   const probeKey = "_rebaseline-write-probe.json";
   const body = JSON.stringify({ ts: new Date().toISOString(), purpose: "write-preflight" });
-  const url = `${env.endpoint}/${env.bucket}/${probeKey}`;
+  const url = `${env.endpoint}/${env.bucket}/${encodeURI(probeKey)}`;
   const headers = sigv4Headers("PUT", url, env.accessKey, env.secretKey, body);
   headers["content-type"] = "application/json";
   const res = await fetchWithTimeout(url, { method: "PUT", headers, body });
@@ -190,7 +190,7 @@ async function verifyWriteAccess(env) {
       `R2 write preflight failed (403 AccessDenied). The configured token has ` +
         `read-only access. Create a token scoped to "Object Read & Write" on the ` +
         `${env.bucket} bucket and set R2_WRITE_ACCESS_KEY_ID / R2_WRITE_SECRET_ACCESS_KEY ` +
-        `as repo secrets. See DEVELOPMENT.md § "Dark-launch replay system" for details.`,
+        `as repo secrets. See DEVELOPMENT.md § "Dark-launch (capture & replay)" for details.`,
     );
   }
   if (!res.ok) {
