@@ -29,6 +29,30 @@
 // rewritten only when prod returns an `ok` response that differs from the
 // stored one, so a prod outage cannot bake an error into the baseline.
 //
+// Which rules a rebaseline kills, and why this script has to be the one to say
+// so
+// ------------------------------------------------------------------------
+// Refreshing the bucket does not only clear the diff the pruned rule covered —
+// it clears EVERY prod-vs-capture diff, so every other transient rule that was
+// masking one stops matching too. Those rules are then dead code that
+// prune-diff-rules.yml can never remove: it gates on `matchCount > 0` as proof
+// the fix shipped, and they now match nothing.
+//
+// The pruner cannot recover this by relaxing that gate, because `matchCount == 0`
+// conflates two opposite states — "the fix has not shipped yet" (prod and
+// captures both still serve the old behaviour, so no diff exists and the rule
+// is about to become necessary) and "the captures are already fresh" (the rule
+// is genuinely dead). A gate keyed on age or on absence of match would delete
+// rules whose release is still pending.
+//
+// This script can tell them apart, because it is the causal agent and it looks
+// before it writes: for each capture it is about to overwrite it asks which
+// rules explain the diff that is about to be destroyed. A rule in that set was
+// demonstrably suppressing a real prod-vs-capture diff — the same evidence
+// standard as the pruner's gate — and is invalidated by this run. A
+// not-yet-shipped rule matches nothing pre-write, so it is correctly left out.
+// The result is reported, never acted on: see `attributeInvalidatedRules`.
+//
 // Usage:
 //   node scripts/rebaseline-captures.mjs --target <prod-url> [--limit N] [--dry-run]
 //
@@ -37,12 +61,31 @@
 //   R2_SECRET_ACCESS_KEY  matching secret
 //   R2_ACCOUNT_ID         Cloudflare account ID (for the S3 endpoint host)
 // Optional env:
-//   R2_BUCKET                defaults to "karinto-captures"
-//   REBASELINE_SUMMARY_PATH  if set, writes a markdown summary to this path
-//   GITHUB_STEP_SUMMARY      if set, the markdown summary is appended here too
+//   R2_BUCKET                  defaults to "karinto-captures"
+//   REBASELINE_SUMMARY_PATH    if set, writes a markdown summary to this path
+//   GITHUB_STEP_SUMMARY        if set, the markdown summary is appended here too
+//   REBASELINE_REPORT_PATH     if set, writes JSON per-rule invalidation
+//                              attribution (consumed by
+//                              rebaseline-captures.yml to open a pruning PR)
 
 import { createHash, createHmac } from "node:crypto";
 import { appendFile, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+
+// Response comparison and rule evaluation are shared with scripts/replay.mjs.
+// The rule contract `matches(capture, replayed, diff)` is written against the
+// diff shapes produced there, so attribution here has to use the same
+// implementation replay uses — a second one would drift and silently
+// mis-attribute.
+import {
+  canonicalJson,
+  collectDiagnostics,
+  computeDiff,
+  loadRules,
+  matchRules,
+  multisetSubtract,
+  normalize,
+} from "./lib/replay-diff.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -322,103 +365,45 @@ async function replayOne(targetUrl, request) {
   }
 }
 
-function normalize(resp) {
-  if (!resp || typeof resp !== "object") return resp;
-  const out = { ok: !!resp.ok };
-  if (resp.error) out.error = resp.error;
-  if (resp.result) {
-    out.result = {
-      kind: resp.result.kind,
-      stats: resp.result.stats,
-      diagnostics: sortDiagnostics(resp.result.diagnostics || []),
-    };
-  }
-  if (Array.isArray(resp.files)) {
-    out.files = resp.files.map((f) => ({
-      path: f.path,
-      ok: f.ok,
-      error: f.error,
-      result: f.result
-        ? {
-            kind: f.result.kind,
-            stats: f.result.stats,
-            diagnostics: sortDiagnostics(f.result.diagnostics || []),
-          }
-        : undefined,
-    }));
-  }
-  return out;
-}
+// ---------------------------------------------------------------------------
+// Invalidated-rule attribution
+// ---------------------------------------------------------------------------
 
-function sortDiagnostics(diags) {
-  return [...diags].sort((a, b) => {
-    const ra = a.rule || "";
-    const rb = b.rule || "";
-    if (ra !== rb) return ra < rb ? -1 : 1;
-    const sa = a.severity || "";
-    const sb = b.severity || "";
-    if (sa !== sb) return sa < sb ? -1 : 1;
-    const ma = a.message || "";
-    const mb = b.message || "";
-    if (ma !== mb) return ma < mb ? -1 : 1;
-    return 0;
-  });
-}
+// Ask which rules explain the diff that this capture's overwrite is about to
+// destroy. Called with the PRE-write responses, so the answer is "what was this
+// rule still doing for us", not "what is left afterwards" (afterwards the answer
+// is always "nothing", which is exactly the ambiguity the header comment
+// describes).
+//
+// Purely observational: it records counts and never influences whether the
+// capture is written. `main` also wraps the whole attribution pass so that a
+// failure here degrades the report to "unavailable" rather than aborting a
+// bake-in half-way through the bucket — a partially rewritten baseline is the
+// worst outcome this workflow can produce.
+export function attributeInvalidatedRules(rules, cap, replayed, stats) {
+  const diff = computeDiff(normalize(cap.response), normalize(replayed));
+  // No diff the rules can see. This happens even for captures being rewritten:
+  // the responses differ as JSON, but only in fields outside what computeDiff
+  // compares (see its note). Nothing was being suppressed here, so nothing is
+  // invalidated.
+  if (diff.length === 0) return;
 
-function canonicalJson(value) {
-  if (value === undefined) return "null";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
-  const parts = [];
-  for (const k of Object.keys(value).sort()) {
-    const v = value[k];
-    if (v === undefined) continue;
-    parts.push(JSON.stringify(k) + ":" + canonicalJson(v));
+  stats.ruleVisible++;
+  const { matched, threw } = matchRules(rules, cap, replayed, diff);
+  for (const t of threw) {
+    stats.threwByRule.set(t.rule.id, (stats.threwByRule.get(t.rule.id) || 0) + 1);
+    console.error(`rule ${t.rule.id} threw during attribution: ${t.reason}`);
   }
-  return "{" + parts.join(",") + "}";
-}
-
-function collectDiagnostics(resp) {
-  if (resp.result?.diagnostics) {
-    return resp.result.diagnostics.map((d) => ({ rule: d.rule, severity: d.severity, message: d.message }));
+  for (const r of matched) {
+    stats.invalidatedByRule.set(r.id, (stats.invalidatedByRule.get(r.id) || 0) + 1);
   }
-  if (Array.isArray(resp.files)) {
-    const out = [];
-    for (const f of resp.files) {
-      for (const d of f.result?.diagnostics || []) {
-        out.push({ file: f.path, rule: d.rule, severity: d.severity, message: d.message });
-      }
-    }
-    return out;
-  }
-  return [];
-}
-
-function diagKey(d) {
-  return JSON.stringify([d.file || "", d.rule, d.severity, d.message]);
-}
-
-function multisetSubtract(left, right) {
-  const counts = new Map();
-  for (const item of right) {
-    const k = diagKey(item);
-    counts.set(k, (counts.get(k) || 0) + 1);
-  }
-  const out = [];
-  for (const item of left) {
-    const k = diagKey(item);
-    const c = counts.get(k) || 0;
-    if (c > 0) counts.set(k, c - 1);
-    else out.push(item);
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
-function buildSummary(summary) {
+export function buildSummary(summary) {
   const lines = [];
   lines.push("## Capture rebaseline");
   lines.push("");
@@ -445,6 +430,69 @@ function buildSummary(summary) {
     lines.push("|---|---|---|");
     for (const [rule, d] of ruleRows) {
       lines.push(`| \`${rule}\` | ${d.added} | ${d.removed} |`);
+    }
+  }
+
+  // The rules this run killed. Without this section the only trace is that some
+  // rule quietly stops matching, which the pruner reads as "not shipped yet".
+  const a = summary.attribution;
+  lines.push("");
+  lines.push("### Ignore rules invalidated by this rebaseline");
+  lines.push("");
+  if (!a.available) {
+    lines.push(`Attribution unavailable: ${a.unavailableReason}`);
+    lines.push("");
+    lines.push("The rebaseline itself completed; only this report is missing.");
+  } else {
+    const invalidated = classifyInvalidated(a);
+    if (invalidated.length === 0) {
+      lines.push("None — no rule explained any diff this run baked in.");
+    } else {
+      lines.push("| rule | captures | prunable | verdict |");
+      lines.push("|---|---|---|---|");
+      for (const r of invalidated) {
+        lines.push(
+          `| \`${r.id}\` | ${r.invalidatedCount}${r.threwCount ? ` (+${r.threwCount} threw)` : ""} ` +
+            `| ${r.prunable === null ? "_undeclared_" : `\`${r.prunable}\``} | ${r.verdict} |`,
+        );
+      }
+      const deletable = invalidated.filter((r) => r.deletable);
+      lines.push("");
+      if (deletable.length > 0) {
+        lines.push(
+          `**${deletable.length} rule(s) are now dead** and can be deleted: ` +
+            deletable.map((r) => `\`scripts/diff-rules/${r.file}\``).join(", ") + ".",
+        );
+        lines.push("");
+        lines.push(
+          "They each explained a real prod-vs-capture diff that this run has now " +
+            "baked in, so they suppress nothing from here on. `prune-diff-rules.yml` " +
+            "cannot find them on its own: it gates on `matchCount > 0` as proof the " +
+            "fix shipped, and that evidence no longer exists.",
+        );
+      } else {
+        lines.push("No rule is proposed for deletion — see the verdicts above.");
+      }
+    }
+    if (a.partial) {
+      lines.push("");
+      lines.push(
+        `> **Partial run** — \`--limit\` examined only ${summary.replayed} capture(s), ` +
+          "so absence from this table does not prove a rule is dead elsewhere in the bucket.",
+      );
+    }
+    // A skipped capture keeps its stale response, so its diff survives this run
+    // and was never attributed. That cannot produce a bogus "safe to delete"
+    // on its own — the verdict is earned from diffs actually destroyed — but a
+    // rule listed here could still be carrying one of these, so say so.
+    if (summary.skipped > 0) {
+      lines.push("");
+      lines.push(
+        `> **${summary.skipped} capture(s) skipped** (prod did not return \`ok\`) and were ` +
+          "left stale, so they were not examined. If a rule below is the only thing " +
+          "explaining one of them, deleting it will resurface that diff — re-run once " +
+          "prod is healthy to get a clean reading.",
+      );
     }
   }
 
@@ -490,6 +538,50 @@ async function main() {
   // here gives an actionable error before any slow replay work starts.
   await verifyWriteAccess(env);
 
+  // Load the ignore rules so each overwrite can be attributed to the rules it
+  // invalidates (see the header). Attribution is a reporting feature, so a load
+  // failure must not stop the bake-in: record why it is unavailable and carry on
+  // with an empty rule set. `loadRules` throws when a surviving rule imports a
+  // deleted delegate — exactly the state a just-merged pruning PR can leave — and
+  // refusing to rebaseline then would strand the captures stale with the rules
+  // already gone, which is the situation this whole workflow exists to end.
+  const attribution = {
+    available: true,
+    unavailableReason: null,
+    // Only meaningful for a whole-bucket run. With `--limit N` the unexamined
+    // captures may still hold diffs that some rule explains, so absence from
+    // the invalidated set proves nothing.
+    partial: Number.isFinite(args.limit),
+    rules: [],
+    // ruleId -> captures whose about-to-be-destroyed diff this rule explained.
+    invalidatedByRule: new Map(),
+    // ruleId -> captures where `matches()` threw. A rule that throws explains
+    // nothing, so its silence must not be read as "not invalidated".
+    threwByRule: new Map(),
+    // Rewritten captures whose diff the rules could actually see. The rest
+    // differ only outside computeDiff's comparison, so no rule could have been
+    // suppressing them.
+    ruleVisible: 0,
+  };
+  try {
+    const { rules, skipped } = await loadRules();
+    attribution.rules = rules;
+    console.log(`loaded ${rules.length} ignore rule(s) for invalidation attribution`);
+    if (skipped.length > 0) {
+      console.error(
+        `WARNING: ignoring ${skipped.join(", ")} — exports no \`matches\` function, ` +
+          `so it suppresses nothing and cannot be attributed.`,
+      );
+    }
+  } catch (e) {
+    attribution.available = false;
+    attribution.unavailableReason = e instanceof Error ? e.message : String(e);
+    console.error(
+      `WARNING: could not load ignore rules; invalidated-rule attribution is ` +
+        `unavailable for this run: ${attribution.unavailableReason}`,
+    );
+  }
+
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);
 
@@ -502,6 +594,7 @@ async function main() {
     skipped: 0,
     ruleDeltas: new Map(),
     changed: [],
+    attribution,
   };
 
   for (const cap of captures) {
@@ -536,6 +629,23 @@ async function main() {
 
     summary.changed.push({ hash: cap.hash, added: added.length, removed: removed.length });
 
+    // Attribute BEFORE the write, while the diff still exists. Runs under
+    // --dry-run too: nothing is written there, but "which rules would this bake
+    // in kill" is exactly what a dry run is for. Wrapped so a misbehaving rule
+    // cannot abort the loop and leave the bucket half-rewritten.
+    if (attribution.available) {
+      try {
+        attributeInvalidatedRules(attribution.rules, cap, replayed, attribution);
+      } catch (e) {
+        attribution.available = false;
+        attribution.unavailableReason = e instanceof Error ? e.message : String(e);
+        console.error(
+          `WARNING: invalidated-rule attribution failed and is disabled for the ` +
+            `rest of this run; the rebaseline continues: ${attribution.unavailableReason}`,
+        );
+      }
+    }
+
     if (!args.dryRun) {
       // Plain put (no `onlyIf`): the whole point is to overwrite the frozen
       // response. Preserve `first_seen` — the timestamp diff-rule cutoffs
@@ -563,6 +673,40 @@ async function main() {
   console.log(`unchanged:   ${summary.unchanged}`);
   console.log(`skipped:     ${summary.skipped}`);
 
+  const invalidated = classifyInvalidated(attribution);
+  console.log("");
+  if (!attribution.available) {
+    console.log(`invalidated rules: unavailable (${attribution.unavailableReason})`);
+  } else {
+    console.log(
+      `rule-visible diffs: ${attribution.ruleVisible} of ${summary.rebaselined} ` +
+        `rebaselined capture(s)`,
+    );
+    if (invalidated.length === 0) {
+      console.log("invalidated rules: none — no rule explained any diff baked in here");
+    } else {
+      console.log("invalidated rules:");
+      for (const r of invalidated) {
+        console.log(
+          `  ${r.id}\tcaptures=${r.invalidatedCount}\tthrew=${r.threwCount}\t` +
+            `prunable=${r.prunable}\t${r.verdict}`,
+        );
+      }
+    }
+    if (attribution.partial) {
+      console.log(
+        `NOTE: --limit run — only ${summary.replayed} capture(s) were examined, so ` +
+          `absence from this list does NOT mean a rule is still needed elsewhere.`,
+      );
+    }
+    if (summary.skipped > 0) {
+      console.log(
+        `NOTE: ${summary.skipped} capture(s) were skipped (prod not ok) and left stale, ` +
+          `so their diffs were not attributed.`,
+      );
+    }
+  }
+
   const md = buildSummary(summary);
   if (process.env.REBASELINE_SUMMARY_PATH) {
     await writeFile(process.env.REBASELINE_SUMMARY_PATH, md);
@@ -570,9 +714,77 @@ async function main() {
   if (process.env.GITHUB_STEP_SUMMARY) {
     await appendFile(process.env.GITHUB_STEP_SUMMARY, md);
   }
+
+  // Machine-readable attribution for rebaseline-captures.yml.
+  //
+  // `deletable` is the only field the workflow acts on, and it is deliberately
+  // narrow: the rule explained at least one diff this run destroyed, never threw
+  // while doing so, declares `prunable = true`, and the run covered the whole
+  // bucket. Anything else is reported but not proposed for deletion — a rule that
+  // threw says nothing either way, a `prunable = false` rule masks drift that will
+  // come back (`archived-uses-baseline`), and a `--limit` run has not looked at
+  // enough of the bucket to conclude anything.
+  if (process.env.REBASELINE_REPORT_PATH) {
+    const report = {
+      target: summary.target,
+      dryRun: summary.dryRun,
+      replayed: summary.replayed,
+      rebaselined: summary.rebaselined,
+      unchanged: summary.unchanged,
+      skipped: summary.skipped,
+      attributionAvailable: attribution.available,
+      attributionUnavailableReason: attribution.unavailableReason,
+      partial: attribution.partial,
+      ruleVisibleDiffs: attribution.ruleVisible,
+      rules: invalidated,
+    };
+    await writeFile(process.env.REBASELINE_REPORT_PATH, JSON.stringify(report, null, 2));
+  }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(2);
-});
+// Turn the raw counters into a per-rule verdict. Only rules that actually
+// explained a destroyed diff appear — a rule that matched nothing was either
+// not yet shipped or already dead, and this run has no evidence to tell those
+// apart (see the header comment).
+export function classifyInvalidated(attribution) {
+  const out = [];
+  for (const r of attribution.rules) {
+    const invalidatedCount = attribution.invalidatedByRule.get(r.id) || 0;
+    const threwCount = attribution.threwByRule.get(r.id) || 0;
+    if (invalidatedCount === 0 && threwCount === 0) continue;
+    let verdict;
+    if (threwCount > 0) {
+      verdict = "unattributable (matches() threw; repair the rule)";
+    } else if (r.prunable === true) {
+      verdict = attribution.partial
+        ? "shipped, but --limit run — verify over the whole bucket before deleting"
+        : "safe to delete";
+    } else if (r.prunable === false) {
+      verdict = "keep (permanent rule — the drift it masks will reopen)";
+    } else {
+      verdict = "keep (no `prunable` declaration — add one, see scripts/diff-rules/README.md)";
+    }
+    out.push({
+      id: r.id,
+      file: r.file,
+      reason: r.reason,
+      invalidatedCount,
+      threwCount,
+      prunable: r.prunable,
+      deletable: threwCount === 0 && r.prunable === true && !attribution.partial,
+      verdict,
+    });
+  }
+  out.sort((a, b) => b.invalidatedCount - a.invalidatedCount);
+  return out;
+}
+
+// Only start a rebaseline when invoked as a CLI. The attribution helpers above
+// are exported for scripts/rebaseline-captures.test.mjs, and importing this file
+// must not begin overwriting the production baseline as a side effect.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(2);
+  });
+}

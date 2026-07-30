@@ -10,6 +10,10 @@ name: lint
 #     `replay.mjs --check-rules` so a rule that fails to import, or that omits
 #     the `prunable` declaration prune-diff-rules.yml gates on, is caught here
 #     rather than at release time.
+#   * The unit tests for the replay/rebaseline diff logic (`node --test`). The
+#     rule contract is written against the diff shapes in scripts/lib, and both
+#     replay.mjs and rebaseline-captures.mjs read them — a regression there
+#     changes which rules are considered to match, which fails silently.
 #
 # `lint` is a required status check, so the workflow must report a check run
 # on every PR — a trigger-level `paths:` filter would leave non-matching PRs
@@ -26,6 +30,12 @@ on:
       - ghalint.yaml
       - scripts/diff-rules/**
       - scripts/replay.mjs
+      - scripts/rebaseline-captures.mjs
+      # Glob, not the individual file: the diff/rule logic these checks cover
+      # lives here and is imported by both scripts, so any module added later
+      # must trigger them too. Naming files one by one is how a shared module
+      # ends up silently unchecked.
+      - scripts/lib/**
 
 # Default to no privileges; each job opts into exactly what it needs.
 permissions: {}
@@ -50,6 +60,10 @@ jobs:
               - 'ghalint.yaml'
               - 'scripts/diff-rules/**'
               - 'scripts/replay.mjs'
+              - 'scripts/rebaseline-captures.mjs'
+              # Keep in step with the trigger `paths:` above — see the comment
+              # there for why this is a glob.
+              - 'scripts/lib/**'
 
   lint:
     needs: changes
@@ -103,3 +117,12 @@ jobs:
       # from having to refuse to act on an incomplete report.
       - name: diff-rules
         run: node scripts/replay.mjs --check-rules
+
+      # The diff shapes the rule contract is written against, plus the verdicts
+      # rebaseline-captures.mjs derives from them. Both are decision logic whose
+      # failure mode is silence — a rule that stops matching reads as "the fix
+      # has not shipped" rather than as a bug — so they are covered by tests
+      # rather than left to a real run to expose. Quoted glob so a test file
+      # added later is picked up without editing this line.
+      - name: diff-logic tests
+        run: node --test "scripts/**/*.test.mjs"
