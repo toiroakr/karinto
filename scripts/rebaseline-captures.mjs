@@ -66,8 +66,9 @@
 //   REBASELINE_SUMMARY_PATH    if set, writes a markdown summary to this path
 //   GITHUB_STEP_SUMMARY        if set, the markdown summary is appended here too
 //   REBASELINE_REPORT_PATH     if set, writes JSON per-rule invalidation
-//                              attribution (consumed by
-//                              rebaseline-captures.yml to open a pruning PR)
+//                              attribution. rebaseline-captures.yml reads it to
+//                              annotate the run with the rules that are now
+//                              dead; deleting them is a manual commit.
 
 import { createHash, createHmac } from "node:crypto";
 import { appendFile, writeFile } from "node:fs/promises";

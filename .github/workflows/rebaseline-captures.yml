@@ -274,10 +274,20 @@ jobs:
           # `deletable` already encodes every gate: the rule explained a diff
           # this run destroyed, never threw, declares prunable = true, and the
           # run covered the whole bucket. Do not widen it here.
+          # Distinguish "nothing was invalidated" from "something was, but none of
+          # it is safe to delete". The second case is the normal outcome for a
+          # permanent rule, a --limit run, or a rule whose matches() threw, and
+          # reporting it as "nothing invalidated" would hide a rule that a human
+          # may still need to look at.
+          TOTAL=$(jq '.rules | length' "$REPORT")
           COUNT=$(jq '[.rules[] | select(.deletable)] | length' "$REPORT")
           if [ "$COUNT" = "0" ]; then
-            echo "No ignore rule was invalidated by this run."
-            jq -r '.rules[] | "kept: \(.id) — \(.verdict)"' "$REPORT"
+            if [ "$TOTAL" = "0" ]; then
+              echo "No ignore rule was invalidated by this run."
+            else
+              echo "${TOTAL} ignore rule(s) were invalidated, but none is proposed for deletion:"
+              jq -r '.rules[] | "kept: \(.id) — \(.verdict)"' "$REPORT"
+            fi
             exit 0
           fi
 
