@@ -81,17 +81,13 @@ import {
   classifyInvalidated,
 } from "./lib/rebaseline-report.mjs";
 
-// Response comparison and rule evaluation are shared with scripts/replay.mjs.
-// The rule contract `matches(capture, replayed, diff)` is written against the
-// diff shapes produced there, so attribution here has to use the same
-// implementation replay uses — a second one would drift and silently
-// mis-attribute.
+// Response comparison shared with scripts/replay.mjs, so "the response changed"
+// means the same thing on both sides. The diff-shape and rule-matching half of
+// that module is used by rebaseline-report.mjs, not here.
 import {
   canonicalJson,
   collectDiagnostics,
-  computeDiff,
   loadRules,
-  matchRules,
   multisetSubtract,
   normalize,
 } from "./lib/replay-diff.mjs";
