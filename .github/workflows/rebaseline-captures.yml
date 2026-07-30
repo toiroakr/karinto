@@ -189,14 +189,19 @@ jobs:
       - name: Rebaseline captures
         if: steps.signal.outputs.run == 'true'
         env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Write-capable token for rebaseline. The default R2_* token is
+          # read-only (intentionally — PR-triggered replay workflows must not
+          # carry write credentials to the captures bucket). Fallback to R2_*
+          # so the workflow still tries if only the old secret exists, but the
+          # script's write preflight will catch a read-only token immediately.
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           # All three R2 credentials are required by the script — fail the run
           # loudly if any is missing rather than silently skipping the bake-in.
           if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
-            echo "R2 credentials not fully set; cannot rebaseline." >&2
+            echo "R2 credentials (R2_WRITE_ACCESS_KEY_ID / R2_WRITE_SECRET_ACCESS_KEY / CLOUDFLARE_ACCOUNT_ID) not fully set; cannot rebaseline." >&2
             exit 1
           fi
           DRY_FLAG=""

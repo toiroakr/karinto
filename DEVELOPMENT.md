@@ -429,12 +429,19 @@ npx wrangler r2 bucket create karinto-captures
 # 3. In the Cloudflare dashboard: R2 → karinto-captures → Lifecycle rules
 #    Add: "Delete objects older than 30 days", prefix `captures/`.
 
-# 4. Create an R2 API token (Dashboard → R2 → Manage R2 API Tokens →
-#    "Create API Token"). Scope it to **Object Read only** on the
-#    `karinto-captures` bucket. Save the Access Key ID + Secret Access Key
-#    as GitHub repo secrets:
-gh secret set R2_ACCESS_KEY_ID     -b "<access key id>"
-gh secret set R2_SECRET_ACCESS_KEY -b "<secret access key>"
+# 4. Create TWO R2 API tokens (Dashboard → R2 → Manage R2 API Tokens →
+#    "Create API Token"), both scoped to the `karinto-captures` bucket:
+#
+#    a) **Read-only** ("Object Read only") — used by PR-triggered replay.
+#       PR workflows run on untrusted code, so they must not carry write
+#       credentials to the captures bucket.
+#    b) **Read-write** ("Object Read & Write") — used only by
+#       rebaseline-captures.yml, which runs on main after a human merges
+#       a diff-rule deletion.
+gh secret set R2_ACCESS_KEY_ID           -b "<read-only access key id>"
+gh secret set R2_SECRET_ACCESS_KEY       -b "<read-only secret access key>"
+gh secret set R2_WRITE_ACCESS_KEY_ID     -b "<read-write access key id>"
+gh secret set R2_WRITE_SECRET_ACCESS_KEY -b "<read-write secret access key>"
 
 # 5. Provision the D1 worklist and stash its id in the D1_DATABASE_ID repo
 #    variable (NOT in wrangler.jsonc — see "Environments and release flow"):
