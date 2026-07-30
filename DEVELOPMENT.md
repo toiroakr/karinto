@@ -503,8 +503,9 @@ PR adds the rule       ──▶  merged, unreleased  ──▶  release ships t
                      ("bake this in")        `main` push, rewrites the captures
                                              from current prod, diffs gone
                                                         │
-                                     reports which OTHER rules that killed
-                                     (see "Collateral rules" below)
+                                     ...and reports which OTHER rules it
+                                     killed doing so — see "Collateral
+                                     rules" below
 ```
 
 The pruner **refuses to act** while the detection replay reports unexplained
