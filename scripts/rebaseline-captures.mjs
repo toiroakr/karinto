@@ -175,6 +175,39 @@ async function r2Get(env, key) {
   return res.text();
 }
 
+// Preflight: verify the token can write before doing any real work. The probe
+// key lives outside `captures/` so fetchCaptures never lists it; on 403 the
+// error message tells the operator exactly which permission to grant.
+async function verifyWriteAccess(env) {
+  const probeKey = "_rebaseline-write-probe.json";
+  const body = JSON.stringify({ ts: new Date().toISOString(), purpose: "write-preflight" });
+  const url = `${env.endpoint}/${env.bucket}/${encodeURI(probeKey)}`;
+  const headers = sigv4Headers("PUT", url, env.accessKey, env.secretKey, body);
+  headers["content-type"] = "application/json";
+  const res = await fetchWithTimeout(url, { method: "PUT", headers, body });
+  if (!res.ok) {
+    const text = await res.text();
+    // R2 answers 403 for several distinct auth failures: AccessDenied (the token
+    // lacks the permission), SignatureDoesNotMatch (secret is wrong / mangled),
+    // NotEntitled (account not subscribed to R2). Only the first means "grant
+    // write scope" — telling an operator to widen a token that is already
+    // correct would send them chasing the wrong fix, so key off the error code.
+    const code = text.match(/<Code>([^<]*)<\/Code>/)?.[1] ?? "";
+    if (res.status === 403 && code === "AccessDenied") {
+      throw new Error(
+        `R2 write preflight failed (403 AccessDenied). The configured token has ` +
+          `read-only access. Create a token scoped to "Object Read & Write" on the ` +
+          `${env.bucket} bucket and set R2_WRITE_ACCESS_KEY_ID / R2_WRITE_SECRET_ACCESS_KEY ` +
+          `as repo secrets. See DEVELOPMENT.md § "Dark-launch (capture & replay)" for details.`,
+      );
+    }
+    throw new Error(
+      `R2 write preflight failed (${res.status}${code ? ` ${code}` : ""}): ${text}`,
+    );
+  }
+  console.log("write preflight: OK");
+}
+
 async function r2Put(env, key, body) {
   const url = `${env.endpoint}/${env.bucket}/${encodeURI(key)}`;
   const headers = sigv4Headers("PUT", url, env.accessKey, env.secretKey, body);
@@ -451,6 +484,11 @@ async function main() {
     process.exit(2);
   }
   env.endpoint = `https://${env.accountId}.r2.cloudflarestorage.com`;
+
+  // Verify write access up front — even for --dry-run, because dry-run skips
+  // the per-capture r2Put and would otherwise never surface a 403. Catching it
+  // here gives an actionable error before any slow replay work starts.
+  await verifyWriteAccess(env);
 
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);

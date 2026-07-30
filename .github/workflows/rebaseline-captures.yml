@@ -189,14 +189,44 @@ jobs:
       - name: Rebaseline captures
         if: steps.signal.outputs.run == 'true'
         env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Both candidate credential pairs are passed in; the pair is chosen in
+          # the shell below (an `||` per variable could mix a write key id with a
+          # legacy secret, which fails later as an opaque signature error).
+          #
+          # The write-capable token is separate from the read-only R2_* one on
+          # purpose: PR-triggered replay workflows run untrusted code and must
+          # not carry write credentials to the captures bucket. Only this
+          # workflow — which runs on main after a human merges a diff-rule
+          # deletion — gets the write pair.
+          WRITE_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID }}
+          WRITE_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY }}
+          LEGACY_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          LEGACY_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -euo pipefail
+
+          # Select the key id and secret as an atomic pair. A half-configured
+          # R2_WRITE_* pair (one secret set, the other not) is an operator
+          # mistake, not a reason to silently splice in the legacy secret — that
+          # would surface as a signature mismatch with no hint at the cause.
+          if [ -n "${WRITE_ACCESS_KEY_ID:-}" ] && [ -n "${WRITE_SECRET_ACCESS_KEY:-}" ]; then
+            export R2_ACCESS_KEY_ID="$WRITE_ACCESS_KEY_ID"
+            export R2_SECRET_ACCESS_KEY="$WRITE_SECRET_ACCESS_KEY"
+          elif [ -n "${WRITE_ACCESS_KEY_ID:-}" ] || [ -n "${WRITE_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::R2_WRITE_ACCESS_KEY_ID and R2_WRITE_SECRET_ACCESS_KEY must both be set (only one is). Refusing to fall back to a mismatched credential pair."
+            exit 1
+          else
+            # Legacy fallback. The old R2_* token is read-only, so the script's
+            # write preflight will fail fast with an actionable message.
+            export R2_ACCESS_KEY_ID="${LEGACY_ACCESS_KEY_ID:-}"
+            export R2_SECRET_ACCESS_KEY="${LEGACY_SECRET_ACCESS_KEY:-}"
+          fi
+
           # All three R2 credentials are required by the script — fail the run
           # loudly if any is missing rather than silently skipping the bake-in.
           if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
-            echo "R2 credentials not fully set; cannot rebaseline." >&2
+            echo "R2 credentials not fully set; need R2_WRITE_ACCESS_KEY_ID + R2_WRITE_SECRET_ACCESS_KEY (or legacy R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY) and CLOUDFLARE_ACCOUNT_ID." >&2
             exit 1
           fi
           DRY_FLAG=""
