@@ -1,4 +1,4 @@
-// Tests for the invalidated-rule attribution in rebaseline-captures.mjs.
+// Tests for the invalidated-rule attribution reported by a capture rebaseline.
 // Run with `node --test scripts/`.
 //
 // Only 2026-05-archived-uses-baseline.mjs is left in scripts/diff-rules and the
@@ -12,7 +12,7 @@ import {
   attributeInvalidatedRules,
   buildSummary,
   classifyInvalidated,
-} from "./rebaseline-captures.mjs";
+} from "./rebaseline-report.mjs";
 
 const diag = (rule, severity = "error", message = "m") => ({ rule, severity, message });
 const capture = (diagnostics) => ({
