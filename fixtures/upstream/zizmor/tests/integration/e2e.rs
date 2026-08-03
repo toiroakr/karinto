@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::common::{NetworkMode, OutputMode, input_under_test, zizmor};
+use crate::common::{NetworkMode, OutputMode, WorkspaceBuilder, input_under_test, zizmor};
 
 mod anchors;
 mod collect;
@@ -309,7 +309,7 @@ fn invalid_inputs() -> Result<()> {
     error: no inputs collected
       |
       = help: collection yielded no auditable inputs
-      = help: inputs must contain at least one valid workflow, action, or Dependabot config
+      = help: at least one valid, auditable input must be given
 
     Caused by:
         no inputs collected
@@ -359,7 +359,7 @@ fn test_issue_1394() -> Result<()> {
     error: no inputs collected
       |
       = help: collection yielded no auditable inputs
-      = help: inputs must contain at least one valid workflow, action, or Dependabot config
+      = help: at least one valid, auditable input must be given
 
     Caused by:
         no inputs collected
@@ -666,28 +666,52 @@ fn issue_1356_lsp_mode_starts() -> Result<()> {
 /// Ensures that the `.github` prefix is not stripped from the path.
 #[test]
 fn issue_1745() -> Result<()> {
-    insta::assert_snapshot!(
-        zizmor()
-            .no_config(true)
-            .working_dir(input_under_test("issue-1745-repro"))
-            .input(".github")
-            .args(["--format=github"])
-            .run()?,
-        @"
-    ::warning file=@@WORKING_DIR@@/@@TEST_PREFIX@@/issue-1745-repro/@@INPUT@@/workflows/test.yml,line=10,title=artipacked::test.yml:10: credential persistence through GitHub Actions artifacts: does not set persist-credentials: false
-    ::error file=@@WORKING_DIR@@/@@TEST_PREFIX@@/issue-1745-repro/@@INPUT@@/workflows/test.yml,line=10,title=unpinned-uses::test.yml:10: unpinned action reference: action is not pinned to a hash (required by blanket policy)
-    "
-    );
+    let workspace = WorkspaceBuilder::new()
+        .is_git_repo(true)
+        .root_name("issue-1745-repro")
+        .build()?;
 
+    workspace.copy(&*input_under_test("issue-1745-repro/"), ".");
+
+    // Trivial case: auditing from the root produes root-relative paths in the output.
     insta::assert_snapshot!(
         zizmor()
             .no_config(true)
-            .working_dir(input_under_test("issue-1745-repro"))
+            .working_dir(workspace.path())
             .args([".", "--format=github"])
             .run()?,
         @"
-    ::warning file=@@WORKING_DIR@@/@@TEST_PREFIX@@/issue-1745-repro/.github/workflows/test.yml,line=10,title=artipacked::test.yml:10: credential persistence through GitHub Actions artifacts: does not set persist-credentials: false
-    ::error file=@@WORKING_DIR@@/@@TEST_PREFIX@@/issue-1745-repro/.github/workflows/test.yml,line=10,title=unpinned-uses::test.yml:10: unpinned action reference: action is not pinned to a hash (required by blanket policy)
+    ::warning file=.github/workflows/test.yml,line=10,title=artipacked::test.yml:10: credential persistence through GitHub Actions artifacts: does not set persist-credentials: false
+    ::error file=.github/workflows/test.yml,line=10,title=unpinned-uses::test.yml:10: unpinned action reference: action is not pinned to a hash (required by blanket policy)
+    "
+    );
+
+    // Auditing with `./.github` as the working directory still produces root-relative paths.
+    insta::assert_snapshot!(
+        zizmor()
+            .no_config(true)
+            .working_dir(workspace.path().join(".github"))
+            // Observe that we pass the input as a raw argument here and below,
+            // to avoid redaction. This makes snapshots clearer.
+            .args([".", "--format=github"])
+            .run()?,
+        @"
+    ::warning file=.github/workflows/test.yml,line=10,title=artipacked::test.yml:10: credential persistence through GitHub Actions artifacts: does not set persist-credentials: false
+    ::error file=.github/workflows/test.yml,line=10,title=unpinned-uses::test.yml:10: unpinned action reference: action is not pinned to a hash (required by blanket policy)
+    "
+    );
+
+    // Auditing with the root as the working directory and `.github` as the input
+    // still produces root-relative paths.
+    insta::assert_snapshot!(
+        zizmor()
+            .no_config(true)
+            .working_dir(workspace.path())
+            .args([".github", "--format=github"])
+            .run()?,
+        @"
+    ::warning file=.github/workflows/test.yml,line=10,title=artipacked::test.yml:10: credential persistence through GitHub Actions artifacts: does not set persist-credentials: false
+    ::error file=.github/workflows/test.yml,line=10,title=unpinned-uses::test.yml:10: unpinned action reference: action is not pinned to a hash (required by blanket policy)
     "
     );
 
@@ -886,6 +910,25 @@ fn issue_2202() -> Result<()> {
         remote input has an ambiguous Git reference ("v1" is both a tag and a branch)
     "#
     );
+
+    Ok(())
+}
+
+/// Primarily a backstop test: `neutral.yml` is what we use whenever we need
+/// a valid but completely fine workflow, so it should never have any findings in it.
+#[cfg_attr(not(feature = "gh-token-tests"), ignore)]
+#[test]
+fn test_neutral_no_findings() -> anyhow::Result<()> {
+    let findings = serde_json::from_str::<Vec<serde_json::Value>>(
+        zizmor()
+            .offline(NetworkMode::AssertOnline)
+            .args(["--format=json-v1"])
+            .input(input_under_test("neutral.yml"))
+            .run()?
+            .as_str(),
+    )?;
+
+    assert!(findings.is_empty());
 
     Ok(())
 }
