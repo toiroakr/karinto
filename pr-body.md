@@ -2,33 +2,29 @@ Refresh upstream linter pins (auto-generated).
 
 | tool | from | to | release | compare |
 | --- | --- | --- | --- | --- |
-| zizmor | 1.27.0 | 1.28.0 | [v1.28.0](https://github.com/zizmorcore/zizmor/releases/tag/v1.28.0) | [`v1.27.0...v1.28.0`](https://github.com/zizmorcore/zizmor/compare/v1.27.0...v1.28.0) |
+| zizmor | 1.28.0 | 1.29.0 | [v1.29.0](https://github.com/zizmorcore/zizmor/releases/tag/v1.29.0) | [`v1.28.0...v1.29.0`](https://github.com/zizmorcore/zizmor/compare/v1.28.0...v1.29.0) |
 
 Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.
 
 ## Upstream release notes
 
-<details><summary><b>zizmor</b> v1.28.0</summary>
+<details><summary><b>zizmor</b> v1.29.0</summary>
 
-## Security 🔒[🔗](https://docs.zizmor.sh/release-notes/#security)
+## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-features)
 
-- v1.27.0 contained a logging defect that would print any configured GitHub credentials as part of zizmor's cleartext logging. No versions other than v1.27.0 were affected. See [GHSA-f42p-wjw5-97qh](https://github.com/zizmorcore/zizmor/security/advisories/GHSA-f42p-wjw5-97qh) for full information.
+- zizmor now has **experimental** support for auditing pre-commit inputs, meaning both pre-commit configuration and hook definitions ([#2209](https://github.com/zizmorcore/zizmor/issues/2209))
 
-    Many thanks to [@shaanmajid](https://github.com/shaanmajid) for finding and reporting this vulnerability.
+- New audit: [insecure-url-scheme](https://docs.zizmor.sh/audits/#insecure-url-scheme) detects usages of insecure (i.e. plaintext) protocols when making network requests. The initial version of this audit is limited to pre-commit inputs only ([#2228](https://github.com/zizmorcore/zizmor/issues/2228))
 
-## Enhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)
+- zizmor now supports GitHub's "self-repository" reference syntax for local actions, e.g. `uses: $/foo/bar` instead of a manual checkout and `uses: ./foo/bar` ([#2248](https://github.com/zizmorcore/zizmor/issues/2248))
 
-- The JSON (v1) output format now includes metadata for each finding's fixes, if the finding has fixes ([#2186](https://github.com/zizmorcore/zizmor/issues/2186))
+## Changes ⚠️[🔗](https://docs.zizmor.sh/release-notes/#changes)
 
-- The [dependabot-cooldown](https://docs.zizmor.sh/audits/#dependabot-cooldown) audit is now aware of GitHub's new three-day default cooldown ([#2193](https://github.com/zizmorcore/zizmor/issues/2193))
+- The [unpinned-uses](https://docs.zizmor.sh/audits/#unpinned-uses) and [unpinned-images](https://docs.zizmor.sh/audits/#unpinned-images) audits have been separated more cleanly: [unpinned-uses](https://docs.zizmor.sh/audits/#unpinned-uses) is now principally responsible for Git-style `uses:` clauses, whereas [unpinned-images](https://docs.zizmor.sh/audits/#unpinned-images) is now responsible for `docker://`-style `uses:` clauses (in addition to already checking other image references) ([#2222](https://github.com/zizmorcore/zizmor/issues/2222))
 
-- sbt is now recognized as a package-ecosystem in dependabot.yml ([#2211](https://github.com/zizmorcore/zizmor/issues/2211))
+## Removals 🌅[🔗](https://docs.zizmor.sh/release-notes/#removals)
 
-## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)
-
-- Fixed a bug where the [template-injection](https://docs.zizmor.sh/audits/#template-injection) audit would incorrectly flag `steps.*.outcome` and `steps.*.conclusion` as injection risks in the default persona ([#2199](https://github.com/zizmorcore/zizmor/issues/2199))
-
-- Fixed a bug where the [github-env](https://docs.zizmor.sh/audits/#github-env) audit would i
+- `--co
 
 …(truncated — see release link)
 
