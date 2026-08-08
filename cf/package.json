@@ -11,7 +11,7 @@
     "smoke": "bash smoke.sh"
   },
   "devDependencies": {
-    "js-yaml": "^5.2.2",
+    "js-yaml": "^5.2.3",
     "wrangler": "^4.118.0"
   }
 }
