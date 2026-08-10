@@ -204,13 +204,17 @@ pub impl ToJson for LintResult with fn to_json(self) {
 /// where it fires.
 ///
 /// - `file_path`: the path of the file under lint, relative to the repo root.
-///   Used only to scope `ghalint_config` excludes by `workflow_file_path`;
-///   leave empty to apply path-less excludes only.
+///   Used to scope `ghalint_config` excludes by `workflow_file_path`, zizmor
+///   `ignore` filenames, and `karinto_config`'s `ignore-paths`; leave empty
+///   to apply only the path-less opt-outs of each.
 /// - `ghalint_config`: the raw text of a ghalint config (`ghalint.yaml`). Its
 ///   `excludes` are mapped onto karinto rules via the catalogue's `origins`
 ///   and applied with their `workflow_file_path` / `job_name` / `action_name`
-///   / `step_id` scoping. actionlint configs are not honoured: they ignore by
-///   regex against tool-specific messages, which do not map onto karinto.
+///   / `step_id` scoping. actionlint's own message-regex ignores
+///   (`paths.*.ignore` in `.github/actionlint.yaml`) are not honoured here:
+///   they match against actionlint's own error text, which does not map onto
+///   karinto's messages — see `karinto_config`'s `ignore-paths` for karinto's
+///   rule-ID-based equivalent.
 /// - `karinto_config`: the raw text of a karinto config (`karinto.yaml`), or
 ///   a compatible `.github/actionlint.yaml` — its `self-hosted-runner.labels`
 ///   and `config-variables` keys are read directly (same names/shapes as
