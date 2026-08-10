@@ -115,8 +115,25 @@ export function parseJson(source) {
   return json;
 }
 
+// Node types whose own text a shell_rules.mbt analyzer actually reads
+// (grep `\.x\b` there before adding to this list). Every other node's text
+// is a substring of some ancestor's, so omitting it keeps the bridged
+// payload from growing roughly with tree depth on deeply nested scripts —
+// `s`/`e` offsets (kept on every node) are enough for callers that only
+// need to slice back into the original source, like
+// `analyze_github_env`'s `${{ }}`-sanitization fallback.
+const TEXT_NODE_TYPES = new Set([
+  "command_name",
+  "word",
+  "variable_name",
+  "file_redirect",
+  "string",
+  "string_content",
+]);
+
 function serialize(node) {
-  const out = { t: node.type, s: node.startIndex, e: node.endIndex, x: node.text };
+  const out = { t: node.type, s: node.startIndex, e: node.endIndex };
+  if (TEXT_NODE_TYPES.has(node.type)) out.x = node.text;
   const children = node.namedChildren.filter(Boolean).map(serialize);
   if (children.length > 0) out.c = children;
   return out;

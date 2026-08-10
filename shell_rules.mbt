@@ -259,11 +259,34 @@ pub fn analyze_trusted_publishing(root : ShellNode) -> Bool {
 fn command_words(cmd : ShellNode) -> Array[String] {
   let out : Array[String] = []
   for c in cmd.c {
-    if c.t == "command_name" || c.t == "word" || c.t == "string" {
+    if c.t == "command_name" || c.t == "word" {
       out.push(c.x)
+    } else if c.t == "string" {
+      out.push(string_literal_text(c))
     }
   }
   out
+}
+
+///|
+/// A double-quoted string's literal value (surrounding quotes stripped),
+/// so a quoted flag like `"--dry-run"` still matches the bare token
+/// `--dry-run` in `command_is_publish`'s comparisons — `c.x` on the
+/// `string` node itself includes the quote characters. Only safe when the
+/// string has no expansion inside it (every child is `string_content`);
+/// falls back to the raw source span otherwise, which won't match any of
+/// this file's literal-token comparisons anyway.
+fn string_literal_text(s : ShellNode) -> String {
+  for c in s.c {
+    if c.t != "string_content" {
+      return s.x
+    }
+  }
+  let buf = StringBuilder::new()
+  for c in s.c {
+    buf.write_string(c.x)
+  }
+  buf.to_string()
 }
 
 ///|

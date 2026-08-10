@@ -183,6 +183,19 @@ test "use-trusted-publishing: npm publish --dry-run is not a real publish" {
 }
 
 ///|
+let publish_npm_dry_run_quoted : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"},{\"t\":\"string\",\"s\":12,\"e\":23,\"x\":\"\\\"--dry-run\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":13,\"e\":22,\"x\":\"--dry-run\"}]}]}]}"
+
+///|
+/// A quoted `"--dry-run"` must still be recognized as the dry-run flag —
+/// `command_words`/`string_literal_text` strip the surrounding quotes
+/// before comparing, instead of matching the raw `string` node text
+/// (`"--dry-run"` with quotes) against the literal token `--dry-run`.
+test "use-trusted-publishing: a quoted --dry-run flag is still recognized" {
+  let root = parse_shell_ast(publish_npm_dry_run_quoted).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
 let publish_pkg_pr_new_dlx : String = "{\"t\":\"program\",\"s\":0,\"e\":61,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":61,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"pnpm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"pnpm\"}]},{\"t\":\"word\",\"s\":5,\"e\":8,\"x\":\"dlx\"},{\"t\":\"word\",\"s\":9,\"e\":26,\"x\":\"pkg-pr-new@0.0.78\"},{\"t\":\"word\",\"s\":27,\"e\":34,\"x\":\"publish\"},{\"t\":\"word\",\"s\":35,\"e\":51,\"x\":\"--commentWithSha\"},{\"t\":\"word\",\"s\":52,\"e\":61,\"x\":\"--compact\"}]}]}"
 
 ///|
