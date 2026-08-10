@@ -193,6 +193,26 @@ jobs:
     expectAbsent: true,
   },
   {
+    rule: "use-trusted-publishing",
+    // A PowerShell backtick line continuation must still collapse to one
+    // logical line before tokenizing, or "npm" and "publish" each fail to
+    // match words_are_publish on their own.
+    name: "use-trusted-publishing (npm publish split across lines by a PowerShell backtick continuation)",
+    yaml: `
+on: push
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: |
+          npm \`
+            publish
+`,
+  },
+  {
     rule: "shell-quote-safety",
     yaml: `
 on: pull_request_target

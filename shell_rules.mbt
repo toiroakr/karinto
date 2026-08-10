@@ -394,6 +394,41 @@ fn analyze_trusted_publishing(root : ShellNode) -> Bool {
 }
 
 ///|
+/// Replaces a bash (`\<EOL>`) or PowerShell (`` `<EOL> ``) line
+/// continuation with a single space, so a publish command split across
+/// lines (`npm \`\n  publish`, a real invocation on a pwsh runner) still
+/// tokenizes as one logical line instead of two — `npm` alone and
+/// `publish` alone each fail to match `words_are_publish` on their own.
+/// Ported from the pre-#113 hand-rolled tokenizer's own
+/// `collapse_continuations`, which handled the same two continuation
+/// styles for the same reason.
+fn collapse_shell_continuations(s : String) -> String {
+  let chars = s.to_array()
+  let n = chars.length()
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '\\' || c == '`') && i + 1 < n {
+      let c1 = chars[i + 1]
+      if c1 == '\n' {
+        buf.write_char(' ')
+        i = i + 2
+        continue
+      }
+      if c1 == '\r' && i + 2 < n && chars[i + 2] == '\n' {
+        buf.write_char(' ')
+        i = i + 3
+        continue
+      }
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  buf.to_string()
+}
+
+///|
 /// Non-bash fallback for a `run:` script tree-sitter-bash can't parse.
 /// Unlike `unpinned-tools`/`unredacted-secrets` (whose patterns — piping to
 /// `sh`, piping through `base64`/`xxd`/etc. — are Unix-shell idioms that
@@ -409,7 +444,7 @@ fn analyze_trusted_publishing(root : ShellNode) -> Bool {
 /// tree-sitter-bash *for bash scripts*, but this only ever runs as a
 /// fallback when a real bash parse isn't applicable in the first place.
 fn text_has_publish_cmd(run : String) -> Bool {
-  for v in run.split("\n") {
+  for v in collapse_shell_continuations(run).split("\n") {
     let line = v.to_owned()
     for segment in split_command_segments(line) {
       if words_are_publish(naive_tokenize(segment)) {

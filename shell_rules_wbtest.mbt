@@ -365,6 +365,23 @@ test "use-trusted-publishing (text fallback): a plain download is not flagged" {
 }
 
 ///|
+/// A PowerShell backtick line continuation (`` `<EOL> ``) splits a single
+/// logical `npm publish` invocation across two lines — must still collapse
+/// to one line and match, not two separate non-matching fragments ("npm"
+/// alone, "publish" alone).
+test "use-trusted-publishing (text fallback): npm publish split across lines by a PowerShell backtick continuation is flagged" {
+  assert_true(text_has_publish_cmd("npm `\n  publish"))
+}
+
+///|
+/// Same continuation handling for bash's trailing backslash, in case the
+/// fallback is ever reached for a bash-ish shell tree-sitter-bash still
+/// couldn't parse for some other reason.
+test "use-trusted-publishing (text fallback): npm publish split across lines by a backslash continuation is flagged" {
+  assert_true(text_has_publish_cmd("npm \\\n  publish"))
+}
+
+///|
 let publish_npm_dry_run_quoted : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"},{\"t\":\"string\",\"s\":12,\"e\":23,\"x\":\"\\\"--dry-run\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":13,\"e\":22,\"x\":\"--dry-run\"}]}]}]}"
 
 ///|
