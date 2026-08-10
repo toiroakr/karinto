@@ -9,6 +9,9 @@
     "url": "https://github.com/toiroakr/karinto.git"
   },
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.6.0"
+  },
   "scripts": {
     "changeset": "changeset",
     "sync-version": "node scripts/sync-moon-version.mjs",

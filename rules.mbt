@@ -5601,17 +5601,29 @@ fn runs_on_labels(raw : Map[String, @yaml.Yaml]) -> Array[String] {
 /// --noprofile {0}`, `sh -e {0}`) all count — matching actionlint's own "is
 /// this shell bash-family" approach. Everything else (`pwsh`, `cmd`,
 /// `python`, `perl {0}`, ...) isn't shell syntax tree-sitter-bash can
-/// meaningfully parse. Only the first whitespace-separated token (the
-/// program) is considered, and only its basename (text after the last `/`
-/// or `\`, and stripped of a `.exe` suffix — a custom `shell:` path
-/// pointing at MSYS2/Git-Bash's `sh`/`bash` on a Windows runner uses `\`
-/// separators and usually an explicit `.exe`) — a template's trailing
-/// flags/`{0}` placeholder don't matter.
+/// meaningfully parse. Only the first token (the program) is considered,
+/// and only its basename (text after the last `/` or `\`, and stripped of
+/// a `.exe` suffix — a custom `shell:` path pointing at MSYS2/Git-Bash's
+/// `sh`/`bash` on a Windows runner uses `\` separators and usually an
+/// explicit `.exe`) — a template's trailing flags/`{0}` placeholder don't
+/// matter. The first token is normally whitespace-delimited, except when
+/// the string opens with a `"`/`'` — a quoted program path containing its
+/// own spaces (`'"C:\Program Files\Git\bin\bash.exe" -e {0}'`, needed
+/// because unquoted the space would split the path itself) — where the
+/// matching close quote is the boundary instead.
 fn is_bash_like_shell(shell : String) -> Bool {
   let lo = shell.to_lower()
-  let first_token = match lo.find(" ") {
-    Some(idx) => lo[:idx].to_owned()
-    None => lo
+  let first_token = if lo.has_prefix("\"") || lo.has_prefix("'") {
+    let quote = lo[:1].to_owned()
+    match lo[1:].find(quote) {
+      Some(idx) => lo[1:1 + idx].to_owned()
+      None => lo[1:].to_owned()
+    }
+  } else {
+    match lo.find(" ") {
+      Some(idx) => lo[:idx].to_owned()
+      None => lo
+    }
   }
   let after_fwd_slash = match first_token.rev_find("/") {
     Some(idx) => first_token[idx + 1:].to_owned()

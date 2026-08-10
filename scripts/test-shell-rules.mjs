@@ -320,6 +320,25 @@ jobs:
   },
   {
     rule: "shell-undefined-var",
+    name: 'shell-undefined-var (step shell: quoted "C:\\Program Files\\...\\bash.exe" with a space in the path, still bash-family, must fire)',
+    // is_bash_like_shell must treat a quoted program path as one token
+    // even when the path itself contains spaces, instead of splitting on
+    // the first (interior) space and mis-tokenizing.
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: '"C:\\Program Files\\Git\\bin\\bash.exe" -e {0}'
+        run: echo $SOME_MYSTERY_VARIABLE
+`,
+  },
+  {
+    rule: "shell-undefined-var",
     name: "shell-undefined-var (runs-on: ${{ matrix.os }} with no explicit shell — unknown default, must not fire)",
     // effective_shell can't resolve an expression-based runs-on: to an OS
     // statically, so it must not guess "bash" (which could misparse an

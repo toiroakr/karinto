@@ -39,6 +39,9 @@ export async function ensureInitNode() {
   // handed a string, they treat it as a literal (bogus) pathname instead of
   // parsing it, so this must be wrapped before it reaches `Language.load`'s
   // internal `fs.readFile(input)`.
+  // `import.meta.resolve` itself needs Node >=20.6.0 (unflagged there);
+  // the root package.json's `engines.node` documents that floor — CI is
+  // pinned to Node 22 throughout, well above it.
   const bashWasmUrl = new URL(
     import.meta.resolve("tree-sitter-bash/tree-sitter-bash.wasm"),
   );
