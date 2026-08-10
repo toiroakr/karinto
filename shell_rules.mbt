@@ -352,6 +352,89 @@ fn analyze_trusted_publishing(root : ShellNode) -> Bool {
 }
 
 ///|
+/// Non-bash fallback for a `run:` script tree-sitter-bash can't parse.
+/// Unlike `unpinned-tools`/`unredacted-secrets` (whose patterns — piping to
+/// `sh`, piping through `base64`/`xxd`/etc. — are Unix-shell idioms that
+/// essentially never appear verbatim outside bash/sh), a publish command
+/// like `npm publish` is a plain executable with no shell-specific syntax:
+/// it runs identically under pwsh or cmd. And windows-family runners
+/// *default* to pwsh (see `effective_shell`'s runner-default fallback), so
+/// without this, a completely ordinary `runs-on: windows-latest` step with
+/// no explicit `shell:` at all — not just one that explicitly opts into
+/// `shell: pwsh` — would silently stop being checked. Deliberately
+/// conservative (whitespace-tokenized, `;`/`&&`/`||`-segmented, no
+/// quote-awareness): reintroducing exactly the imprecision #113 replaced
+/// tree-sitter-bash *for bash scripts*, but this only ever runs as a
+/// fallback when a real bash parse isn't applicable in the first place.
+fn text_has_publish_cmd(run : String) -> Bool {
+  for v in run.split("\n") {
+    let line = v.to_owned()
+    for segment in split_command_segments(line) {
+      if words_are_publish(naive_tokenize(segment)) {
+        return true
+      }
+    }
+  }
+  false
+}
+
+///|
+/// Splits `line` on `;`/`&&`/`||` into independent segments, so a chained
+/// line (`cd dist && npm publish`) is evaluated per-segment instead of as
+/// one flat token stream.
+fn split_command_segments(line : String) -> Array[String] {
+  let chars = line.to_array()
+  let n = chars.length()
+  let segments : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    let c = chars[i]
+    if (c == '&' || c == '|') && i + 1 < n && chars[i + 1] == c {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 2
+      continue
+    }
+    if c == ';' {
+      segments.push(buf.to_string())
+      buf.reset()
+      i = i + 1
+      continue
+    }
+    buf.write_char(c)
+    i = i + 1
+  }
+  segments.push(buf.to_string())
+  segments
+}
+
+///|
+/// Whitespace-tokenizes `segment` into words — no quote-awareness, since
+/// this is only reached for a shell tree-sitter-bash can't parse anyway.
+fn naive_tokenize(segment : String) -> Array[String] {
+  let out : Array[String] = []
+  let buf = StringBuilder::new()
+  let mut in_word = false
+  for ch in segment {
+    if ch == ' ' || ch == '\t' {
+      if in_word {
+        out.push(buf.to_string())
+        buf.reset()
+        in_word = false
+      }
+    } else {
+      buf.write_char(ch)
+      in_word = true
+    }
+  }
+  if in_word {
+    out.push(buf.to_string())
+  }
+  out
+}
+
+///|
 fn command_words(cmd : ShellNode) -> Array[String] {
   let out : Array[String] = []
   for c in cmd.c {
@@ -436,7 +519,16 @@ fn first_non_flag_word(words : ArrayView[String]) -> String? {
 /// `publish` argument is never `rest`'s first non-flag word, `dlx`/`exec`
 /// is.
 fn command_is_publish(cmd : ShellNode) -> Bool {
-  let words = command_words(cmd)
+  words_are_publish(command_words(cmd))
+}
+
+///|
+/// The actual family-matching table, factored out of `command_is_publish`
+/// so `text_has_publish_cmd` (the non-bash fallback below) can reuse the
+/// exact same publish-command recognition — including the dlx
+/// false-positive protection — over a naively-tokenized word list instead
+/// of a real AST's `command_name`/`word`/`string` nodes.
+fn words_are_publish(words : Array[String]) -> Bool {
   if words.length() == 0 {
     return false
   }
@@ -598,6 +690,48 @@ fn is_well_known_prefix(name : String) -> Bool {
 }
 
 ///|
+/// Every `variable_assignment` that actually persists for later statements
+/// — i.e. `FOO=bar` on its own line — as `(name, end_offset)`. Excludes a
+/// *prefix* assignment on a command with its own name (`FOO=bar echo hi`):
+/// in bash that only sets `$FOO` in `echo`'s environment for that one
+/// invocation, it does not persist afterward. tree-sitter-bash represents
+/// the difference structurally: a bare `FOO=bar` statement is a top-level
+/// `variable_assignment` node (a sibling of `command` nodes), while a
+/// prefix assignment is nested *inside* a `command` node alongside that
+/// command's own `command_name` — so a `variable_assignment` child of a
+/// `command` that also has a `command_name` is prefix-only and skipped.
+/// (This also means an assignment inside a `$(...)` command substitution's
+/// own subshell is correctly never treated as persisting to the outer
+/// script — bash subshells don't leak variables back to the parent either.)
+fn collect_persistent_assignments(root : ShellNode) -> Array[(String, Int)] {
+  let out : Array[(String, Int)] = []
+  fn walk(node : ShellNode) -> Unit {
+    if node.t == "command" &&
+      shell_node_find_child(node, "command_name") is Some(_) {
+      for c in node.c {
+        if c.t != "variable_assignment" {
+          walk(c)
+        }
+      }
+      return
+    }
+    if node.t == "variable_assignment" {
+      match shell_node_find_child(node, "variable_name") {
+        Some(vn) => out.push((vn.x, node.e))
+        None => ()
+      }
+      return
+    }
+    for c in node.c {
+      walk(c)
+    }
+  }
+
+  walk(root)
+  out
+}
+
+///|
 /// Every referenced variable name with no visible declaration — neither in
 /// `declared` (the caller's merged workflow/job/step `env:` keys, visible
 /// for the whole script) nor assigned *earlier* in `root` itself (`FOO=bar`
@@ -605,18 +739,14 @@ fn is_well_known_prefix(name : String) -> Bool {
 /// reference starts) nor a well-known built-in. Position-aware by design:
 /// an assignment later in the script doesn't retroactively excuse an
 /// earlier use-before-def, which is exactly the class of bug this rule
-/// exists to catch. Dedup'd, AST-visit order.
+/// exists to catch. A *prefix* assignment on a named command (`FOO=bar echo
+/// hi`) is excluded from what counts as a persistent declaration — see
+/// `collect_persistent_assignments`. Dedup'd, AST-visit order.
 fn analyze_undefined_vars(
   root : ShellNode,
   declared : Array[String],
 ) -> Array[String] {
-  let assignments : Array[(String, Int)] = []
-  for a in shell_node_find_all(root, "variable_assignment") {
-    match shell_node_find_child(a, "variable_name") {
-      Some(vn) => assignments.push((vn.x, a.e))
-      None => ()
-    }
-  }
+  let assignments = collect_persistent_assignments(root)
   let refs : Array[(String, Int)] = []
   shell_node_walk(root, fn(n) {
     if n.t == "simple_expansion" || n.t == "expansion" {

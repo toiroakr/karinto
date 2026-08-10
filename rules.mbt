@@ -1813,7 +1813,14 @@ fn trusted_publishing_action_finding(step : StepInfo) -> String? {
 /// in `shell_rules.mbt` for the actual command matching, now against real
 /// AST `command`/`word` nodes instead of a manual scanner that "doesn't
 /// account for quoting" (as the old implementation's own comment put it).
-fn run_has_publish_cmd(run : String) -> Bool {
+/// For a shell tree-sitter-bash can't parse, falls back to
+/// `text_has_publish_cmd` (same file) — see its doc comment for why this
+/// rule specifically (unlike `unpinned-tools`/`unredacted-secrets`) can't
+/// just skip non-bash shells entirely.
+fn run_has_publish_cmd(run : String, is_bash : Bool) -> Bool {
+  if !is_bash {
+    return text_has_publish_cmd(run)
+  }
   match ts_parse_json(sanitize_expr_placeholders(run)) {
     None => false
     Some(json) =>
@@ -1875,8 +1882,10 @@ fn check_trusted_publishing_job(
     if !suppress_run {
       match step.run {
         Some(r) =>
-          if is_bash_like_shell(effective_shell(ctx, step)) &&
-            run_has_publish_cmd(r) {
+          if run_has_publish_cmd(
+              r,
+              is_bash_like_shell(effective_shell(ctx, step)),
+            ) {
             add_diag_step_field(
               out,
               ctx,
@@ -1912,8 +1921,7 @@ fn check_trusted_publishing_step(
   }
   match step.run {
     Some(r) =>
-      if is_bash_like_shell(effective_shell(ctx, step)) &&
-        run_has_publish_cmd(r) {
+      if run_has_publish_cmd(r, is_bash_like_shell(effective_shell(ctx, step))) {
         add_diag(
           out,
           "use-trusted-publishing",

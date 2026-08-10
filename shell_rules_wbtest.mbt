@@ -307,6 +307,40 @@ test "use-trusted-publishing: uvx twine upload" {
 }
 
 ///|
+/// `text_has_publish_cmd` is the non-bash fallback (pwsh/cmd, where a real
+/// tree-sitter-bash parse isn't applicable) — a plain `npm publish` is an
+/// ordinary executable invocation with no shell-specific syntax, so it must
+/// still be recognized without an AST.
+test "use-trusted-publishing (text fallback): plain npm publish is flagged" {
+  assert_true(text_has_publish_cmd("npm publish"))
+}
+
+///|
+/// Same dlx false-positive protection as the AST path
+/// (`command_is_publish`'s doc comment): `pnpm dlx pkg-pr-new publish`'s
+/// `publish` belongs to the dlx'd tool, not to pnpm itself —
+/// `first_non_flag_word(rest)` for `pnpm` sees `dlx`, not `publish`.
+test "use-trusted-publishing (text fallback): pnpm dlx pkg-pr-new publish is not a real publish" {
+  assert_false(
+    text_has_publish_cmd("pnpm dlx pkg-pr-new@0.0.78 publish --compact"),
+  )
+}
+
+///|
+/// `;`/`&&`/`||`-chained lines are split into segments so a publish
+/// command after a `cd`/build step is still caught.
+test "use-trusted-publishing (text fallback): chained command after && is flagged" {
+  assert_true(text_has_publish_cmd("cd dist && npm publish"))
+}
+
+///|
+test "use-trusted-publishing (text fallback): a plain download is not flagged" {
+  assert_false(
+    text_has_publish_cmd("Invoke-WebRequest -Uri https://example.com/a.txt"),
+  )
+}
+
+///|
 let publish_npm_dry_run_quoted : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"},{\"t\":\"string\",\"s\":12,\"e\":23,\"x\":\"\\\"--dry-run\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":13,\"e\":22,\"x\":\"--dry-run\"}]}]}]}"
 
 ///|
@@ -424,6 +458,19 @@ let undef_used_before_assigned : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\
 /// that comes before it — `echo $FOO` on line 1, `FOO=bar` on line 2.
 test "shell-undefined-var: a use before its assignment is still flagged" {
   let root = parse_shell_ast(undef_used_before_assigned).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), ["FOO"])
+}
+
+///|
+let undef_prefix_assignment_does_not_persist : String = "{\"t\":\"program\",\"s\":0,\"e\":25,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":15,\"c\":[{\"t\":\"variable_assignment\",\"s\":0,\"e\":7,\"c\":[{\"t\":\"variable_name\",\"s\":0,\"e\":3,\"x\":\"FOO\"},{\"t\":\"word\",\"s\":4,\"e\":7,\"x\":\"bar\"}]},{\"t\":\"command_name\",\"s\":8,\"e\":12,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":8,\"e\":12,\"x\":\"echo\"}]},{\"t\":\"word\",\"s\":13,\"e\":15,\"x\":\"hi\"}]},{\"t\":\"command\",\"s\":16,\"e\":25,\"c\":[{\"t\":\"command_name\",\"s\":16,\"e\":20,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":16,\"e\":20,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":21,\"e\":25,\"c\":[{\"t\":\"variable_name\",\"s\":22,\"e\":25,\"x\":\"FOO\"}]}]}]}"
+
+///|
+/// `FOO=bar echo hi` is a *prefix* assignment scoped to that one `echo`
+/// invocation's environment — it does not persist for the next statement,
+/// unlike a bare `FOO=bar` line (see `undef_assigned_first` above). The
+/// later `echo $FOO` must still be flagged as undefined.
+test "shell-undefined-var: a prefix assignment on a command (FOO=bar echo hi) does not persist to later statements" {
+  let root = parse_shell_ast(undef_prefix_assignment_does_not_persist).unwrap()
   assert_eq(analyze_undefined_vars(root, []), ["FOO"])
 }
 

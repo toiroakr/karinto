@@ -155,6 +155,44 @@ jobs:
     expectAbsent: true,
   },
   {
+    rule: "use-trusted-publishing",
+    // windows-family runners default to pwsh (no explicit shell: needed) —
+    // the tree-sitter-bash AST path can't parse this, so it must fall back
+    // to the text-based text_has_publish_cmd to still catch a plain
+    // `npm publish` here.
+    name: "use-trusted-publishing (npm publish on windows-latest with no explicit shell — pwsh default)",
+    yaml: `
+on: push
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: npm publish
+`,
+  },
+  {
+    rule: "use-trusted-publishing",
+    // Same dlx false-positive protection as the AST path must survive in
+    // the non-bash text fallback too.
+    name: "use-trusted-publishing (pnpm dlx pkg-pr-new under pwsh is still not a real publish)",
+    yaml: `
+on: push
+jobs:
+  preview:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: pwsh
+        run: pnpm dlx pkg-pr-new@0.0.78 publish --compact
+`,
+    expectAbsent: true,
+  },
+  {
     rule: "shell-quote-safety",
     yaml: `
 on: pull_request_target
