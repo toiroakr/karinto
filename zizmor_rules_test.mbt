@@ -1695,6 +1695,74 @@ test "unredacted-secrets: secret length manipulated before logging" {
 }
 
 ///|
+/// `fromJSON(secrets...)` isn't shell syntax — it's a GitHub Actions
+/// expression, textually present in `run:` regardless of which shell
+/// interprets the surrounding script — so it must still fire even when the
+/// step's resolved shell is pwsh (where the tree-sitter-bash AST half of
+/// `unredacted-secrets` is skipped entirely). Regression test for a bug
+/// where the whole `unredacted_secret_transform_run` check, including this
+/// shell-agnostic substring half, was wrongly gated behind
+/// `is_bash_like_shell`.
+test "unredacted-secrets: fromJSON(secrets) still fires under a pwsh step" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: windows-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    environment: prod
+    #|    steps:
+    #|      - shell: pwsh
+    #|        run: Write-Output ${{ fromJSON(secrets.CONFIG_JSON).token }}
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
+        "pos": { "line": 11, "col": 14 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+      {
+        "rule": "unredacted-secrets",
+        "severity": "error",
+        "message": "secret is transformed (fromJSON) before logging; redaction will fail",
+        "pos": { "line": 10, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
 test "unsound-condition: `always() && success()` is always true" {
   let yaml =
     #|on: push

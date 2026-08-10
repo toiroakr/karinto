@@ -5262,13 +5262,19 @@ fn unredacted_secret_transform_text(text : String) -> String? {
 /// AST-based (#113, `analyze_unredacted_secrets` in `shell_rules.mbt`),
 /// scoped by real pipeline structure instead of matching `"| base64"`
 /// anywhere in the script text. `fromJSON(secrets...)` isn't a shell
-/// construct either way, so that half stays a plain substring check.
-fn unredacted_secret_transform_run(text : String) -> String? {
+/// construct either way (it's a GitHub Actions expression, textually
+/// present in `run:` regardless of which shell runs it), so that half stays
+/// a plain substring check that always runs, even for a pwsh/cmd step where
+/// `is_bash` is false and the AST half is skipped.
+fn unredacted_secret_transform_run(text : String, is_bash : Bool) -> String? {
   if !contains_secrets_ref(text) {
     return None
   }
   if text.to_lower().contains("fromjson(secrets") {
     return Some("fromJSON")
+  }
+  if !is_bash {
+    return None
   }
   match ts_parse_json(sanitize_expr_placeholders(text)) {
     None => None
@@ -5288,19 +5294,21 @@ fn check_unredacted_secrets(
 ) -> Unit {
   match step.run {
     Some(r) =>
-      if is_bash_like_shell(effective_shell(ctx, step)) {
-        match unredacted_secret_transform_run(r) {
-          Some(name) => {
-            add_diag(
-              out,
-              "unredacted-secrets",
-              Error,
-              "secret is transformed (\{name}) before logging; redaction will fail",
-            )
-            return
-          }
-          None => ()
+      match
+        unredacted_secret_transform_run(
+          r,
+          is_bash_like_shell(effective_shell(ctx, step)),
+        ) {
+        Some(name) => {
+          add_diag(
+            out,
+            "unredacted-secrets",
+            Error,
+            "secret is transformed (\{name}) before logging; redaction will fail",
+          )
+          return
         }
+        None => ()
       }
     None => ()
   }
