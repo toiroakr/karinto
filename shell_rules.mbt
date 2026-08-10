@@ -163,10 +163,15 @@ fn source_slice(source : String, s : Int, e : Int) -> String {
 /// Exact-match, not substring — `redirect.x` used to be checked with a
 /// plain `contains`, which would false-positive on an unrelated variable
 /// that merely contains "GITHUB_ENV" as a substring (e.g. `$GITHUB_ENV_FILE`).
-/// bash `$VAR`/`${VAR}` surfaces a `variable_name` node to compare exactly;
-/// cmd's `%VAR%` has no such substructure (a bare `word`), but its own `%`
-/// delimiters already act as a boundary, so a literal `%GITHUB_ENV%`
-/// substring check on the redirect's text is still exact-enough there.
+/// bash `$VAR`/`${VAR}` surfaces a `variable_name` node to compare exactly.
+/// The `%VAR%` fallback below is realistically dead in practice: the only
+/// caller (`check_github_env` in rules.mbt) already gates on the step's
+/// resolved shell being bash/sh before this ever runs, so a real cmd step
+/// never reaches here. Left in (cheap, and correct if reached — cmd's
+/// `%VAR%` has no `variable_name` substructure, a bare `word` instead, but
+/// its own `%` delimiters already bound the substring check) rather than
+/// removed, in case a bash script ever legitimately contains a literal
+/// `%GITHUB_ENV%` string.
 fn github_env_target(redirect : ShellNode) -> String? {
   for vn in shell_node_find_all(redirect, "variable_name") {
     let up = vn.x.to_upper()
@@ -206,10 +211,42 @@ fn pipeline_command_names(pipeline : ShellNode) -> Array[String] {
 }
 
 ///|
+fn last_pipeline_command(pipeline : ShellNode) -> ShellNode? {
+  let mut last : ShellNode? = None
+  for c in pipeline.c {
+    if c.t == "command" {
+      last = Some(c)
+    }
+  }
+  last
+}
+
+///|
+/// The shell interpreter a pipeline's last command actually runs, seeing
+/// through a thin wrapper (`sudo`/`env`/`exec`/`nohup`) to its first
+/// non-flag argument — `curl x | sudo bash` and `curl x | env bash` both
+/// end in `bash`, not `sudo`/`env`.
+fn command_shell_name(cmd : ShellNode) -> String? {
+  let words = command_words(cmd)
+  if words.length() == 0 {
+    return None
+  }
+  let head = words[0].to_lower()
+  let wrappers = ["sudo", "env", "exec", "nohup"]
+  if wrappers.contains(head) {
+    first_non_flag_word(words[1:])
+  } else {
+    Some(head)
+  }
+}
+
+///|
 /// True if a `pipeline` runs a fetch tool (`curl`/`wget`) and ends in a
 /// shell interpreter — position-aware, unlike the old
 /// `contains("curl ") && contains("| sh")` heuristic, which fires on script
-/// text that merely mentions both substrings anywhere, in any order.
+/// text that merely mentions both substrings anywhere, in any order. Sees
+/// through `sudo`/`env`/`exec`/`nohup` wrappers (`command_shell_name`), so
+/// `curl x | sudo bash` is caught, not just a bare `curl x | bash`.
 pub fn analyze_unpinned_tools(root : ShellNode) -> Bool {
   let shells = ["sh", "bash", "zsh", "dash"]
   let fetchers = ["curl", "wget"]
@@ -221,9 +258,16 @@ pub fn analyze_unpinned_tools(root : ShellNode) -> Bool {
     let has_fetch = names[:names.length() - 1]
       .iter()
       .any(fn(n) { fetchers.contains(n) })
-    let last = names[names.length() - 1]
-    if has_fetch && shells.contains(last) {
-      return true
+    if !has_fetch {
+      continue
+    }
+    match last_pipeline_command(pipeline) {
+      Some(last_cmd) =>
+        match command_shell_name(last_cmd) {
+          Some(sh) => if shells.contains(sh) { return true }
+          None => ()
+        }
+      None => ()
     }
   }
   false

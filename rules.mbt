@@ -5169,18 +5169,18 @@ fn workflow_has_dangerous_trigger(ctx : WalkCtx) -> Bool {
 }
 
 ///|
-/// Matches the three syntactic forms upstream recognises for a redirect to
-/// `GITHUB_ENV` / `GITHUB_PATH`: bash (`$GITHUB_ENV`/`${GITHUB_ENV}`),
-/// powershell (`$env:GITHUB_ENV`/`${env:GITHUB_ENV}`, case-insensitive), and
-/// cmd (`%GITHUB_ENV%`). See `github_env_target` in `shell_rules.mbt` for
-/// the (now AST-node-text-based, not per-line-regex) implementation.
-///
 /// Tree-sitter-bash replacement (#113) for the old per-line regex scanner
 /// (`detect_github_env_redirect` + `lhs_has_dynamic_token`), which only
 /// ever looked at the single line containing `>>` — so it silently missed
 /// the common `cat <<EOF >> "$GITHUB_ENV" ... EOF` heredoc form entirely
 /// (the dynamic content lives on later lines the old scanner never
 /// inspected). See `analyze_github_env` in `shell_rules.mbt`.
+///
+/// Bash/sh only, unlike the old regex scanner (which nominally recognised
+/// powershell `$env:GITHUB_ENV`/`${env:GITHUB_ENV}` and cmd `%GITHUB_ENV%`
+/// forms too, via naive substring matching): the `is_bash_like_shell`
+/// guard below skips a pwsh/cmd step's `run:` entirely rather than
+/// tree-sitter-bash-parsing script text that isn't bash.
 fn check_github_env(
   ctx : WalkCtx,
   step : StepInfo,

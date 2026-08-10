@@ -156,6 +156,19 @@ test "unpinned-tools: plain curl download is not flagged" {
 }
 
 ///|
+let unpinned_curl_pipe_sudo_bash : String = "{\"t\":\"program\",\"s\":0,\"e\":47,\"x\":\"curl https://example.com/install.sh | sudo bash\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":47,\"x\":\"curl https://example.com/install.sh | sudo bash\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":35,\"x\":\"curl https://example.com/install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":35,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":38,\"e\":47,\"x\":\"sudo bash\",\"c\":[{\"t\":\"command_name\",\"s\":38,\"e\":42,\"x\":\"sudo\",\"c\":[{\"t\":\"word\",\"s\":38,\"e\":42,\"x\":\"sudo\"}]},{\"t\":\"word\",\"s\":43,\"e\":47,\"x\":\"bash\"}]}]}]}"
+
+///|
+/// The pipeline's last *command_name* is `sudo`, not `bash` — the old
+/// naive "last command_name is a shell" check would have missed this.
+/// `command_shell_name` sees through the wrapper to `sudo`'s first
+/// non-flag argument.
+test "unpinned-tools: curl piped to sudo bash is still flagged" {
+  let root = parse_shell_ast(unpinned_curl_pipe_sudo_bash).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
 let unredacted_base64_pipe : String = "{\"t\":\"program\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo \\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":17,\"x\":\"\\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":16,\"x\":\"$MY_SECRET\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":16,\"x\":\"MY_SECRET\"}]}]}]},{\"t\":\"command\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"command_name\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"word\",\"s\":20,\"e\":26,\"x\":\"base64\"}]}]}]}]}"
 
 ///|

@@ -71,6 +71,21 @@ jobs:
 `,
   },
   {
+    rule: "unpinned-tools",
+    name: "unpinned-tools (curl piped to sudo bash — wrapper form)",
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: curl -fsSL https://example.com/install.sh | sudo bash
+`,
+  },
+  {
     rule: "unredacted-secrets",
     yaml: `
 on: push

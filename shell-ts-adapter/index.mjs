@@ -76,8 +76,22 @@ export async function ensureInitWorkerd(ttsModule, bashModule) {
   // pending promise), the read has already happened. Restoring `process`
   // immediately after, before awaiting that promise, closes the window to
   // zero: nothing can run between two synchronous statements.
+  // Verified against real local workerd (`wrangler dev`, nodejs_compat):
+  // `globalThis.process` is a plain, writable, configurable data property
+  // there (not a getter/frozen binding), so this reassignment doesn't
+  // throw in practice — but wrapped defensively anyway in case some future
+  // workerd/nodejs_compat revision changes that: if the reassignment
+  // itself throws, skip the mutation and proceed unmutated (init then
+  // likely fails via the original createRequire bug this exists to dodge,
+  // same as before this workaround existed — not a new failure mode).
   const savedProcess = globalThis.process;
-  globalThis.process = undefined;
+  let processMutated = false;
+  try {
+    globalThis.process = undefined;
+    processMutated = true;
+  } catch (_e) {
+    // Non-writable in this environment — proceed without the mutation.
+  }
   let initPromise;
   try {
     initPromise = Parser.init({
@@ -88,7 +102,7 @@ export async function ensureInitWorkerd(ttsModule, bashModule) {
       },
     });
   } finally {
-    globalThis.process = savedProcess;
+    if (processMutated) globalThis.process = savedProcess;
   }
   await initPromise;
   // Requires the root patch-package patch (see patches/) adding a
