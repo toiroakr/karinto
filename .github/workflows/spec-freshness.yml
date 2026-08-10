@@ -1,0 +1,141 @@
+name: spec-freshness
+
+# Standing drift check for issue #111: actionlint's hardcoded GitHub Actions
+# spec tables (permission scopes, runner labels, webhook events, context
+# names, workflow/job/step/action key allowlists) went stale once its
+# releases stopped shipping. karinto has the same kind of tables in
+# rules.mbt, and the same risk of quietly drifting from GitHub's actual
+# spec. This job watches github/docs and actions/runner-images and files (or
+# updates) a tracking issue when a source lists a value the code doesn't
+# have — see scripts/spec-freshness/check.mjs for the comparison and
+# DEVELOPMENT.md for how to act on a drift issue.
+#
+# Deliberately does not auto-edit rules.mbt: the fix is sometimes a plain
+# addition, but sometimes needs judgment (issue #111 itself found a scope
+# that had to be *removed* — `repository-projects`, Projects-classic sunset
+# — which a "docs says X, add X" bot would never catch). The goal is
+# noticing drift, not auto-applying it.
+
+on:
+  schedule:
+    # Weekly, offset from the other standing crons (refresh-archived 03:00
+    # daily, upstream-parity 06:00 daily, upstream-refresh Monday 00:00) so a
+    # drift issue doesn't get lost in the same-minute notification batch.
+    # GitHub's own spec doesn't churn daily; weekly is enough to catch a new
+    # permission scope or runner label within the same week it ships.
+    - cron: '30 7 * * 3'
+  workflow_dispatch:
+
+jobs:
+  check:
+    # Read-only: this job only fetches external docs and reads rules.mbt —
+    # no write-scoped token needed. The result crosses into the write-scoped
+    # report-issue job only as a plain string job output, never as code.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      # check.mjs exit code: 0 fresh, 1 drift found, 2 config/fetch error.
+      code: ${{ steps.check.outputs.code }}
+      body: ${{ steps.check.outputs.body }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Check GitHub spec freshness
+        id: check
+        run: |
+          set +e
+          node scripts/spec-freshness/check.mjs --summary-path report.md
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<__SPEC_FRESHNESS_REPORT_EOF__"
+            if [ -f report.md ]; then
+              cat report.md
+            else
+              echo "_check.mjs exited $code without writing a report — see the run logs._"
+            fi
+            echo "__SPEC_FRESHNESS_REPORT_EOF__"
+          } >> "$GITHUB_OUTPUT"
+          if [ -f report.md ]; then
+            cat report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Unexpected exit codes (crash, OOM kill, signal) always fail the
+          # job. 1 (drift) and 2 (config error) are expected outcomes the
+          # report-issue job below handles — this job stays green either way
+          # so a config error doesn't page anyone, it just skips filing.
+          case "$code" in
+            0 | 1 | 2) ;;
+            *)
+              echo "spec-freshness: check.mjs exited with unexpected code $code" >&2
+              exit "$code"
+              ;;
+          esac
+
+  report-issue:
+    # Isolated write-scoped job, same shape as upstream-parity's
+    # report-issue: it never checks out the repo or runs fetched content, so
+    # the issues:write token can't be exfiltrated by anything the check job
+    # pulled from the network.
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: File or update the drift issue
+        if: needs.check.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BODY: ${{ needs.check.outputs.body }}
+        run: |
+          label="spec-freshness"
+          title="spec-freshness: GitHub Actions spec drift detected"
+          gh label create "$label" --repo "$REPO" --color 0E8A16 \
+            --description "Scheduled GitHub Actions spec drift (issue #111)" 2>/dev/null || true
+          {
+            echo "The scheduled \`spec-freshness\` run found value(s) in GitHub's docs or actions/runner-images that karinto's hardcoded tables in \`rules.mbt\` don't have yet."
+            echo
+            echo "Not tied to a specific PR — GitHub shipped a spec addition (or retired a value) that no one has taught karinto about yet. Update the matching table function in \`rules.mbt\`, add a fixture (see the \`(GitHub spec freshness)\` tests in \`actionlint_rules_test.mbt\` for the pattern), and check whether the same entry needs removing elsewhere (e.g. a sunset permission scope)."
+            echo
+            echo "- Run: ${RUN_URL}"
+            echo
+            echo "$BODY"
+          } > issue-body.md
+          existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            # Refresh in place — a standing drift shouldn't grow a noisy
+            # comment timeline every week it stays unresolved.
+            gh issue edit "$existing" --repo "$REPO" --body-file issue-body.md
+          else
+            gh issue create --repo "$REPO" --title "$title" --label "$label" \
+              --body-file issue-body.md
+          fi
+
+      - name: Close the drift issue once the tables are fresh again
+        if: needs.check.outputs.code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label="spec-freshness"
+          existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" \
+              --body "Resolved: the [scheduled run](${RUN_URL}) found no drift. Closing."
+            gh issue close "$existing" --repo "$REPO"
+          fi

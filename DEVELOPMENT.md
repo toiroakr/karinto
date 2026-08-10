@@ -229,6 +229,14 @@ GitHub Actions wiring:
   that checks GitHub for newer actionlint / zizmor / ghalint releases. When
   found, bumps `mise.toml` and re-vendors `fixtures/upstream/<tool>/` from
   the matching tag, then opens a PR labelled `dependencies` + `skip-changeset`.
+- `.github/workflows/spec-freshness.yml` — weekly cron (Wednesday 07:30 UTC)
+  that runs `scripts/spec-freshness/check.mjs` to diff karinto's hardcoded
+  GitHub Actions spec tables (permission scopes, runner labels, webhook
+  events, context names, workflow/job/step/action key allowlists) against
+  github/docs and the `actions/runner-images` README. Files (or updates) a
+  `spec-freshness`-labelled tracking issue on drift; closes it once the
+  tables are fresh again. See ["Spec freshness check"](#spec-freshness-check)
+  below.
 
 ### Per-PR changesets
 
@@ -700,3 +708,63 @@ changed; turning it into a karinto rule is manual:
 5. If we're intentionally *not* matching it, record the divergence in
    `scripts/upstream-parity/allowlist.json` (keyed by rule ID + file).
 6. Verify with `moon test` and a green local parity run.
+
+## Spec freshness check
+
+Upstream parity (above) catches karinto drifting from what actionlint /
+zizmor / ghalint currently do. It can't catch the opposite problem: GitHub
+itself shipping a spec change that *none* of the upstream tools have caught
+up to yet. That's what stalled actionlint out — its main branch went quiet
+in 2026-04, and ~27 issues piled up reporting permission scopes, runner
+labels, and workflow keys its hardcoded tables didn't recognize. karinto has
+the same shape of hardcoded tables in `rules.mbt` (`valid_perm_scopes`,
+`known_runner_labels`, `known_events`, `known_contexts`, `workflow_top_keys`,
+`job_keys`, `step_keys`, `action_top_keys`) and the same risk of quietly
+going stale the same way. See issue #111.
+
+`spec-freshness.yml` runs `scripts/spec-freshness/check.mjs` weekly (and on
+`workflow_dispatch`). For each watched table it:
+
+1. extracts the table's current string values straight out of `rules.mbt`
+   (a pattern match on `fn <name>() -> Array[String] { [ "...", ... ] }`,
+   not a general MoonBit parser — every watched table is written in exactly
+   this shape);
+2. fetches the matching page(s) from github/docs (raw, off `main`) — plus,
+   for runner labels specifically, the `actions/runner-images` README's
+   "Available Images" table, since new hosted-runner images sometimes land
+   there before github/docs catches up (this is how the `xcode-27` preview
+   label was found missing while writing this check);
+3. diffs the two. A value the source documents but the code doesn't have is
+   drift; a value the code has but no source documents is only printed as
+   informational context (it's often intentional — a meta-label like
+   `self-hosted`, or a scope documented on a different page, like
+   `copilot-requests`).
+
+Run it locally:
+
+```sh
+node scripts/spec-freshness/check.mjs
+```
+
+Exit codes: `0` every table matches, `1` drift found, `2` a source
+couldn't be fetched or parsed (treated as "couldn't check", not drift — a
+doc restructuring shouldn't file a false alarm). On the weekly schedule, a
+`1` files (or refreshes) a `spec-freshness`-labelled tracking issue with the
+diff; a `0` closes it if one is open.
+
+**Fixing a reported drift is a manual edit, deliberately.** The script does
+not touch `rules.mbt` itself: "docs added a value, add it" is not always the
+right fix — issue #111's own audit found a scope that had to be *removed*
+(`repository-projects`, since Projects classic sunset in 2024-08-23) and one
+whose removal was judgment-dependent (`models`, retired 2026-07-30 but
+conceivably still accepted in existing workflows). To act on a drift issue:
+
+1. Edit the relevant table function in `rules.mbt`.
+2. Add a fixture in the matching `<tool>_rules_test.mbt` — search that file
+   for `(GitHub spec freshness)` in existing test names for the pattern:
+   name the test after what should (or shouldn't) fire, use `content={}`
+   and `moon test --update` to bake in the real diagnostics, then read the
+   diff before committing to make sure it says what you expect.
+3. Run `moon info && moon fmt` and check the `.mbti` diff is empty (these
+   tables are internal, so it should be).
+4. Add a changeset (`npx changeset`, `patch` — this is a bug fix).

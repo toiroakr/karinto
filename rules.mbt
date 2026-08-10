@@ -113,7 +113,10 @@ fn build_step_info(
   let mut has_full_sha = false
   match uses {
     Some(u) => {
-      if u.has_prefix("./") || u.has_prefix("docker://") {
+      // `$/path/to/action` (no `@ref`) references an action in the same
+      // repository, resolved at the currently-executing commit — added
+      // 2026-07-30, after actionlint's last release. See rhysd/actionlint#711.
+      if u.has_prefix("./") || u.has_prefix("docker://") || u.has_prefix("$/") {
         is_local_or_docker = true
       } else if u.has_prefix("actions/checkout@") {
         is_actions_checkout = true
@@ -5143,9 +5146,9 @@ fn check_missing_required_keys(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 fn known_events() -> Array[String] {
   [
     "branch_protection_rule", "check_run", "check_suite", "create", "delete", "deployment",
-    "deployment_status", "discussion", "discussion_comment", "fork", "gollum", "issue_comment",
-    "issues", "label", "merge_group", "milestone", "page_build", "project", "project_card",
-    "project_column", "public", "pull_request", "pull_request_review", "pull_request_review_comment",
+    "deployment_status", "discussion", "discussion_comment", "fork", "gollum", "image_version",
+    "issue_comment", "issues", "label", "merge_group", "milestone", "page_build",
+    "public", "pull_request", "pull_request_review", "pull_request_review_comment",
     "pull_request_target", "push", "registry_package", "release", "repository_dispatch",
     "schedule", "status", "watch", "workflow_call", "workflow_dispatch", "workflow_run",
   ]
@@ -5850,9 +5853,9 @@ fn check_constant_if_step(
 ///|
 fn valid_perm_scopes() -> Array[String] {
   [
-    "actions", "attestations", "checks", "contents", "deployments", "discussions",
-    "id-token", "issues", "models", "packages", "pages", "pull-requests", "repository-projects",
-    "security-events", "statuses",
+    "actions", "artifact-metadata", "attestations", "checks", "code-quality", "contents",
+    "copilot-requests", "deployments", "discussions", "id-token", "issues", "packages",
+    "pages", "pull-requests", "security-events", "statuses", "vulnerability-alerts",
   ]
 }
 
@@ -5944,15 +5947,22 @@ fn job_keys() -> Array[String] {
   [
     "name", "needs", "if", "runs-on", "environment", "concurrency", "outputs", "env",
     "defaults", "steps", "strategy", "container", "services", "secrets", "uses",
-    "with", "permissions", "continue-on-error", "timeout-minutes",
+    "with", "permissions", "continue-on-error", "timeout-minutes", "snapshot",
   ]
 }
 
 ///|
+/// `background`/`wait`/`wait-all`/`cancel` are the async-step keys GitHub
+/// shipped alongside `parallel:` (both GA on fpt/ghec). `parallel` never
+/// actually reaches `validate_keys` today — `build_steps` flattens it away
+/// before `check_unexpected_keys_step` runs (see the `unexpected-keys:
+/// parallel: steps are not flagged...` test) — but it's listed for when a
+/// future caller validates a raw, unflattened steps list directly.
 fn step_keys() -> Array[String] {
   [
     "id", "name", "if", "run", "uses", "shell", "working-directory", "env", "with",
-    "continue-on-error", "timeout-minutes",
+    "continue-on-error", "timeout-minutes", "parallel", "background", "wait", "wait-all",
+    "cancel",
   ]
 }
 
@@ -6492,15 +6502,18 @@ fn check_invalid_mapping_values_step(
 fn known_runner_labels() -> Array[String] {
   [
     // GitHub-hosted x64 Linux
-    "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04", "ubuntu-slim",
+    "ubuntu-latest", "ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-slim",
     // Arm Linux (preview)
-     "ubuntu-22.04-arm", "ubuntu-24.04-arm",
+     "ubuntu-22.04-arm", "ubuntu-24.04-arm", "ubuntu-26.04-arm",
     // macOS
-     "macos-latest", "macos-15", "macos-14", "macos-13", "macos-12", "macos-latest-large",
-    "macos-latest-xlarge", "macos-14-large", "macos-14-xlarge", "macos-15-large",
-    "macos-15-xlarge",
+     "macos-latest", "macos-26", "macos-15", "macos-14", "macos-15-intel", "macos-26-intel",
+    "macos-latest-large", "macos-latest-xlarge", "macos-14-large", "macos-14-xlarge",
+    "macos-15-large", "macos-15-xlarge", "macos-26-large", "macos-26-xlarge",
+    // Xcode (preview) — actions/runner-images README "Available Images" table
+     "xcode-27", "xcode-27-xlarge",
     // Windows
-     "windows-latest", "windows-2025", "windows-2022", "windows-2019", "windows-11-arm",
+     "windows-latest", "windows-2025", "windows-2025-vs2026", "windows-2022", "windows-11-arm",
+    "windows-11-vs2026-arm",
     // Common meta labels
      "self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm",
   ]
@@ -7153,10 +7166,13 @@ fn is_archived_repo(repo : String, extra : Array[String]) -> Bool {
 ///|
 /// Extract `owner/repo` from a `uses:` value, stripping any subpath
 /// (`actions/cache/restore` → `actions/cache`) and `@ref` suffix. Returns
-/// `""` for local (`./...`) or docker (`docker://...`) refs that have no
-/// `owner/repo` form.
+/// `""` for local (`./...`), docker (`docker://...`), or same-repo
+/// (`$/...`) refs that have no `owner/repo` form.
 fn bare_repo_of(uses : String) -> String {
-  if uses == "" || uses.has_prefix("./") || uses.has_prefix("docker://") {
+  if uses == "" ||
+    uses.has_prefix("./") ||
+    uses.has_prefix("docker://") ||
+    uses.has_prefix("$/") {
     return ""
   }
   let at = last_at_index(uses)
