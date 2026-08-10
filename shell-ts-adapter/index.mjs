@@ -56,7 +56,14 @@ export async function ensureInitNode() {
       await Parser.init();
       const Bash = await Language.load(bashWasmUrl);
       afterReady(Bash);
-    })();
+    })().catch((e) => {
+      // Don't cache a rejection forever — a later caller in the same
+      // process should get to retry in case the failure was transient,
+      // same as cf/index.js's getShellTs() already does for the Workerd
+      // path.
+      initNodePromise = null;
+      throw e;
+    });
   }
   return initNodePromise;
 }
