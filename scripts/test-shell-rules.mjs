@@ -99,6 +99,12 @@ jobs:
     steps:
       - run: pnpm publish --no-git-checks
 `,
+    // Attributed to the offending step, not left job-only — this is what
+    // lets an inline ignore comment on the step itself suppress it (see
+    // zizmor_rules_test.mbt's ignore-comment tests, which still cover that
+    // suppression behavior; this only re-adds the attribution assertion
+    // that moved here from the old end-to-end test).
+    checkAttribution: { job: "publish", stepIndex: 0 },
   },
   {
     rule: "use-trusted-publishing",
@@ -146,6 +152,46 @@ jobs:
       - run: echo $SOME_MYSTERY_VARIABLE
 `,
   },
+  {
+    rule: "github-env",
+    name: "github-env (step shell: pwsh — not bash, must not fire)",
+    // Same shape as the "github-env" true-positive case above, but the
+    // step declares `shell: pwsh`. `$env:GITHUB_ENV` in PowerShell isn't
+    // bash/sh syntax tree-sitter-bash can parse; effective_shell/
+    // is_bash_like_shell (rules.mbt) must skip it, not misparse it as bash.
+    yaml: `
+on: pull_request_target
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: pwsh
+        run: echo "TITLE=\${{ github.event.pull_request.title }}" >> $env:GITHUB_ENV
+`,
+    expectAbsent: true,
+  },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (job defaults.run.shell: pwsh — not bash, must not fire)",
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
 ];
 
 let failures = 0;
@@ -154,8 +200,23 @@ for (const c of cases) {
   const result = JSON.parse(
     lint_string(c.yaml, "workflow", "", ""),
   ).result;
-  const hit = result.diagnostics.some((d) => d.rule === c.rule);
-  const ok = c.expectAbsent ? !hit : hit;
+  const matches = result.diagnostics.filter((d) => d.rule === c.rule);
+  const hit = matches.length > 0;
+  let ok = c.expectAbsent ? !hit : hit;
+  if (ok && !c.expectAbsent && c.checkAttribution) {
+    const { job, stepIndex } = c.checkAttribution;
+    ok = matches.some(
+      (d) => d.job === job && d.step?.index === stepIndex,
+    );
+    if (!ok) {
+      failures++;
+      console.error(
+        `FAIL ${label}: expected a ${c.rule} diagnostic attributed to job "${job}" step ${stepIndex}`,
+      );
+      console.error(JSON.stringify(matches, null, 2));
+      continue;
+    }
+  }
   if (ok) {
     console.log(`ok   ${label}`);
   } else {

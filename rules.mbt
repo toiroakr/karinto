@@ -1875,7 +1875,8 @@ fn check_trusted_publishing_job(
     if !suppress_run {
       match step.run {
         Some(r) =>
-          if run_has_publish_cmd(r) {
+          if is_bash_like_shell(effective_shell(ctx, step)) &&
+            run_has_publish_cmd(r) {
             add_diag_step_field(
               out,
               ctx,
@@ -1911,7 +1912,8 @@ fn check_trusted_publishing_step(
   }
   match step.run {
     Some(r) =>
-      if run_has_publish_cmd(r) {
+      if is_bash_like_shell(effective_shell(ctx, step)) &&
+        run_has_publish_cmd(r) {
         add_diag(
           out,
           "use-trusted-publishing",
@@ -4492,7 +4494,8 @@ fn check_unpinned_tools(
   }
   match step.run {
     Some(r) =>
-      if run_has_pipe_to_shell(r) {
+      if is_bash_like_shell(effective_shell(ctx, step)) &&
+        run_has_pipe_to_shell(r) {
         add_diag_step_field(
           out,
           ctx,
@@ -5193,6 +5196,9 @@ fn check_github_env(
   if !ctx.action_is_composite && !workflow_has_dangerous_trigger(ctx) {
     return
   }
+  if !is_bash_like_shell(effective_shell(ctx, step)) {
+    return
+  }
   match ts_parse_json(sanitize_expr_placeholders(run)) {
     None => ()
     Some(json) =>
@@ -5276,23 +5282,25 @@ fn unredacted_secret_transform_run(text : String) -> String? {
 
 ///|
 fn check_unredacted_secrets(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   step : StepInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match step.run {
     Some(r) =>
-      match unredacted_secret_transform_run(r) {
-        Some(name) => {
-          add_diag(
-            out,
-            "unredacted-secrets",
-            Error,
-            "secret is transformed (\{name}) before logging; redaction will fail",
-          )
-          return
+      if is_bash_like_shell(effective_shell(ctx, step)) {
+        match unredacted_secret_transform_run(r) {
+          Some(name) => {
+            add_diag(
+              out,
+              "unredacted-secrets",
+              Error,
+              "secret is transformed (\{name}) before logging; redaction will fail",
+            )
+            return
+          }
+          None => ()
         }
-        None => ()
       }
     None => ()
   }
@@ -5355,6 +5363,9 @@ fn check_shell_quote_safety(
   }
   let dynamic_names = dynamic_env_names_of_step(step)
   if dynamic_names.length() == 0 {
+    return
+  }
+  if !is_bash_like_shell(effective_shell(ctx, step)) {
     return
   }
   match ts_parse_json(sanitize_expr_placeholders(run)) {
@@ -5422,6 +5433,9 @@ fn check_shell_undefined_var(
     Some(r) => r
     None => return
   }
+  if !is_bash_like_shell(effective_shell(ctx, step)) {
+    return
+  }
   let declared = declared_env_names(ctx, step)
   match ts_parse_json(sanitize_expr_placeholders(run)) {
     None => ()
@@ -5458,6 +5472,75 @@ fn runner_os_of(s : String) -> String {
     return "macos"
   }
   "linux"
+}
+
+///|
+fn defaults_run_shell(raw : Map[String, @yaml.Yaml]) -> String? {
+  match raw.get("defaults") {
+    Some(Map(d)) =>
+      match d.get("run") {
+        Some(Map(r)) => get_string_field(r, "shell")
+        _ => None
+      }
+    _ => None
+  }
+}
+
+///|
+/// Resolves the shell a step's `run:` actually executes under (#113), per
+/// GitHub's own precedence: step `shell:` > job `defaults.run.shell` >
+/// workflow `defaults.run.shell` > runner default (`pwsh` on `windows-*`
+/// labels, else `bash`). Composite-action steps (`step.job` is `None`)
+/// skip the job/workflow layers — actions have neither — and fall back to
+/// `bash` if `shell:` is omitted (which `composite-step-shell-required`
+/// already flags as its own error; this is just a reasonable default for
+/// *this* function's callers rather than a claim about what GitHub does).
+fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
+  match get_string_field(step.raw, "shell") {
+    Some(s) => return s
+    None => ()
+  }
+  match step.job {
+    Some(job_name) => {
+      for j in ctx.jobs {
+        if j.name == job_name {
+          match defaults_run_shell(j.raw) {
+            Some(s) => return s
+            None => ()
+          }
+        }
+      }
+      match ctx.workflow_map {
+        Some(m) =>
+          match defaults_run_shell(m) {
+            Some(s) => return s
+            None => ()
+          }
+        None => ()
+      }
+      for j in ctx.jobs {
+        if j.name == job_name {
+          match get_string_field(j.raw, "runs-on") {
+            Some(runs) => if runner_os_of(runs) == "windows" { return "pwsh" }
+            None => ()
+          }
+        }
+      }
+    }
+    None => ()
+  }
+  "bash"
+}
+
+///|
+/// `sh`/`bash` (any path, e.g. `/bin/bash`) and custom shell command
+/// templates built on either (e.g. `bash --norc --noprofile {0}`) all
+/// count — matching actionlint's own "is this shell bash-family"
+/// approach. Everything else (`pwsh`, `cmd`, `python`, `perl {0}`, ...)
+/// isn't shell syntax tree-sitter-bash can meaningfully parse.
+fn is_bash_like_shell(shell : String) -> Bool {
+  let lo = shell.to_lower()
+  lo == "sh" || lo.contains("bash")
 }
 
 ///|
