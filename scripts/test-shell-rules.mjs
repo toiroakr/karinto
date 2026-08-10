@@ -340,13 +340,31 @@ jobs:
 `,
     expectAbsent: true,
   },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (composite-action step with no explicit shell — unknown default, must not fire)",
+    // A composite action has no runs-on: of its own (it runs wherever the
+    // calling workflow's job runs, which could be any OS), so
+    // effective_shell can't resolve a default here either — same "don't
+    // guess bash" treatment as the dynamic runs-on: case above.
+    kind: "action",
+    yaml: `
+name: example
+description: example
+runs:
+  using: composite
+  steps:
+    - run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
 ];
 
 let failures = 0;
 for (const c of cases) {
   const label = c.name ?? c.rule;
   const result = JSON.parse(
-    lint_string(c.yaml, "workflow", "", ""),
+    lint_string(c.yaml, c.kind ?? "workflow", "", ""),
   ).result;
   const matches = result.diagnostics.filter((d) => d.rule === c.rule);
   const hit = matches.length > 0;

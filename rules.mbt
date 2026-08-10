@@ -5506,15 +5506,18 @@ fn defaults_run_shell(raw : Map[String, @yaml.Yaml]) -> String? {
 /// Resolves the shell a step's `run:` actually executes under (#113), per
 /// GitHub's own precedence: step `shell:` > job `defaults.run.shell` >
 /// workflow `defaults.run.shell` > runner default (`pwsh` on `windows-*`
-/// labels, else `bash`). Composite-action steps (`step.job` is `None`)
-/// skip the job/workflow layers — actions have neither — and fall back to
-/// `bash` if `shell:` is omitted (which `composite-step-shell-required`
-/// already flags as its own error; this is just a reasonable default for
-/// *this* function's callers rather than a claim about what GitHub does).
-/// One exception to "else bash": an expression-based `runs-on:` (e.g.
-/// `runs-on: ${{ matrix.os }}`) can't be resolved to an OS statically, so
-/// this returns `""` (never `is_bash_like_shell`) instead of guessing —
-/// see `runs_on_is_dynamic`.
+/// labels, else `bash`). Two cases can't be resolved to a real OS
+/// statically, and return `""` (never `is_bash_like_shell`, so bash-only
+/// rules just skip the step, same as an explicit non-bash `shell:` would)
+/// rather than guess "bash" — guessing wrong risks running the
+/// tree-sitter-bash analyzers on what's actually a pwsh script:
+/// - a composite-action step (`step.job` is `None` — actions have no
+///   `runs-on:` of their own, they run wherever the calling workflow's job
+///   runs, which could be any OS; `composite-step-shell-required` already
+///   flags the missing `shell:` itself as its own separate error, but that
+///   doesn't stop *this* function from also needing a safe answer)
+/// - an expression-based `runs-on:` (e.g. `runs-on: ${{ matrix.os }}`, a
+///   common cross-platform matrix pattern) — see `runs_on_is_dynamic`
 fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
   match get_string_field(step.raw, "shell") {
     Some(s) => return s
@@ -5547,20 +5550,14 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
             }
           }
           if runs_on_is_dynamic(labels) {
-            // Can't tell the runner OS statically (e.g. `runs-on: ${{
-            // matrix.os }}`), so don't guess "bash" — that risks running
-            // the tree-sitter-bash analyzers on what's actually a pwsh
-            // script on the Windows leg of the matrix. `""` isn't
-            // `is_bash_like_shell`, so bash-only rules just skip this step,
-            // same as an explicit non-bash `shell:` would.
             return ""
           }
         }
       }
+      "bash"
     }
-    None => ()
+    None => ""
   }
-  "bash"
 }
 
 ///|
