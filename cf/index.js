@@ -91,12 +91,16 @@ import { ensureInitWorkerd } from "../shell-ts-adapter/index.mjs";
 // shell rules are additive, not load-bearing, so this is caught and logged
 // rather than propagated. `ts_is_ready()` staying false makes the shell
 // rules no-op the same way it does when this is never awaited at all.
+// Clears the cached promise on failure (rather than caching the rejection's
+// resolved-undefined replacement forever) so a later request in the same
+// isolate gets to retry, in case the failure was transient.
 let _shellTsPromise;
 function getShellTs() {
   if (!_shellTsPromise) {
     _shellTsPromise = ensureInitWorkerd(ttsWasmModule, bashWasmModule).catch(
       (e) => {
         console.error("shell-ts-adapter init failed:", e);
+        _shellTsPromise = undefined;
       },
     );
   }

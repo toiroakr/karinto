@@ -230,21 +230,63 @@ fn command_shell_name(cmd : ShellNode) -> String? {
   }
   let head = words[0].to_lower()
   let wrappers = ["sudo", "env", "exec", "nohup"]
-  if head == "env" {
-    // `env` accepts leading `NAME=VALUE` assignments before the command it
-    // runs (`env FOO=bar bash`) — skip those too, not just `-` flags, or
-    // `FOO=bar` is mistaken for the shell name.
-    for w in words[1:] {
-      if !w.has_prefix("-") && !is_env_style_assignment(w) {
-        return Some(w.to_lower())
-      }
-    }
-    None
-  } else if wrappers.contains(head) {
-    first_non_flag_word(words[1:])
+  if wrappers.contains(head) {
+    first_word_after_wrapper_flags(words[1:], head)
   } else {
     Some(head)
   }
+}
+
+///|
+/// True if `flag` (as it appears on `wrapper`'s own command line, e.g. the
+/// `-u` in `sudo -u root bash` or `env -u PATH bash`) consumes the *next*
+/// word as its argument rather than standing alone — so that argument isn't
+/// mistaken for the wrapped command's name. Not exhaustive, just the flags
+/// plausible before a shell invocation in a `curl | wrapper ... bash`-style
+/// install script.
+fn wrapper_flag_takes_value(wrapper : String, flag : String) -> Bool {
+  match wrapper {
+    "sudo" =>
+      flag == "-u" ||
+      flag == "-g" ||
+      flag == "-h" ||
+      flag == "-p" ||
+      flag == "-r" ||
+      flag == "-t" ||
+      flag == "-C" ||
+      flag == "-D" ||
+      flag == "-U"
+    "env" => flag == "-u" || flag == "--unset"
+    "exec" => flag == "-a"
+    _ => false
+  }
+}
+
+///|
+/// The first `words` token that's neither a `-`-prefixed flag (skipping
+/// that flag's own argument too, per `wrapper_flag_takes_value` — `sudo -u
+/// root bash` must resolve to `bash`, not `root`) nor, for `env`
+/// specifically, a `NAME=VALUE` assignment (`env FOO=bar bash` → `bash`,
+/// not `FOO=bar`).
+fn first_word_after_wrapper_flags(
+  words : ArrayView[String],
+  wrapper : String,
+) -> String? {
+  let mut i = 0
+  let n = words.length()
+  while i < n {
+    let w = words[i]
+    if wrapper == "env" && is_env_style_assignment(w) {
+      i = i + 1
+      continue
+    }
+    if w.has_prefix("-") {
+      i = if wrapper_flag_takes_value(wrapper, w) { i + 2 } else { i + 1 }
+      continue
+    }
+    return Some(w.to_lower())
+  }
+  None
 }
 
 ///|

@@ -181,6 +181,30 @@ test "unpinned-tools: curl piped to env with a NAME=VALUE assignment before bash
 }
 
 ///|
+let unpinned_curl_pipe_env_dash_u_bash : String = "{\"t\":\"program\",\"s\":0,\"e\":54,\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":54,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":35,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":35,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":38,\"e\":54,\"c\":[{\"t\":\"command_name\",\"s\":38,\"e\":41,\"x\":\"env\",\"c\":[{\"t\":\"word\",\"s\":38,\"e\":41,\"x\":\"env\"}]},{\"t\":\"word\",\"s\":42,\"e\":44,\"x\":\"-u\"},{\"t\":\"word\",\"s\":45,\"e\":49,\"x\":\"PATH\"},{\"t\":\"word\",\"s\":50,\"e\":54,\"x\":\"bash\"}]}]}]}"
+
+///|
+/// `env -u PATH bash` — `-u` takes `PATH` as its own argument (unset that
+/// var before running the command), so `PATH` must not be mistaken for the
+/// shell name; `command_shell_name` needs to skip both tokens to reach
+/// `bash`.
+test "unpinned-tools: curl piped to env -u PATH bash (flag with its own argument) is still flagged" {
+  let root = parse_shell_ast(unpinned_curl_pipe_env_dash_u_bash).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
+let unpinned_curl_pipe_sudo_dash_u_bash : String = "{\"t\":\"program\",\"s\":0,\"e\":55,\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":55,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":35,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":35,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":38,\"e\":55,\"c\":[{\"t\":\"command_name\",\"s\":38,\"e\":42,\"x\":\"sudo\",\"c\":[{\"t\":\"word\",\"s\":38,\"e\":42,\"x\":\"sudo\"}]},{\"t\":\"word\",\"s\":43,\"e\":45,\"x\":\"-u\"},{\"t\":\"word\",\"s\":46,\"e\":50,\"x\":\"root\"},{\"t\":\"word\",\"s\":51,\"e\":55,\"x\":\"bash\"}]}]}]}"
+
+///|
+/// `sudo -u root bash` — same issue as `env -u`: `-u`'s argument (`root`)
+/// must not be mistaken for the shell name.
+test "unpinned-tools: curl piped to sudo -u root bash (flag with its own argument) is still flagged" {
+  let root = parse_shell_ast(unpinned_curl_pipe_sudo_dash_u_bash).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
 let unredacted_base64_pipe : String = "{\"t\":\"program\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo \\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":17,\"x\":\"\\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":16,\"x\":\"$MY_SECRET\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":16,\"x\":\"MY_SECRET\"}]}]}]},{\"t\":\"command\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"command_name\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"word\",\"s\":20,\"e\":26,\"x\":\"base64\"}]}]}]}]}"
 
 ///|
