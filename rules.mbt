@@ -76,10 +76,12 @@ pub(all) struct WalkCtx {
   archived_uses : Array[String]
   // Optional caller-supplied glob patterns naming known self-hosted runner
   // labels (karinto.yaml's / actionlint.yaml's `self-hosted-runner.labels`).
-  // Empty means "not configured": `check_unknown_runner_label` then keeps its
-  // historical behaviour of skipping validation entirely once `self-hosted`
-  // appears, rather than treating every custom label as unknown.
-  self_hosted_runner_labels : Array[String]
+  // `None` means "not configured": `check_unknown_runner_label` then keeps
+  // its historical behaviour of skipping validation entirely once
+  // `self-hosted` appears. `Some([])` means "configured, no extra labels" —
+  // validation runs strictly (every custom label alongside `self-hosted` is
+  // unknown); `Some([...])` validates against the known set plus these globs.
+  self_hosted_runner_labels : Array[String]?
   // Optional caller-supplied `vars.*` allowlist (karinto.yaml's /
   // actionlint.yaml's `config-variables`). `None` disables the check
   // (default, matches actionlint); `Some([])` forbids every `vars.*`
@@ -210,7 +212,7 @@ pub fn prewalk(
   source? : String = "",
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
-  self_hosted_runner_labels? : Array[String] = [],
+  self_hosted_runner_labels? : Array[String]? = None,
   config_variables? : Array[String]? = None,
   position_root? : @yaml.Node? = None,
   line_counter? : @yaml.LineCounter? = None,
@@ -6657,7 +6659,7 @@ fn known_runner_labels() -> Array[String] {
 fn flag_runner_label(
   label : String,
   out : Array[Diagnostic],
-  configured_labels : Array[String],
+  configured_labels : Array[String]?,
 ) -> Unit {
   // Skip GHA expression labels (`${{ ... }}`) and the empty string.
   if label == "" || label.contains("${{") {
@@ -6668,11 +6670,16 @@ fn flag_runner_label(
     return
   }
   // Caller-supplied self-hosted runner labels (karinto.yaml /
-  // actionlint.yaml `self-hosted-runner.labels`), glob-capable.
-  for pat in configured_labels {
-    if glob_match(pat, label) {
-      return
-    }
+  // actionlint.yaml `self-hosted-runner.labels`), glob-capable. `None`
+  // (not configured) contributes no extra allowed labels.
+  match configured_labels {
+    Some(extra) =>
+      for pat in extra {
+        if glob_match(pat, label) {
+          return
+        }
+      }
+    None => ()
   }
   let hint = suggest(label, labels)
   // Flag every label not in the known list. This matches actionlint behaviour:
@@ -6699,9 +6706,10 @@ fn check_unknown_runner_label(
       // for self-hosted infrastructure. Absent a caller-supplied
       // `self-hosted-runner.labels` config, actionlint skips the
       // unknown-label check entirely in that case, so we do the same. With a
-      // config present, validate the remaining labels against the known set
-      // plus the configured globs instead of skipping — that's the whole
-      // point of supplying one.
+      // config present — even `Some([])`, "configured, no extra labels" —
+      // validate the remaining labels against the known set plus the
+      // configured globs instead of skipping; presence of the config is
+      // what opts in, not whether it lists any globs.
       let mut has_self_hosted = false
       for item in arr {
         match item {
@@ -6709,7 +6717,7 @@ fn check_unknown_runner_label(
           _ => ()
         }
       }
-      if not(has_self_hosted) || ctx.self_hosted_runner_labels.length() > 0 {
+      if not(has_self_hosted) || ctx.self_hosted_runner_labels is Some(_) {
         for item in arr {
           match item {
             String(s) =>

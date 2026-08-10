@@ -16,7 +16,13 @@
 
 ///|
 priv struct KarintoConfig {
-  self_hosted_runner_labels : Array[String]
+  // `None` = not configured (default — `check_unknown_runner_label` keeps
+  // its historical skip-when-self-hosted behaviour), `Some([])` = configured
+  // with no extra labels (validate strictly: only the known built-in labels
+  // pass), `Some([...])` = validate against the known set plus these globs.
+  // Distinguishing `Some([])` from `None` matters: an author who writes
+  // `labels: []` is opting into strict checking, not opting out of it.
+  self_hosted_runner_labels : Array[String]?
   // `None` = disabled (default — matches actionlint's own default), `Some([])`
   // = forbid every `vars.*` reference, `Some([...])` = allow only those names.
   config_variables : Array[String]?
@@ -27,7 +33,7 @@ priv struct KarintoConfig {
 ///|
 fn empty_karinto_config() -> KarintoConfig {
   KarintoConfig::{
-    self_hosted_runner_labels: [],
+    self_hosted_runner_labels: None,
     config_variables: None,
     rule_severity: {},
     ignore_paths: [],
@@ -75,10 +81,10 @@ fn parse_karinto_config(config : String) -> KarintoConfig {
   let self_hosted_runner_labels = match top.get("self-hosted-runner") {
     Some(Map(sm)) =>
       match sm.get("labels") {
-        Some(Array(items)) => yaml_string_array(items)
-        _ => []
+        Some(Array(items)) => Some(yaml_string_array(items))
+        _ => None
       }
-    _ => []
+    _ => None
   }
   let config_variables = match top.get("config-variables") {
     Some(Array(items)) => Some(yaml_string_array(items))

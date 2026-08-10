@@ -716,7 +716,7 @@ fn run_rules(
   source : String,
   forbidden_uses : Array[String],
   archived_uses : Array[String],
-  self_hosted_runner_labels : Array[String],
+  self_hosted_runner_labels : Array[String]?,
   config_variables : Array[String]?,
   position_root : @yaml.Node?,
   line_counter : @yaml.LineCounter?,

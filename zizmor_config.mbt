@@ -63,7 +63,9 @@ fn parse_zizmor_config(config : String) -> ZizmorConfig {
 fn merge_zizmor_configs(a : ZizmorConfig, b : ZizmorConfig) -> ZizmorConfig {
   let disabled : Array[String] = []
   for d in a.disabled {
-    disabled.push(d)
+    if !disabled.contains(d) {
+      disabled.push(d)
+    }
   }
   for d in b.disabled {
     if !disabled.contains(d) {

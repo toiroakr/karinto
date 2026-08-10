@@ -213,11 +213,13 @@ the opt-outs authors already wrote for the upstream tools:
 - **karinto config** — a native `karinto.yaml` covers four things with no
   home in the tools above:
   - `self-hosted-runner.labels`: glob patterns of labels your self-hosted
-    runners carry. Without this, a `runs-on:` that includes `self-hosted`
-    skips label validation entirely (any custom label is assumed to be a
-    routing hint); with it, the remaining labels are checked against the
-    known set plus your globs, so a typo (`gpu-a1oo` vs `gpu-a100`) is still
-    caught.
+    runners carry. Without this key at all, a `runs-on:` that includes
+    `self-hosted` skips label validation entirely (any custom label is
+    assumed to be a routing hint); with it — even `labels: []` — the
+    remaining labels are checked against the known set plus your globs, so a
+    typo (`gpu-a1oo` vs `gpu-a100`) is still caught. `labels: []` means
+    "configured, no extra labels" (strict — every custom label is flagged),
+    not "same as omitting the key".
   - `config-variables`: an allowlist of `vars.*` names. Omitted (the
     default) leaves the check off; `[]` forbids every `vars.*` reference;
     a non-empty list flags any `vars.<name>` not in it.

@@ -910,6 +910,30 @@ test "karinto config: self-hosted-runner.labels validates the remaining labels i
 }
 
 ///|
+test "karinto config: self-hosted-runner.labels: [] means \"configured, no extra labels\" (strict), not \"unconfigured\"" {
+  // `Some([])` (an explicit empty list) must validate strictly — every
+  // custom label alongside `self-hosted` is flagged — the same as it would
+  // if a non-empty list were given and the label just didn't match any glob.
+  // It must NOT fall back to the `None` (unconfigured) skip-all behaviour,
+  // which only an *absent* `self-hosted-runner.labels` key triggers.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, gpu-a100]
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|self-hosted-runner:
+    #|  labels: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length(),
+    1,
+  )
+}
+
+///|
 test "karinto config: config-variables is dormant without config" {
   let yaml =
     #|on: push
