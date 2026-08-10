@@ -47,6 +47,17 @@ async function fetchText(url) {
   return res.text();
 }
 
+// workflow-syntax.md backs three watchers (workflow/job/step keys). Caching
+// by URL — keyed on the in-flight promise, so concurrent watchers dedupe
+// too — means it's fetched once per run instead of once per watcher.
+const fetchCache = new Map();
+function fetchTextCached(url) {
+  if (!fetchCache.has(url)) {
+    fetchCache.set(url, fetchText(url));
+  }
+  return fetchCache.get(url);
+}
+
 // Extracts the string literals out of `fn <fnName>() -> Array[String] { [
 // "...", "...", ... ] }` in rules.mbt. Every watched table is written in
 // this exact shape (see valid_perm_scopes/known_runner_labels/known_events/
@@ -301,7 +312,7 @@ async function checkWatcher(watcher, rulesSource) {
   const docValues = new Set();
   const sourceUrls = [];
   for (const source of watcher.sources) {
-    const text = await fetchText(source.url);
+    const text = await fetchTextCached(source.url);
     for (const v of source.extract(text)) docValues.add(v);
     sourceUrls.push(source.url);
   }
