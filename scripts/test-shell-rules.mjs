@@ -300,6 +300,46 @@ jobs:
         run: echo $SOME_MYSTERY_VARIABLE
 `,
   },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (step shell: C:\\msys64\\usr\\bin\\sh.exe — Windows path + .exe, still bash-family, must fire)",
+    // is_bash_like_shell must strip both a `\`-separated Windows path and
+    // a `.exe` suffix to reach the "sh" basename.
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: 'C:\\msys64\\usr\\bin\\sh.exe -e {0}'
+        run: echo $SOME_MYSTERY_VARIABLE
+`,
+  },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (runs-on: ${{ matrix.os }} with no explicit shell — unknown default, must not fire)",
+    // effective_shell can't resolve an expression-based runs-on: to an OS
+    // statically, so it must not guess "bash" (which could misparse an
+    // actual pwsh script on the Windows leg of the matrix).
+    yaml: `
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: \${{ matrix.os }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
 ];
 
 let failures = 0;

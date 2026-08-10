@@ -5511,6 +5511,10 @@ fn defaults_run_shell(raw : Map[String, @yaml.Yaml]) -> String? {
 /// `bash` if `shell:` is omitted (which `composite-step-shell-required`
 /// already flags as its own error; this is just a reasonable default for
 /// *this* function's callers rather than a claim about what GitHub does).
+/// One exception to "else bash": an expression-based `runs-on:` (e.g.
+/// `runs-on: ${{ matrix.os }}`) can't be resolved to an OS statically, so
+/// this returns `""` (never `is_bash_like_shell`) instead of guessing —
+/// see `runs_on_is_dynamic`.
 fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
   match get_string_field(step.raw, "shell") {
     Some(s) => return s
@@ -5536,10 +5540,20 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
       }
       for j in ctx.jobs {
         if j.name == job_name {
-          for runs in runs_on_labels(j.raw) {
+          let labels = runs_on_labels(j.raw)
+          for runs in labels {
             if runner_os_of(runs) == "windows" {
               return "pwsh"
             }
+          }
+          if runs_on_is_dynamic(labels) {
+            // Can't tell the runner OS statically (e.g. `runs-on: ${{
+            // matrix.os }}`), so don't guess "bash" — that risks running
+            // the tree-sitter-bash analyzers on what's actually a pwsh
+            // script on the Windows leg of the matrix. `""` isn't
+            // `is_bash_like_shell`, so bash-only rules just skip this step,
+            // same as an explicit non-bash `shell:` would.
+            return ""
           }
         }
       }
@@ -5547,6 +5561,19 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
     None => ()
   }
   "bash"
+}
+
+///|
+/// True if any `runs-on:` label is an unresolved `${{ … }}` expression
+/// (e.g. `runs-on: ${{ matrix.os }}`) — a common cross-platform matrix
+/// pattern. See the comment where this is used in `effective_shell`.
+fn runs_on_is_dynamic(labels : Array[String]) -> Bool {
+  for l in labels {
+    if l.contains("${{") {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -5572,23 +5599,35 @@ fn runs_on_labels(raw : Map[String, @yaml.Yaml]) -> Array[String] {
 }
 
 ///|
-/// `sh`/`bash` (any path, e.g. `/bin/bash`) and custom shell command
-/// templates built on either (e.g. `bash --norc --noprofile {0}`,
-/// `sh -e {0}`) all count — matching actionlint's own "is this shell
-/// bash-family" approach. Everything else (`pwsh`, `cmd`, `python`,
-/// `perl {0}`, ...) isn't shell syntax tree-sitter-bash can meaningfully
-/// parse. Only the first whitespace-separated token (the program) is
-/// considered, and only its basename (text after the last `/`) — a
-/// template's trailing flags/`{0}` placeholder don't matter.
+/// `sh`/`bash` (any path, e.g. `/bin/bash`, `C:\msys64\usr\bin\sh.exe`) and
+/// custom shell command templates built on either (e.g. `bash --norc
+/// --noprofile {0}`, `sh -e {0}`) all count — matching actionlint's own "is
+/// this shell bash-family" approach. Everything else (`pwsh`, `cmd`,
+/// `python`, `perl {0}`, ...) isn't shell syntax tree-sitter-bash can
+/// meaningfully parse. Only the first whitespace-separated token (the
+/// program) is considered, and only its basename (text after the last `/`
+/// or `\`, and stripped of a `.exe` suffix — a custom `shell:` path
+/// pointing at MSYS2/Git-Bash's `sh`/`bash` on a Windows runner uses `\`
+/// separators and usually an explicit `.exe`) — a template's trailing
+/// flags/`{0}` placeholder don't matter.
 fn is_bash_like_shell(shell : String) -> Bool {
   let lo = shell.to_lower()
   let first_token = match lo.find(" ") {
     Some(idx) => lo[:idx].to_owned()
     None => lo
   }
-  let basename = match first_token.rev_find("/") {
+  let after_fwd_slash = match first_token.rev_find("/") {
     Some(idx) => first_token[idx + 1:].to_owned()
     None => first_token
+  }
+  let after_back_slash = match after_fwd_slash.rev_find("\\") {
+    Some(idx) => after_fwd_slash[idx + 1:].to_owned()
+    None => after_fwd_slash
+  }
+  let basename = if after_back_slash.has_suffix(".exe") {
+    after_back_slash[:after_back_slash.length() - 4].to_owned()
+  } else {
+    after_back_slash
   }
   basename == "sh" || basename.contains("bash")
 }
