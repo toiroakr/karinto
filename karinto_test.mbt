@@ -1004,6 +1004,32 @@ test "karinto config: rules.<id> overrides severity" {
 }
 
 ///|
+test "karinto config: rules.<id> severity as a YAML block scalar still parses" {
+  // A literal block scalar (`|`) keeps its trailing newline under YAML's
+  // default "clip" chomping — `parse_severity_string` must trim it, not
+  // just spaces/tabs, or the override silently falls through.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions: |
+    #|    error
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
 test "karinto config: ignore-paths suppresses a rule under a matching glob" {
   let yaml =
     #|on: push

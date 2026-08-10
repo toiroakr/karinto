@@ -49,8 +49,11 @@ fn yaml_string_array(items : Array[@yaml.Yaml]) -> Array[String] {
 }
 
 ///|
+/// Trims ` \t\r\n` rather than just ` \t`, so a value written as a YAML
+/// block scalar (`severity: |\n  error\n`, which keeps its trailing
+/// newline) still matches instead of silently falling through to `None`.
 fn parse_severity_string(s : String) -> Severity? {
-  match s.trim(chars=" \t").to_owned() {
+  match s.trim(chars=" \t\r\n").to_owned() {
     "error" => Some(Error)
     "warning" => Some(Warning)
     "info" => Some(Info)
