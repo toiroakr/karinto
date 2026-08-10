@@ -5520,9 +5520,10 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
       }
       for j in ctx.jobs {
         if j.name == job_name {
-          match get_string_field(j.raw, "runs-on") {
-            Some(runs) => if runner_os_of(runs) == "windows" { return "pwsh" }
-            None => ()
+          for runs in runs_on_labels(j.raw) {
+            if runner_os_of(runs) == "windows" {
+              return "pwsh"
+            }
           }
         }
       }
@@ -5533,14 +5534,47 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
 }
 
 ///|
+/// `runs-on:` is either a scalar string (`runs-on: windows-latest`) or a
+/// label array (`runs-on: [self-hosted, windows, x64]`) — `get_string_field`
+/// alone only handles the scalar form and silently drops the array form,
+/// which `effective_shell` needs to check for a `windows`-family label.
+fn runs_on_labels(raw : Map[String, @yaml.Yaml]) -> Array[String] {
+  match raw.get("runs-on") {
+    Some(String(s)) => [s]
+    Some(Array(arr)) => {
+      let out : Array[String] = []
+      for item in arr {
+        match item {
+          String(s) => out.push(s)
+          _ => ()
+        }
+      }
+      out
+    }
+    _ => []
+  }
+}
+
+///|
 /// `sh`/`bash` (any path, e.g. `/bin/bash`) and custom shell command
-/// templates built on either (e.g. `bash --norc --noprofile {0}`) all
-/// count — matching actionlint's own "is this shell bash-family"
-/// approach. Everything else (`pwsh`, `cmd`, `python`, `perl {0}`, ...)
-/// isn't shell syntax tree-sitter-bash can meaningfully parse.
+/// templates built on either (e.g. `bash --norc --noprofile {0}`,
+/// `sh -e {0}`) all count — matching actionlint's own "is this shell
+/// bash-family" approach. Everything else (`pwsh`, `cmd`, `python`,
+/// `perl {0}`, ...) isn't shell syntax tree-sitter-bash can meaningfully
+/// parse. Only the first whitespace-separated token (the program) is
+/// considered, and only its basename (text after the last `/`) — a
+/// template's trailing flags/`{0}` placeholder don't matter.
 fn is_bash_like_shell(shell : String) -> Bool {
   let lo = shell.to_lower()
-  lo == "sh" || lo.contains("bash")
+  let first_token = match lo.find(" ") {
+    Some(idx) => lo[:idx].to_owned()
+    None => lo
+  }
+  let basename = match first_token.rev_find("/") {
+    Some(idx) => first_token[idx + 1:].to_owned()
+    None => first_token
+  }
+  basename == "sh" || basename.contains("bash")
 }
 
 ///|

@@ -192,6 +192,44 @@ jobs:
 `,
     expectAbsent: true,
   },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (runs-on as a label array on Windows — runner-default shell is still pwsh)",
+    // `runs-on: [self-hosted, windows, x64]` — an array, not a scalar
+    // string. effective_shell's windows-default fallback must still see
+    // the "windows" label inside the array, not silently fall through to
+    // the "bash" default just because runs-on isn't a plain string.
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
+  {
+    rule: "shell-undefined-var",
+    name: "shell-undefined-var (step shell: /bin/sh — still bash-family, must fire)",
+    // is_bash_like_shell must recognize a full path to `sh`, not just the
+    // bare literal "sh".
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: /bin/sh
+        run: echo $SOME_MYSTERY_VARIABLE
+`,
+  },
 ];
 
 let failures = 0;
