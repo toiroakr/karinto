@@ -52,6 +52,27 @@ async function fetchText(url) {
 // this exact shape (see valid_perm_scopes/known_runner_labels/known_events/
 // known_contexts/workflow_top_keys/job_keys/step_keys/action_top_keys) —
 // this is not a general MoonBit parser, just a pattern match on that shape.
+// Truncates each line at its first `//` that isn't inside a quoted string,
+// so a comment like `// ... "Available Images" table` doesn't get read as a
+// table entry.
+function stripLineComments(text) {
+  return text
+    .split("\n")
+    .map((line) => {
+      let inString = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"' && line[i - 1] !== "\\") {
+          inString = !inString;
+        } else if (!inString && c === "/" && line[i + 1] === "/") {
+          return line.slice(0, i);
+        }
+      }
+      return line;
+    })
+    .join("\n");
+}
+
 function extractMbtArray(source, fnName) {
   const fnStart = source.indexOf(`fn ${fnName}(`);
   if (fnStart < 0) {
@@ -62,7 +83,7 @@ function extractMbtArray(source, fnName) {
   if (braceStart < 0 || braceEnd < 0) {
     throw new Error(`could not find the body of \`${fnName}\` in rules.mbt`);
   }
-  const body = source.slice(braceStart, braceEnd);
+  const body = stripLineComments(source.slice(braceStart, braceEnd));
   const values = new Set();
   for (const m of body.matchAll(/"([^"]+)"/g)) values.add(m[1]);
   return values;
