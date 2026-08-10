@@ -397,6 +397,27 @@ runs:
 `,
     expectAbsent: true,
   },
+  {
+    rule: "shell-undefined-var",
+    name: 'shell-undefined-var (step shell: "bashate" — merely contains "bash", not actually bash-family, must not fire)',
+    // is_bash_like_shell's basename comparison must be exact, not
+    // substring — bashate is a bash *style checker*, not an interpreter,
+    // so tree-sitter-bash parsing it as if it ran a bash script would be
+    // wrong even though the name contains "bash".
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - shell: bashate {0}
+        run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
 ];
 
 let failures = 0;

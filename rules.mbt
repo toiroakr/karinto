@@ -5610,7 +5610,11 @@ fn runs_on_labels(raw : Map[String, @yaml.Yaml]) -> Array[String] {
 /// the string opens with a `"`/`'` — a quoted program path containing its
 /// own spaces (`'"C:\Program Files\Git\bin\bash.exe" -e {0}'`, needed
 /// because unquoted the space would split the path itself) — where the
-/// matching close quote is the boundary instead.
+/// matching close quote is the boundary instead. The basename comparison
+/// is exact, not substring — a program merely containing "bash" in its
+/// name (`bashate`, a bash *style checker*, not an interpreter at all; a
+/// hypothetical `my-bash-wrapper`) isn't necessarily bash-family and
+/// tree-sitter-bash would parse its script incorrectly.
 fn is_bash_like_shell(shell : String) -> Bool {
   let lo = shell.to_lower()
   let first_token = if lo.has_prefix("\"") || lo.has_prefix("'") {
@@ -5638,7 +5642,7 @@ fn is_bash_like_shell(shell : String) -> Bool {
   } else {
     after_back_slash
   }
-  basename == "sh" || basename.contains("bash")
+  basename == "sh" || basename == "bash"
 }
 
 ///|

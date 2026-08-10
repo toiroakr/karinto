@@ -20,6 +20,12 @@
 import { Parser, Language } from "web-tree-sitter";
 
 let parser = null;
+// Caches the in-flight init promise so two concurrent callers await the
+// same initialization instead of each independently racing
+// `Parser.init()`/`Language.load()` before either has set `parser` — the
+// Workerd path's equivalent guard already lives one layer up, in
+// `cf/index.js`'s own `getShellTs()` promise cache.
+let initNodePromise = null;
 
 function afterReady(Bash) {
   parser = new Parser();
@@ -34,20 +40,25 @@ function afterReady(Bash) {
  */
 export async function ensureInitNode() {
   if (parser) return;
-  // `import.meta.resolve` returns a `file://` string, not a `URL` object —
-  // and Node's `fs` functions only special-case actual `URL` instances;
-  // handed a string, they treat it as a literal (bogus) pathname instead of
-  // parsing it, so this must be wrapped before it reaches `Language.load`'s
-  // internal `fs.readFile(input)`.
-  // `import.meta.resolve` itself needs Node >=20.6.0 (unflagged there);
-  // the root package.json's `engines.node` documents that floor — CI is
-  // pinned to Node 22 throughout, well above it.
-  const bashWasmUrl = new URL(
-    import.meta.resolve("tree-sitter-bash/tree-sitter-bash.wasm"),
-  );
-  await Parser.init();
-  const Bash = await Language.load(bashWasmUrl);
-  afterReady(Bash);
+  if (!initNodePromise) {
+    initNodePromise = (async () => {
+      // `import.meta.resolve` returns a `file://` string, not a `URL`
+      // object — and Node's `fs` functions only special-case actual `URL`
+      // instances; handed a string, they treat it as a literal (bogus)
+      // pathname instead of parsing it, so this must be wrapped before it
+      // reaches `Language.load`'s internal `fs.readFile(input)`.
+      // `import.meta.resolve` itself needs Node >=20.6.0 (unflagged
+      // there); the root package.json's `engines.node` documents that
+      // floor — CI is pinned to Node 22 throughout, well above it.
+      const bashWasmUrl = new URL(
+        import.meta.resolve("tree-sitter-bash/tree-sitter-bash.wasm"),
+      );
+      await Parser.init();
+      const Bash = await Language.load(bashWasmUrl);
+      afterReady(Bash);
+    })();
+  }
+  return initNodePromise;
 }
 
 /**
