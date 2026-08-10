@@ -399,6 +399,30 @@ runs:
   },
   {
     rule: "shell-undefined-var",
+    name: 'shell-undefined-var (runs-on: dynamic expression whose own text merely mentions "windows" — still unknown default, must not fire)',
+    // effective_shell's windows-label scan must not run before the
+    // dynamic check: the raw expression text below literally contains
+    // "windows-latest" as a substring, which would otherwise make
+    // runner_os_of misread it as an unconditional windows label and
+    // return "pwsh" for what's actually an unresolvable expression.
+    yaml: `
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: \${{ startsWith(matrix.os, 'windows') && 'windows-latest' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo $SOME_MYSTERY_VARIABLE
+`,
+    expectAbsent: true,
+  },
+  {
+    rule: "shell-undefined-var",
     name: 'shell-undefined-var (step shell: "bashate" — merely contains "bash", not actually bash-family, must not fire)',
     // is_bash_like_shell's basename comparison must be exact, not
     // substring — bashate is a bash *style checker*, not an interpreter,

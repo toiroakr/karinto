@@ -5544,13 +5544,21 @@ fn effective_shell(ctx : WalkCtx, step : StepInfo) -> String {
       for j in ctx.jobs {
         if j.name == job_name {
           let labels = runs_on_labels(j.raw)
+          // Checked *before* scanning for a literal windows label: an
+          // expression like `${{ startsWith(matrix.os, 'windows') &&
+          // 'windows-latest' || 'ubuntu-latest' }}` literally contains
+          // "windows" as a substring of its own source text, which would
+          // otherwise make runner_os_of misread it as an unconditional
+          // windows label and return "pwsh" for what's actually an
+          // unresolvable expression — defeating the whole point of
+          // runs_on_is_dynamic below.
+          if runs_on_is_dynamic(labels) {
+            return ""
+          }
           for runs in labels {
             if runner_os_of(runs) == "windows" {
               return "pwsh"
             }
-          }
-          if runs_on_is_dynamic(labels) {
-            return ""
           }
         }
       }
