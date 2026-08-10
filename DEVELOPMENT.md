@@ -46,9 +46,21 @@ first request because MoonBit's compiled JS seeds a hashmap RNG via
 `crypto.getRandomValues` at module load — CF Workers forbids that in global
 scope, so we lazy-`import()` inside the `fetch` handler.
 
+The tree-sitter-bash shell rules (#113) work the same way, via
+`getShellTs()` next to `getWorker()`: `shell-ts-adapter/` (root
+`node_modules`, `npm install` at the repo root — not just `cd cf`) does the
+async `Parser.init()`/`Language.load()` setup, awaited alongside `getWorker()`
+before the first lint call. `web-tree-sitter` ships patched
+(`patches/web-tree-sitter+*.patch`, applied by `patch-package` on
+`npm install`) so `Language.load` accepts a precompiled `WebAssembly.Module` —
+workerd forbids compiling WASM from raw bytes at runtime, so the two `.wasm`
+files are wrangler's native `.wasm` imports (compiled at deploy/bundle time),
+not bytes read at request time.
+
 Run locally:
 
 ```sh
+npm install         # repo root: shell-ts-adapter + patch-package
 cd cf
 npm install        # installs wrangler
 npm run dev        # render-config + `wrangler dev --config wrangler.deploy.jsonc`

@@ -1,0 +1,292 @@
+///|
+/// Fixture tests for the tree-sitter-bash shell rules (#113), using JSON AST
+/// snapshots captured once via `web-tree-sitter`/`tree-sitter-bash` under
+/// Node (see `scripts/gen-shell-ast-fixtures.mjs`) and pasted in verbatim —
+/// this file needs no live tree-sitter parse, so it runs under the default
+/// `moon test` (wasm-gc) same as every other rule's fixtures. The
+/// integration seam that actually produces this JSON from a live parse is
+/// covered separately by `scripts/test-shell-rules.mjs` (one end-to-end case
+/// per rule, run via `npm run test:shell-rules`).
+
+///|
+let ghenv_true_positive : String = "{\"t\":\"program\",\"s\":0,\"e\":37,\"x\":\"echo \\\"VAR=$USER_INPUT\\\" >> $GITHUB_ENV\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":37,\"x\":\"echo \\\"VAR=$USER_INPUT\\\" >> $GITHUB_ENV\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":22,\"x\":\"echo \\\"VAR=$USER_INPUT\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":22,\"x\":\"\\\"VAR=$USER_INPUT\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":6,\"e\":10,\"x\":\"VAR=\"},{\"t\":\"simple_expansion\",\"s\":10,\"e\":21,\"x\":\"$USER_INPUT\",\"c\":[{\"t\":\"variable_name\",\"s\":11,\"e\":21,\"x\":\"USER_INPUT\"}]}]}]},{\"t\":\"file_redirect\",\"s\":23,\"e\":37,\"x\":\">> $GITHUB_ENV\",\"c\":[{\"t\":\"simple_expansion\",\"s\":26,\"e\":37,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":27,\"e\":37,\"x\":\"GITHUB_ENV\"}]}]}]}]}"
+
+///|
+let ghenv_true_negative : String = "{\"t\":\"program\",\"s\":0,\"e\":34,\"x\":\"echo \\\"VAR=static\\\" >> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":34,\"x\":\"echo \\\"VAR=static\\\" >> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo \\\"VAR=static\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":17,\"x\":\"\\\"VAR=static\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":6,\"e\":16,\"x\":\"VAR=static\"}]}]},{\"t\":\"file_redirect\",\"s\":18,\"e\":34,\"x\":\">> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"string\",\"s\":21,\"e\":34,\"x\":\"\\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":22,\"e\":33,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":23,\"e\":33,\"x\":\"GITHUB_ENV\"}]}]}]}]}]}"
+
+///|
+let ghenv_heredoc_true_positive : String = "{\"t\":\"program\",\"s\":0,\"e\":46,\"x\":\"cat <<EOF >> \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":46,\"x\":\"cat <<EOF >> \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"cat\"}]}]},{\"t\":\"heredoc_redirect\",\"s\":4,\"e\":46,\"x\":\"<<EOF >> \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"heredoc_start\",\"s\":6,\"e\":9,\"x\":\"EOF\"},{\"t\":\"file_redirect\",\"s\":10,\"e\":26,\"x\":\">> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"string\",\"s\":13,\"e\":26,\"x\":\"\\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":14,\"e\":25,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":15,\"e\":25,\"x\":\"GITHUB_ENV\"}]}]}]},{\"t\":\"heredoc_body\",\"s\":27,\"e\":43,\"x\":\"VAR=$USER_INPUT\\n\",\"c\":[{\"t\":\"simple_expansion\",\"s\":31,\"e\":42,\"x\":\"$USER_INPUT\",\"c\":[{\"t\":\"variable_name\",\"s\":32,\"e\":42,\"x\":\"USER_INPUT\"}]},{\"t\":\"heredoc_content\",\"s\":43,\"e\":43,\"x\":\"\"}]},{\"t\":\"heredoc_end\",\"s\":43,\"e\":46,\"x\":\"EOF\"}]}]}]}"
+
+///|
+/// The improvement over the old line-based regex, which never even looked
+/// inside a heredoc body: a quoted heredoc delimiter (`<<'EOF'`) disables
+/// expansion, and tree-sitter-bash's grammar already encodes that itself —
+/// no `simple_expansion` child nodes appear inside this body at all, so
+/// there's nothing extra to special-case here.
+let ghenv_heredoc_quoted_safe : String = "{\"t\":\"program\",\"s\":0,\"e\":50,\"x\":\"cat <<'EOF' >> \\\"$GITHUB_ENV\\\"\\nVAR=$NOT_EXPANDED\\nEOF\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":50,\"x\":\"cat <<'EOF' >> \\\"$GITHUB_ENV\\\"\\nVAR=$NOT_EXPANDED\\nEOF\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"cat\"}]}]},{\"t\":\"heredoc_redirect\",\"s\":4,\"e\":50,\"x\":\"<<'EOF' >> \\\"$GITHUB_ENV\\\"\\nVAR=$NOT_EXPANDED\\nEOF\",\"c\":[{\"t\":\"heredoc_start\",\"s\":6,\"e\":11,\"x\":\"'EOF'\"},{\"t\":\"file_redirect\",\"s\":12,\"e\":28,\"x\":\">> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"string\",\"s\":15,\"e\":28,\"x\":\"\\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":16,\"e\":27,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":17,\"e\":27,\"x\":\"GITHUB_ENV\"}]}]}]},{\"t\":\"heredoc_body\",\"s\":29,\"e\":47,\"x\":\"VAR=$NOT_EXPANDED\\n\"},{\"t\":\"heredoc_end\",\"s\":47,\"e\":50,\"x\":\"EOF\"}]}]}]}"
+
+///|
+let ghenv_overwrite_not_append : String = "{\"t\":\"program\",\"s\":0,\"e\":27,\"x\":\"echo \\\"VAR=$X\\\" > $GITHUB_ENV\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":27,\"x\":\"echo \\\"VAR=$X\\\" > $GITHUB_ENV\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":13,\"x\":\"echo \\\"VAR=$X\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":13,\"x\":\"\\\"VAR=$X\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":6,\"e\":10,\"x\":\"VAR=\"},{\"t\":\"simple_expansion\",\"s\":10,\"e\":12,\"x\":\"$X\",\"c\":[{\"t\":\"variable_name\",\"s\":11,\"e\":12,\"x\":\"X\"}]}]}]},{\"t\":\"file_redirect\",\"s\":14,\"e\":27,\"x\":\"> $GITHUB_ENV\",\"c\":[{\"t\":\"simple_expansion\",\"s\":16,\"e\":27,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":17,\"e\":27,\"x\":\"GITHUB_ENV\"}]}]}]}]}"
+
+///|
+test "github-env: dynamic content appended to $GITHUB_ENV" {
+  let src = "echo \"VAR=$USER_INPUT\" >> $GITHUB_ENV"
+  let root = parse_shell_ast(ghenv_true_positive).unwrap()
+  assert_eq(analyze_github_env(root, src), Some("GITHUB_ENV"))
+}
+
+///|
+test "github-env: static content is not flagged" {
+  let src = "echo \"VAR=static\" >> \"$GITHUB_ENV\""
+  let root = parse_shell_ast(ghenv_true_negative).unwrap()
+  assert_eq(analyze_github_env(root, src), None)
+}
+
+///|
+test "github-env: heredoc body with live expansion is flagged (old regex missed this)" {
+  let src = "cat <<EOF >> \"$GITHUB_ENV\"\nVAR=$USER_INPUT\nEOF"
+  let root = parse_shell_ast(ghenv_heredoc_true_positive).unwrap()
+  assert_eq(analyze_github_env(root, src), Some("GITHUB_ENV"))
+}
+
+///|
+test "github-env: quoted heredoc delimiter disables expansion" {
+  let src = "cat <<'EOF' >> \"$GITHUB_ENV\"\nVAR=$NOT_EXPANDED\nEOF"
+  let root = parse_shell_ast(ghenv_heredoc_quoted_safe).unwrap()
+  assert_eq(analyze_github_env(root, src), None)
+}
+
+///|
+test "github-env: overwrite (`>`) is not an append, not flagged" {
+  let src = "echo \"VAR=$X\" > $GITHUB_ENV"
+  let root = parse_shell_ast(ghenv_overwrite_not_append).unwrap()
+  assert_eq(analyze_github_env(root, src), None)
+}
+
+///|
+/// The `${{ }}`-sanitization pitfall: the AST is parsed from the
+/// *sanitized* script (`${{ … }}` → underscores, so it can't confuse the
+/// bash grammar), which means a `${{ github.event... }}` expression
+/// embedded directly in `run:` — the classic github-env attack shape —
+/// leaves no `simple_expansion` node behind for a pure-AST check to find.
+/// `analyze_github_env` also checks the matching span of the *original*
+/// (pre-sanitization) source for a literal `${{`, which is what actually
+/// catches this case.
+let ghenv_sanitized_expr_true_positive : String = "{\"t\":\"program\",\"s\":0,\"e\":66,\"x\":\"echo \\\"TITLE=______________________________________\\\" >> $GITHUB_ENV\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":66,\"x\":\"echo \\\"TITLE=______________________________________\\\" >> $GITHUB_ENV\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":51,\"x\":\"echo \\\"TITLE=______________________________________\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":51,\"x\":\"\\\"TITLE=______________________________________\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":6,\"e\":50,\"x\":\"TITLE=______________________________________\"}]}]},{\"t\":\"file_redirect\",\"s\":52,\"e\":66,\"x\":\">> $GITHUB_ENV\",\"c\":[{\"t\":\"simple_expansion\",\"s\":55,\"e\":66,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":56,\"e\":66,\"x\":\"GITHUB_ENV\"}]}]}]}]}"
+
+///|
+test "github-env: a raw ${{ }} expression (not a shell var) is still flagged via the original-source fallback" {
+  let sanitized_src = "echo \"TITLE=______________________________________\" >> $GITHUB_ENV"
+  let original_src = "echo \"TITLE=${{ github.event.pull_request.title }}\" >> $GITHUB_ENV"
+  assert_eq(sanitize_expr_placeholders(original_src), sanitized_src)
+  let root = parse_shell_ast(ghenv_sanitized_expr_true_positive).unwrap()
+  assert_eq(analyze_github_env(root, original_src), Some("GITHUB_ENV"))
+}
+
+///|
+let unpinned_curl_pipe_sh : String = "{\"t\":\"program\",\"s\":0,\"e\":40,\"x\":\"curl https://example.com/install.sh | sh\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":40,\"x\":\"curl https://example.com/install.sh | sh\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":35,\"x\":\"curl https://example.com/install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":35,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":38,\"e\":40,\"x\":\"sh\",\"c\":[{\"t\":\"command_name\",\"s\":38,\"e\":40,\"x\":\"sh\",\"c\":[{\"t\":\"word\",\"s\":38,\"e\":40,\"x\":\"sh\"}]}]}]}]}"
+
+///|
+let unpinned_curl_pipe_bash : String = "{\"t\":\"program\",\"s\":0,\"e\":47,\"x\":\"curl -sSL https://example.com/install.sh | bash\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":47,\"x\":\"curl -sSL https://example.com/install.sh | bash\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":40,\"x\":\"curl -sSL https://example.com/install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":9,\"x\":\"-sSL\"},{\"t\":\"word\",\"s\":10,\"e\":40,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":43,\"e\":47,\"x\":\"bash\",\"c\":[{\"t\":\"command_name\",\"s\":43,\"e\":47,\"x\":\"bash\",\"c\":[{\"t\":\"word\",\"s\":43,\"e\":47,\"x\":\"bash\"}]}]}]}]}"
+
+///|
+let unpinned_curl_saved_then_run : String = "{\"t\":\"program\",\"s\":0,\"e\":63,\"x\":\"curl -o install.sh https://example.com/install.sh\\nsh install.sh\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":49,\"x\":\"curl -o install.sh https://example.com/install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":7,\"x\":\"-o\"},{\"t\":\"word\",\"s\":8,\"e\":18,\"x\":\"install.sh\"},{\"t\":\"word\",\"s\":19,\"e\":49,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":50,\"e\":63,\"x\":\"sh install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":50,\"e\":52,\"x\":\"sh\",\"c\":[{\"t\":\"word\",\"s\":50,\"e\":52,\"x\":\"sh\"}]},{\"t\":\"word\",\"s\":53,\"e\":63,\"x\":\"install.sh\"}]}]}"
+
+///|
+let unpinned_safe_curl : String = "{\"t\":\"program\",\"s\":0,\"e\":46,\"x\":\"curl -o out.json https://example.com/data.json\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":46,\"x\":\"curl -o out.json https://example.com/data.json\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"curl\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"curl\"}]},{\"t\":\"word\",\"s\":5,\"e\":7,\"x\":\"-o\"},{\"t\":\"word\",\"s\":8,\"e\":16,\"x\":\"out.json\"},{\"t\":\"word\",\"s\":17,\"e\":46,\"x\":\"https://example.com/data.json\"}]}]}"
+
+///|
+let unpinned_wget_pipe_sh : String = "{\"t\":\"program\",\"s\":0,\"e\":45,\"x\":\"wget -qO- https://example.com/install.sh | sh\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":45,\"x\":\"wget -qO- https://example.com/install.sh | sh\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":40,\"x\":\"wget -qO- https://example.com/install.sh\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"wget\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"wget\"}]},{\"t\":\"word\",\"s\":5,\"e\":9,\"x\":\"-qO-\"},{\"t\":\"word\",\"s\":10,\"e\":40,\"x\":\"https://example.com/install.sh\"}]},{\"t\":\"command\",\"s\":43,\"e\":45,\"x\":\"sh\",\"c\":[{\"t\":\"command_name\",\"s\":43,\"e\":45,\"x\":\"sh\",\"c\":[{\"t\":\"word\",\"s\":43,\"e\":45,\"x\":\"sh\"}]}]}]}]}"
+
+///|
+test "unpinned-tools: curl piped straight to sh" {
+  let root = parse_shell_ast(unpinned_curl_pipe_sh).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
+test "unpinned-tools: curl piped straight to bash" {
+  let root = parse_shell_ast(unpinned_curl_pipe_bash).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
+test "unpinned-tools: wget piped straight to sh" {
+  let root = parse_shell_ast(unpinned_wget_pipe_sh).unwrap()
+  assert_true(analyze_unpinned_tools(root))
+}
+
+///|
+test "unpinned-tools: curl saved to disk then run separately is out of scope (matches old behavior)" {
+  let root = parse_shell_ast(unpinned_curl_saved_then_run).unwrap()
+  assert_false(analyze_unpinned_tools(root))
+}
+
+///|
+test "unpinned-tools: plain curl download is not flagged" {
+  let root = parse_shell_ast(unpinned_safe_curl).unwrap()
+  assert_false(analyze_unpinned_tools(root))
+}
+
+///|
+let unredacted_base64_pipe : String = "{\"t\":\"program\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":26,\"x\":\"echo \\\"$MY_SECRET\\\" | base64\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo \\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":17,\"x\":\"\\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":16,\"x\":\"$MY_SECRET\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":16,\"x\":\"MY_SECRET\"}]}]}]},{\"t\":\"command\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"command_name\",\"s\":20,\"e\":26,\"x\":\"base64\",\"c\":[{\"t\":\"word\",\"s\":20,\"e\":26,\"x\":\"base64\"}]}]}]}]}"
+
+///|
+let unredacted_plain_echo : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\"x\":\"echo \\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo \\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":17,\"x\":\"\\\"$MY_SECRET\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":16,\"x\":\"$MY_SECRET\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":16,\"x\":\"MY_SECRET\"}]}]}]}]}"
+
+///|
+let unredacted_xxd_pipe : String = "{\"t\":\"program\",\"s\":0,\"e\":19,\"x\":\"echo \\\"$TOKEN\\\" | xxd\",\"c\":[{\"t\":\"pipeline\",\"s\":0,\"e\":19,\"x\":\"echo \\\"$TOKEN\\\" | xxd\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":13,\"x\":\"echo \\\"$TOKEN\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":13,\"x\":\"\\\"$TOKEN\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":12,\"x\":\"$TOKEN\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":12,\"x\":\"TOKEN\"}]}]}]},{\"t\":\"command\",\"s\":16,\"e\":19,\"x\":\"xxd\",\"c\":[{\"t\":\"command_name\",\"s\":16,\"e\":19,\"x\":\"xxd\",\"c\":[{\"t\":\"word\",\"s\":16,\"e\":19,\"x\":\"xxd\"}]}]}]}]}"
+
+///|
+test "unredacted-secrets: piped through base64" {
+  let root = parse_shell_ast(unredacted_base64_pipe).unwrap()
+  assert_eq(analyze_unredacted_secrets(root), Some("base64"))
+}
+
+///|
+test "unredacted-secrets: piped through xxd" {
+  let root = parse_shell_ast(unredacted_xxd_pipe).unwrap()
+  assert_eq(analyze_unredacted_secrets(root), Some("xxd"))
+}
+
+///|
+test "unredacted-secrets: no pipe at all is not flagged" {
+  let root = parse_shell_ast(unredacted_plain_echo).unwrap()
+  assert_eq(analyze_unredacted_secrets(root), None)
+}
+
+///|
+let publish_twine_upload : String = "{\"t\":\"program\",\"s\":0,\"e\":29,\"x\":\"python -m twine upload dist/*\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":29,\"x\":\"python -m twine upload dist/*\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":6,\"x\":\"python\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":6,\"x\":\"python\"}]},{\"t\":\"word\",\"s\":7,\"e\":9,\"x\":\"-m\"},{\"t\":\"word\",\"s\":10,\"e\":15,\"x\":\"twine\"},{\"t\":\"word\",\"s\":16,\"e\":22,\"x\":\"upload\"},{\"t\":\"word\",\"s\":23,\"e\":29,\"x\":\"dist/*\"}]}]}"
+
+///|
+let publish_npm_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":11,\"x\":\"npm publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":11,\"x\":\"npm publish\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"}]}]}"
+
+///|
+let publish_npm_dry_run : String = "{\"t\":\"program\",\"s\":0,\"e\":21,\"x\":\"npm publish --dry-run\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":21,\"x\":\"npm publish --dry-run\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"},{\"t\":\"word\",\"s\":12,\"e\":21,\"x\":\"--dry-run\"}]}]}"
+
+///|
+test "use-trusted-publishing: python -m twine upload" {
+  let root = parse_shell_ast(publish_twine_upload).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: npm publish" {
+  let root = parse_shell_ast(publish_npm_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: npm publish --dry-run is not a real publish" {
+  let root = parse_shell_ast(publish_npm_dry_run).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
+let publish_pkg_pr_new_dlx : String = "{\"t\":\"program\",\"s\":0,\"e\":61,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":61,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --commentWithSha --compact\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"pnpm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"pnpm\"}]},{\"t\":\"word\",\"s\":5,\"e\":8,\"x\":\"dlx\"},{\"t\":\"word\",\"s\":9,\"e\":26,\"x\":\"pkg-pr-new@0.0.78\"},{\"t\":\"word\",\"s\":27,\"e\":34,\"x\":\"publish\"},{\"t\":\"word\",\"s\":35,\"e\":51,\"x\":\"--commentWithSha\"},{\"t\":\"word\",\"s\":52,\"e\":61,\"x\":\"--compact\"}]}]}"
+
+///|
+let publish_pkg_pr_new_dlx_yflag : String = "{\"t\":\"program\",\"s\":0,\"e\":47,\"x\":\"pnpm dlx -y pkg-pr-new@0.0.78 publish --compact\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":47,\"x\":\"pnpm dlx -y pkg-pr-new@0.0.78 publish --compact\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"pnpm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"pnpm\"}]},{\"t\":\"word\",\"s\":5,\"e\":8,\"x\":\"dlx\"},{\"t\":\"word\",\"s\":9,\"e\":11,\"x\":\"-y\"},{\"t\":\"word\",\"s\":12,\"e\":29,\"x\":\"pkg-pr-new@0.0.78\"},{\"t\":\"word\",\"s\":30,\"e\":37,\"x\":\"publish\"},{\"t\":\"word\",\"s\":38,\"e\":47,\"x\":\"--compact\"}]}]}"
+
+///|
+let publish_npm_exec_yes : String = "{\"t\":\"program\",\"s\":0,\"e\":46,\"x\":\"npm exec --yes pkg-pr-new -- publish --compact\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":46,\"x\":\"npm exec --yes pkg-pr-new -- publish --compact\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":8,\"x\":\"exec\"},{\"t\":\"word\",\"s\":9,\"e\":14,\"x\":\"--yes\"},{\"t\":\"word\",\"s\":15,\"e\":25,\"x\":\"pkg-pr-new\"},{\"t\":\"word\",\"s\":26,\"e\":28,\"x\":\"--\"},{\"t\":\"word\",\"s\":29,\"e\":36,\"x\":\"publish\"},{\"t\":\"word\",\"s\":37,\"e\":46,\"x\":\"--compact\"}]}]}"
+
+///|
+let publish_dlx_then_real_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":60,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --compact && pnpm publish\",\"c\":[{\"t\":\"list\",\"s\":0,\"e\":60,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --compact && pnpm publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":44,\"x\":\"pnpm dlx pkg-pr-new@0.0.78 publish --compact\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"pnpm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"pnpm\"}]},{\"t\":\"word\",\"s\":5,\"e\":8,\"x\":\"dlx\"},{\"t\":\"word\",\"s\":9,\"e\":26,\"x\":\"pkg-pr-new@0.0.78\"},{\"t\":\"word\",\"s\":27,\"e\":34,\"x\":\"publish\"},{\"t\":\"word\",\"s\":35,\"e\":44,\"x\":\"--compact\"}]},{\"t\":\"command\",\"s\":48,\"e\":60,\"x\":\"pnpm publish\",\"c\":[{\"t\":\"command_name\",\"s\":48,\"e\":52,\"x\":\"pnpm\",\"c\":[{\"t\":\"word\",\"s\":48,\"e\":52,\"x\":\"pnpm\"}]},{\"t\":\"word\",\"s\":53,\"e\":60,\"x\":\"publish\"}]}]}]}"
+
+///|
+test "use-trusted-publishing: pnpm dlx pkg-pr-new preview publish is not a registry publish" {
+  let root = parse_shell_ast(publish_pkg_pr_new_dlx).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: pnpm dlx -y pkg-pr-new is still recognized as dlx (not pnpm's own publish)" {
+  let root = parse_shell_ast(publish_pkg_pr_new_dlx_yflag).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: npm exec --yes pkg is not npm's own publish" {
+  let root = parse_shell_ast(publish_npm_exec_yes).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx still fires" {
+  let root = parse_shell_ast(publish_dlx_then_real_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "sanitize_expr_placeholders: keeps offsets stable" {
+  let src = "echo ${{ inputs.x }} done"
+  let out = sanitize_expr_placeholders(src)
+  assert_eq(out.length(), src.length())
+  assert_eq(out, "echo _______________ done")
+}
+
+///|
+test "sanitize_expr_placeholders: no-op without any ${{ }}" {
+  assert_eq(sanitize_expr_placeholders("echo hi"), "echo hi")
+}
+
+///|
+let quote_unsafe_unquoted : String = "{\"t\":\"program\",\"s\":0,\"e\":11,\"x\":\"echo $TITLE\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":11,\"x\":\"echo $TITLE\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":11,\"x\":\"$TITLE\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":11,\"x\":\"TITLE\"}]}]}]}"
+
+///|
+let quote_safe_quoted : String = "{\"t\":\"program\",\"s\":0,\"e\":13,\"x\":\"echo \\\"$TITLE\\\"\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":13,\"x\":\"echo \\\"$TITLE\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":13,\"x\":\"\\\"$TITLE\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":12,\"x\":\"$TITLE\",\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":12,\"x\":\"TITLE\"}]}]}]}]}"
+
+///|
+let quote_safe_unrelated_var : String = "{\"t\":\"program\",\"s\":0,\"e\":11,\"x\":\"echo $OTHER\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":11,\"x\":\"echo $OTHER\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":11,\"x\":\"$OTHER\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":11,\"x\":\"OTHER\"}]}]}]}"
+
+///|
+test "shell-quote-safety: unquoted expansion of a dynamic env var is flagged" {
+  let root = parse_shell_ast(quote_unsafe_unquoted).unwrap()
+  assert_eq(analyze_quote_safety(root, ["TITLE"]), ["TITLE"])
+}
+
+///|
+test "shell-quote-safety: quoted expansion is safe" {
+  let root = parse_shell_ast(quote_safe_quoted).unwrap()
+  assert_eq(analyze_quote_safety(root, ["TITLE"]), [])
+}
+
+///|
+test "shell-quote-safety: unquoted expansion of an unrelated (non-dynamic) var is not flagged" {
+  let root = parse_shell_ast(quote_safe_unrelated_var).unwrap()
+  assert_eq(analyze_quote_safety(root, ["TITLE"]), [])
+}
+
+///|
+let undef_unknown_ref : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\"x\":\"echo $MYSTERY_VAR\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo $MYSTERY_VAR\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":17,\"x\":\"$MYSTERY_VAR\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":17,\"x\":\"MYSTERY_VAR\"}]}]}]}"
+
+///|
+let undef_assigned_first : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\"x\":\"FOO=bar\\necho $FOO\",\"c\":[{\"t\":\"variable_assignment\",\"s\":0,\"e\":7,\"x\":\"FOO=bar\",\"c\":[{\"t\":\"variable_name\",\"s\":0,\"e\":3,\"x\":\"FOO\"},{\"t\":\"word\",\"s\":4,\"e\":7,\"x\":\"bar\"}]},{\"t\":\"command\",\"s\":8,\"e\":17,\"x\":\"echo $FOO\",\"c\":[{\"t\":\"command_name\",\"s\":8,\"e\":12,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":8,\"e\":12,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":13,\"e\":17,\"x\":\"$FOO\",\"c\":[{\"t\":\"variable_name\",\"s\":14,\"e\":17,\"x\":\"FOO\"}]}]}]}"
+
+///|
+let undef_well_known : String = "{\"t\":\"program\",\"s\":0,\"e\":16,\"x\":\"echo $GITHUB_SHA\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":16,\"x\":\"echo $GITHUB_SHA\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":16,\"x\":\"$GITHUB_SHA\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":16,\"x\":\"GITHUB_SHA\"}]}]}]}"
+
+///|
+test "shell-undefined-var: reference with no declared source is flagged" {
+  let root = parse_shell_ast(undef_unknown_ref).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), ["MYSTERY_VAR"])
+}
+
+///|
+test "shell-undefined-var: a variable assigned earlier in the same script is not flagged" {
+  let root = parse_shell_ast(undef_assigned_first).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}
+
+///|
+test "shell-undefined-var: a declared env: key is not flagged" {
+  let root = parse_shell_ast(undef_unknown_ref).unwrap()
+  assert_eq(analyze_undefined_vars(root, ["MYSTERY_VAR"]), [])
+}
+
+///|
+test "shell-undefined-var: a well-known GITHUB_* context var is not flagged" {
+  let root = parse_shell_ast(undef_well_known).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}

@@ -44,6 +44,8 @@ fn tested_rule_ids() -> Array[String] {
     "workflow-env-no-secrets", "job-env-no-secrets", "github-app-limit-repositories",
     "github-app-limit-permissions", "composite-step-shell-required", "job-timeout-minutes-required",
     "checkout-persist-credentials-false",
+    // karinto-original family (#113) — fixtures live in shell_rules_test.mbt
+     "shell-quote-safety", "shell-undefined-var",
   ]
 }
 

@@ -38,9 +38,24 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+          cache: npm
+
+      # The js target now resolves `@karinto/shell-ts-adapter` (#113,
+      # tree-sitter-bash) via root `node_modules`, so it needs installing
+      # before this pass — the wasm-gc pass above never touches it.
+      - run: npm ci
 
       - name: moon test (js)
         run: moon test --target js
+
+      # `moon test`'s js-target driver loads the compiled test bundle via
+      # CJS `require()`, which can't load an ESM graph with a top-level
+      # await — so nothing in it can await the shell-ts-adapter's async
+      # init before a test body runs (see shell_ts_ffi.mbt). This is the
+      # only place the tree-sitter-bash shell rules get exercised with a
+      # real parse against the real compiled Worker artifact.
+      - name: shell rules (real tree-sitter parse)
+        run: npm run test:shell-rules
 
   changeset-check:
     # Skip on the auto-generated "Version Packages" PR from changesets/action,

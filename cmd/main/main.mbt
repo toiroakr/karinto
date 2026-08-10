@@ -30,6 +30,16 @@
 /// The package is js-only (`supported_targets = "js"` in moon.pkg):
 /// stdin / file IO and the exit code go through Node.js FFI, which is the
 /// simplest local UX given the Worker build already targets js.
+///
+/// `moon run --target js cmd/main` never awaits the async setup the
+/// tree-sitter-bash shell rules need (#113: github-env / unpinned-tools /
+/// unredacted-secrets / use-trusted-publishing / shell-quote-safety /
+/// shell-undefined-var) — those rules just no-op on this path, the same as
+/// they do under `moon test`. For shell-rule-enabled linting, build once
+/// and use the `cli.mjs` wrapper instead:
+///
+///   moon build --target js --release
+///   node cmd/main/cli.mjs -- .github/workflows/ci.yml
 
 ///|
 fn main {

@@ -2,3 +2,10 @@ import {
   "toiroakr/karinto/yamlpos" @yaml,
   "moonbitlang/core/json",
 }
+
+options(
+  targets: {
+    "shell_ts_ffi.mbt": [ "js" ],
+    "shell_ts_ffi_stub.mbt": [ "not", "js" ],
+  },
+)

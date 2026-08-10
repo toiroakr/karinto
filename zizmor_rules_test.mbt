@@ -730,6 +730,17 @@ test "github-app: scoped properly is silent" {
 }
 
 ///|
+/// `github-env`'s own detection is tree-sitter-bash-based (#113) and only
+/// runs under `--target js` with `shell-ts-adapter`'s `ensureInit*()`
+/// awaited first — `moon test` can't do that (no way to await async JS
+/// setup before a plain sync `test { }` body runs; see the architecture
+/// note in `shell_ts_ffi.mbt`), so this diagnostic never fires here. This
+/// test still verifies the rest of the pipeline (the workflow's other
+/// diagnostics) and that the shell-parse-dependent rule no-ops safely
+/// rather than erroring. The detection logic itself is unit-tested against
+/// captured AST fixtures in `shell_rules_test.mbt`
+/// (`analyze_github_env`); the live parse is covered by
+/// `scripts/test-shell-rules.mjs` (`npm run test:shell-rules`).
 test "github-env: write to $GITHUB_ENV from untrusted input" {
   let yaml =
     #|on: pull_request_target
@@ -777,14 +788,6 @@ test "github-env: write to $GITHUB_ENV from untrusted input" {
         "severity": "error",
         "message": "untrusted `github.event.pull_request.title` interpolated into `run:` script",
         "pos": { "line": 9, "col": 14 },
-        "job": "build",
-        "step": { "index": 0 },
-      },
-      {
-        "rule": "github-env",
-        "severity": "error",
-        "message": "write to `GITHUB_ENV` may allow code execution",
-        "pos": { "line": 9, "col": 9 },
         "job": "build",
         "step": { "index": 0 },
       },
@@ -1537,6 +1540,10 @@ test "unpinned-images: container image uses a floating tag" {
 }
 
 ///|
+/// See the comment on "github-env: write to $GITHUB_ENV from untrusted
+/// input" above — `unpinned-tools`' run-based detection is also
+/// tree-sitter-bash-based (#113) and only runs under `--target js` with
+/// the adapter initialized, which `moon test` can't do.
 test "unpinned-tools: pipe-to-shell installer in run" {
   let yaml =
     #|on: push
@@ -1573,14 +1580,6 @@ test "unpinned-tools: pipe-to-shell installer in run" {
         "message": "job `build` has no `name:`",
         "pos": { "line": 3, "col": 3 },
         "job": "build",
-      },
-      {
-        "rule": "unpinned-tools",
-        "severity": "warning",
-        "message": "run step fetches and executes an external script without pinning",
-        "pos": { "line": 9, "col": 14 },
-        "job": "build",
-        "step": { "index": 0 },
       },
     ],
   })
@@ -1639,6 +1638,11 @@ test "unpinned-uses: tag/branch ref instead of full SHA" {
 }
 
 ///|
+/// See the comment on "github-env: write to $GITHUB_ENV from untrusted
+/// input" above — the pipe-transform half of `unredacted-secrets` (this
+/// fixture) is also tree-sitter-bash-based (#113); the `fromJSON(secrets)`
+/// half (tested elsewhere in this file) isn't shell syntax and still runs
+/// under `moon test`.
 test "unredacted-secrets: secret length manipulated before logging" {
   let yaml =
     #|on: push
@@ -1682,14 +1686,6 @@ test "unredacted-secrets: secret length manipulated before logging" {
         "rule": "template-injection",
         "severity": "info",
         "message": "code injection via template expansion in `run:` script",
-        "pos": { "line": 10, "col": 9 },
-        "job": "build",
-        "step": { "index": 0 },
-      },
-      {
-        "rule": "unredacted-secrets",
-        "severity": "error",
-        "message": "secret is transformed (base64) before logging; redaction will fail",
         "pos": { "line": 10, "col": 9 },
         "job": "build",
         "step": { "index": 0 },
@@ -1857,6 +1853,18 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
 }
 
 ///|
+/// `use-trusted-publishing`'s run-based detection is tree-sitter-bash-based
+/// (#113) and only runs under `--target js` with `shell-ts-adapter`
+/// initialized, which `moon test` can't do (see the architecture note in
+/// `shell_ts_ffi.mbt`) — this and the three tests below that exercise the
+/// same run-based path (`git grep 'tree-sitter-bash-based (#113)'` finds
+/// them) assert `0` hits here for that reason, not because the detection
+/// stopped working. `analyze_trusted_publishing` (`shell_rules.mbt`) is
+/// unit-tested against captured AST fixtures in `shell_rules_test.mbt`,
+/// including the job/step attribution behavior this test used to check
+/// end-to-end (`add_diag_step_field` itself is unchanged and still
+/// exercised by every other job/step-scoped rule's fixtures); the live
+/// parse is covered by `scripts/test-shell-rules.mjs`.
 test "use-trusted-publishing: run-based detection fires on a real npm publish" {
   let yaml =
     #|on: push
@@ -1870,11 +1878,7 @@ test "use-trusted-publishing: run-based detection fires on a real npm publish" {
     #|      - run: pnpm publish --no-git-checks
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
-  inspect(hits.length(), content="1")
-  // Attributed to the offending step, not left job-only — this is what lets
-  // an inline ignore comment on the step itself suppress it.
-  assert_true(hits[0].job is Some("publish"))
-  assert_true(hits[0].step is Some({ index: 0, .. }))
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -1933,9 +1937,12 @@ test "use-trusted-publishing: a trailing ignore on one step does not swallow the
     #|    steps:
     #|      - run: pnpm publish --no-git-checks # karinto: ignore[use-trusted-publishing]
     #|      - run: npm publish --no-git-checks
+  // Both steps' run-based detection is tree-sitter-bash-based (#113) and
+  // doesn't run under `moon test` — see the comment on "run-based
+  // detection fires on a real npm publish" above.
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
-  inspect(hits.length(), content="1")
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -1978,9 +1985,12 @@ test "use-trusted-publishing: a comment above the PREVIOUS step's `- ` line does
     #|        run: pnpm build
     #|      - name: Publish
     #|        run: pnpm publish --no-git-checks
+  // Run-based detection is tree-sitter-bash-based (#113) and doesn't run
+  // under `moon test` — see the comment on "run-based detection fires on a
+  // real npm publish" above.
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
-  inspect(hits.length(), content="1")
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -2034,9 +2044,15 @@ test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx stil
     #|      contents: read
     #|    steps:
     #|      - run: pnpm dlx pkg-pr-new@0.0.78 publish --compact && pnpm publish
+  // Run-based detection is tree-sitter-bash-based (#113) and doesn't run
+  // under `moon test` — see the comment on "run-based detection fires on a
+  // real npm publish" above. The dlx-vs-real-publish distinction this test
+  // name describes is unit-tested against captured AST fixtures in
+  // `shell_rules_test.mbt` ("a real publish chained after a pkg-pr-new dlx
+  // still fires").
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })
-  inspect(hits.length(), content="1")
+  inspect(hits.length(), content="0")
 }
 
 // ---------------------------------------------------------------------------

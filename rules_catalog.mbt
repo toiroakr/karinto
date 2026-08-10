@@ -21,6 +21,10 @@ pub(all) enum Source {
   Zizmor
   Ghalint
   Curllint
+  /// karinto-original: no upstream defines this check. First used by the
+  /// tree-sitter-bash shell rules (#113) — see `origins` on each entry for
+  /// which specific gap it fills.
+  Karinto
 } derive(Eq, Debug)
 
 ///|
@@ -199,8 +203,16 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       true,
     ),
-    // shellcheck / pyflakes: out of scope — karinto runs in a Cloudflare
-    // Worker and cannot ship native shellcheck / pyflakes binaries.
+    // shellcheck: out of scope. A 2026-08-10 investigation found WASM
+    // (wasilibs/go-shellcheck) partially invalidates the "can't ship a
+    // native binary" rationale, but it was evaluated and rejected anyway —
+    // GPL-3.0 (license-hygiene overhead for this Apache-2.0 repo), an
+    // unproven WASI shim under workerd, and a GHC-runtime CPU cost that
+    // doesn't fit the free plan's 10ms budget. #113 adds targeted
+    // tree-sitter-bash rules instead (see the `Karinto`-sourced entries
+    // below and the upgraded `github-env` / `unpinned-tools` /
+    // `unredacted-secrets` / `use-trusted-publishing` entries) — not a
+    // shellcheck substitute or a claim of equivalent coverage.
     spec(
       "shellcheck",
       "shellcheck findings in run",
@@ -212,6 +224,10 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       true,
     ),
+    // pyflakes / Python script analysis: out of scope entirely, unrelated
+    // to the shellcheck WASM question above. GitHub-hosted runners don't
+    // preinstall pyflakes either, so actionlint's own pyflakes rule is a
+    // silent no-op in most CI anyway.
     spec(
       "pyflakes",
       "pyflakes findings in python run",
@@ -624,6 +640,32 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Implemented,
       true,
       false,
+    ),
+    // First karinto-original rules (#113), built on the tree-sitter-bash
+    // integration added for the upgraded shell rules above/below. Narrower
+    // in scope than stock shellcheck by design — see DEVELOPMENT.md /
+    // the issue for the rationale.
+    spec(
+      "shell-quote-safety",
+      "Unquoted expansion of an expression-derived env var in `run:`",
+      Karinto,
+      ["karinto:shell-quote-safety"],
+      Security,
+      Warning,
+      Implemented,
+      true,
+      true,
+    ),
+    spec(
+      "shell-undefined-var",
+      "Reference to a shell variable with no declared source",
+      Karinto,
+      ["karinto:shell-undefined-var"],
+      BestPractice,
+      Info,
+      Implemented,
+      true,
+      true,
     ),
     spec(
       "github-env",

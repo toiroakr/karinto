@@ -1,0 +1,13 @@
+diff --git a/node_modules/web-tree-sitter/web-tree-sitter.js b/node_modules/web-tree-sitter/web-tree-sitter.js
+index 449545c..22db809 100644
+--- a/node_modules/web-tree-sitter/web-tree-sitter.js
++++ b/node_modules/web-tree-sitter/web-tree-sitter.js
+@@ -1483,6 +1483,8 @@ var Language = class _Language {
+     let binary2;
+     if (input instanceof Uint8Array) {
+       binary2 = input;
++    } else if (input instanceof WebAssembly.Module) {
++      binary2 = input;
+     } else if (globalThis.process?.versions.node) {
+       const fs2 = await import("fs/promises");
+       binary2 = await fs2.readFile(input);

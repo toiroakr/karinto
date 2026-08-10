@@ -740,6 +740,22 @@ pub fn all_rules() -> Array[Rule] {
       on_step: Some(check_unredacted_secrets),
     },
     Rule::{
+      id: "shell-quote-safety",
+      title: "Unquoted expansion of an expression-derived env var",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_shell_quote_safety),
+    },
+    Rule::{
+      id: "shell-undefined-var",
+      title: "Shell variable reference with no declared source",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_shell_undefined_var),
+    },
+    Rule::{
       id: "shell-name-per-os",
       title: "Bad shell for runner OS",
       applies: workflow_only,
@@ -1792,297 +1808,20 @@ fn trusted_publishing_action_finding(step : StepInfo) -> String? {
 }
 
 ///|
-/// Replace bash (`\<EOL>`) and PowerShell (`` `<EOL> ``) line
-/// continuations with a single space so multi-line publishing commands
-/// flatten into one logical line.
-fn collapse_continuations(s : String) -> String {
-  let chars : Array[Char] = []
-  for ch in s {
-    chars.push(ch)
-  }
-  let n = chars.length()
-  let buf = StringBuilder::new()
-  let mut i = 0
-  while i < n {
-    let c = chars[i]
-    if (c == '\\' || c == '`') && i + 1 < n {
-      let c1 = chars[i + 1]
-      if c1 == '\n' {
-        buf.write_char(' ')
-        i = i + 2
-        continue
-      }
-      if c1 == '\r' && i + 2 < n && chars[i + 2] == '\n' {
-        buf.write_char(' ')
-        i = i + 3
-        continue
-      }
-    }
-    buf.write_char(c)
-    i = i + 1
-  }
-  buf.to_string()
-}
-
-///|
-fn tokens_contain(tokens : Array[String], needle : String) -> Bool {
-  for t in tokens {
-    if t == needle {
-      return true
-    }
-  }
-  false
-}
-
-///|
-fn tokens_contain_prefix(tokens : Array[String], prefix : String) -> Bool {
-  for t in tokens {
-    if t.has_prefix(prefix) {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// Tokenize a shell line on ASCII whitespace.
-fn shell_tokens(line : String) -> Array[String] {
-  let out : Array[String] = []
-  let buf = StringBuilder::new()
-  let mut has = false
-  for ch in line {
-    if ch == ' ' || ch == '\t' {
-      if has {
-        out.push(buf.to_string())
-        buf.reset()
-        has = false
-      }
-    } else {
-      buf.write_char(ch)
-      has = true
-    }
-  }
-  if has {
-    out.push(buf.to_string())
-  }
-  out
-}
-
-///|
-/// Strips a trailing `@version` (or `@tag`) from a package spec, keeping a
-/// leading scope marker intact (`@scope/pkg@1.0.0` -> `@scope/pkg`).
-fn strip_pkg_version(spec : String) -> String {
-  let chars : Array[Char] = []
-  for ch in spec {
-    chars.push(ch)
-  }
-  let n = chars.length()
-  let mut at_idx = -1
-  for i in 1..<n {
-    if chars[i] == '@' {
-      at_idx = i
-    }
-  }
-  if at_idx < 0 {
-    return spec
-  }
-  let buf = StringBuilder::new()
-  for j in 0..<at_idx {
-    buf.write_char(chars[j])
-  }
-  buf.to_string()
-}
-
-///|
-/// Known "ephemeral publish" tools that are commonly run via a package
-/// manager's dlx/exec mechanism but don't push to a long-lived-token-backed
-/// npm registry (e.g. `pkg-pr-new` publishes PR preview builds authenticated
-/// via the job's own `GITHUB_TOKEN`, not an npm auth token).
-fn is_known_non_registry_dlx_tool(name : String) -> Bool {
-  name == "pkg-pr-new"
-}
-
-///|
-/// If `cmd`/`rest` run a package via a dlx-style mechanism (`pnpm dlx`,
-/// `yarn dlx`, `npm exec`), returns the bare (version-stripped) package name
-/// being invoked. Flags between the dlx keyword and the package spec (e.g.
-/// `pnpm dlx -y pkg`, `npm exec --yes -- pkg`) are skipped.
-fn dlx_invoked_tool(cmd : String, rest : Array[String]) -> String? {
-  let after_keyword = if (cmd == "pnpm" || cmd == "yarn") &&
-    rest.length() > 0 &&
-    rest[0] == "dlx" {
-    1
-  } else if cmd == "npm" && rest.length() > 0 && rest[0] == "exec" {
-    1
-  } else {
-    return None
-  }
-  let mut i = after_keyword
-  while i < rest.length() && rest[i].has_prefix("-") {
-    i = i + 1
-  }
-  if i < rest.length() {
-    return Some(strip_pkg_version(rest[i]))
-  }
-  None
-}
-
-///|
-/// Returns true if `tokens` (a single flattened shell command line)
-/// invokes one of upstream zizmor's tracked publishing commands.
-fn shell_line_is_publish(tokens : Array[String]) -> Bool {
-  if tokens.length() == 0 {
-    return false
-  }
-  let cmd = tokens[0]
-  let rest : Array[String] = []
-  for k in 1..<tokens.length() {
-    rest.push(tokens[k])
-  }
-  match dlx_invoked_tool(cmd, rest) {
-    Some(tool) => if is_known_non_registry_dlx_tool(tool) { return false }
-    None => ()
-  }
-  if cmd == "cargo" {
-    return tokens_contain(rest, "publish") &&
-      !tokens_contain(rest, "--dry-run") &&
-      !tokens_contain(rest, "-n")
-  }
-  if cmd == "twine" {
-    return tokens_contain(rest, "upload")
-  }
-  if cmd == "npm" || cmd == "pnpm" {
-    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
-  }
-  if cmd == "bun" {
-    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
-  }
-  if cmd == "yarn" {
-    return tokens_contain(rest, "publish") &&
-      !tokens_contain(rest, "--dry-run") &&
-      !tokens_contain(rest, "-n")
-  }
-  if cmd == "gem" {
-    return tokens_contain(rest, "push")
-  }
-  if cmd == "nuget" || cmd == "nuget.exe" {
-    return tokens_contain(rest, "push")
-  }
-  if cmd == "dotnet" {
-    return tokens_contain(rest, "nuget") && tokens_contain(rest, "push")
-  }
-  if cmd == "poetry" {
-    return tokens_contain(rest, "publish") && !tokens_contain(rest, "--dry-run")
-  }
-  if cmd == "hatch" || cmd == "pdm" {
-    return tokens_contain(rest, "publish")
-  }
-  if cmd == "uv" {
-    if tokens_contain(rest, "publish") {
-      return true
-    }
-    if tokens_contain(rest, "twine") && tokens_contain(rest, "upload") {
-      return true
-    }
-    return false
-  }
-  if cmd == "uvx" {
-    if (
-        tokens_contain(rest, "twine") ||
-        tokens_contain_prefix(rest, "twine==") ||
-        tokens_contain_prefix(rest, "twine@")
-      ) &&
-      tokens_contain(rest, "upload") {
-      return true
-    }
-    return false
-  }
-  if cmd == "python" || cmd.has_prefix("python3") {
-    return tokens_contain(rest, "-m") &&
-      tokens_contain(rest, "twine") &&
-      tokens_contain(rest, "upload")
-  }
-  if cmd == "pipx" {
-    if rest.length() > 0 && rest[0] == "run" {
-      let twine_like = tokens_contain(rest, "twine") ||
-        tokens_contain_prefix(rest, "twine==") ||
-        tokens_contain_prefix(rest, "twine@")
-      return twine_like && tokens_contain(rest, "upload")
-    }
-    return false
-  }
-  if cmd == "bundle" {
-    return tokens_contain(rest, "exec") &&
-      tokens_contain(rest, "gem") &&
-      tokens_contain(rest, "push")
-  }
-  if cmd == "bunx" {
-    let npm_like = tokens_contain(rest, "npm") ||
-      tokens_contain_prefix(rest, "npm@")
-    return npm_like &&
-      tokens_contain(rest, "publish") &&
-      !tokens_contain(rest, "--dry-run")
-  }
-  false
-}
-
-///|
-/// Splits a shell line on `&&`, `||`, and `;` into independent command
-/// segments, so a line chaining several commands (e.g.
-/// `pnpm dlx pkg-pr-new publish && pnpm publish`) is evaluated per-segment
-/// instead of as one flat token stream — otherwise an early decision about
-/// the first segment (e.g. it's a known non-registry dlx tool) would swallow
-/// a real publish command later on the same line. Heuristic, like the rest
-/// of this shell-line parsing: it doesn't account for quoting.
-fn split_shell_segments(line : String) -> Array[String] {
-  let chars : Array[Char] = []
-  for ch in line {
-    chars.push(ch)
-  }
-  let n = chars.length()
-  let segments : Array[String] = []
-  let buf = StringBuilder::new()
-  let mut i = 0
-  while i < n {
-    let c = chars[i]
-    if (c == '&' || c == '|') && i + 1 < n && chars[i + 1] == c {
-      segments.push(buf.to_string())
-      buf.reset()
-      i = i + 2
-      continue
-    }
-    if c == ';' {
-      segments.push(buf.to_string())
-      buf.reset()
-      i = i + 1
-      continue
-    }
-    buf.write_char(c)
-    i = i + 1
-  }
-  segments.push(buf.to_string())
-  segments
-}
-
-///|
+/// Tree-sitter-bash replacement (#113) for the old hand-rolled
+/// `&&`/`||`/`;`-splitting shell tokenizer — see `analyze_trusted_publishing`
+/// in `shell_rules.mbt` for the actual command matching, now against real
+/// AST `command`/`word` nodes instead of a manual scanner that "doesn't
+/// account for quoting" (as the old implementation's own comment put it).
 fn run_has_publish_cmd(run : String) -> Bool {
-  let normalized = collapse_continuations(run)
-  for line in normalized.split("\n") {
-    let trimmed = line.trim(chars=" \t\r").to_owned()
-    if trimmed.length() == 0 {
-      continue
-    }
-    for segment in split_shell_segments(trimmed) {
-      let seg_trimmed = trim_ws(segment)
-      if seg_trimmed.length() == 0 {
-        continue
+  match ts_parse_json(sanitize_expr_placeholders(run)) {
+    None => false
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => false
+        Some(root) => analyze_trusted_publishing(root)
       }
-      if shell_line_is_publish(shell_tokens(seg_trimmed)) {
-        return true
-      }
-    }
   }
-  false
 }
 
 ///|
@@ -4710,17 +4449,20 @@ fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 // ---------------------------------------------------------------------------
 
 ///|
+/// Tree-sitter-bash replacement (#113) for the old
+/// `contains("curl ") && contains("| sh")`-style heuristic, which fired on
+/// script text that merely mentions both substrings anywhere (in any order,
+/// any statement) — see `analyze_unpinned_tools` in `shell_rules.mbt` for
+/// the position-aware pipeline check.
 fn run_has_pipe_to_shell(r : String) -> Bool {
-  let has_fetch = r.contains("curl ") || r.contains("wget ")
-  if !has_fetch {
-    return false
+  match ts_parse_json(sanitize_expr_placeholders(r)) {
+    None => false
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => false
+        Some(root) => analyze_unpinned_tools(root)
+      }
   }
-  r.contains("| bash") ||
-  r.contains("|bash") ||
-  r.contains("| sh") ||
-  r.contains("|sh") ||
-  r.contains("| zsh") ||
-  r.contains("|zsh")
 }
 
 ///|
@@ -5424,86 +5166,18 @@ fn workflow_has_dangerous_trigger(ctx : WalkCtx) -> Bool {
 }
 
 ///|
-/// Heuristic "non-literal" check for the LHS of a `>>` redirect to
-/// `GITHUB_ENV`/`GITHUB_PATH`. Matches any shell variable, `$(...)`,
-/// command-substitution backticks, cmd-style `%var%`, or `${{ ... }}`
-/// expression. Single-quoted regions stay literal in bash, so `$` and
-/// backticks inside them are ignored — `echo '$HOME' >> $GITHUB_ENV`
-/// is a static write. Static-only writes (e.g. `echo foo=bar >> $GITHUB_ENV`)
-/// stay silent, matching upstream `bash_echo_arg_is_safe`.
-fn lhs_has_dynamic_token(lhs : String) -> Bool {
-  let chars = lhs.to_array()
-  let n = chars.length()
-  let mut i = 0
-  let mut in_single = false
-  let mut in_double = false
-  while i < n {
-    let ch = chars[i]
-    if !in_double && ch == '\'' {
-      in_single = !in_single
-      i = i + 1
-      continue
-    }
-    if !in_single && ch == '"' {
-      in_double = !in_double
-      i = i + 1
-      continue
-    }
-    if !in_single {
-      // Outside single-quotes: bash `$VAR` / `${VAR}` / `$(...)`,
-      // pwsh `$env:...`, the template expression `${{ ... }}`, or a
-      // command-substitution backtick — every one is dynamic.
-      if ch == '$' || ch == '`' {
-        return true
-      }
-    }
-    i = i + 1
-  }
-  // cmd `%VAR%` is unaffected by shell quoting (cmd doesn't use single quotes
-  // the same way); fall back to counting `%` occurrences.
-  let mut pct_count = 0
-  for part in lhs.split("%") {
-    let _ = part
-    pct_count = pct_count + 1
-  }
-  if pct_count >= 3 {
-    return true
-  }
-  false
-}
-
-///|
 /// Matches the three syntactic forms upstream recognises for a redirect to
-/// `GITHUB_ENV` / `GITHUB_PATH`:
-///   * bash       `>> $GITHUB_ENV` or `>> ${GITHUB_ENV}`
-///   * powershell `>> $env:GITHUB_ENV` or `>> ${env:GITHUB_ENV}` (case-insensitive)
-///   * cmd        `>> %GITHUB_ENV%`
-/// Returns the (label, target) on first hit per line, else None.
-fn detect_github_env_redirect(line : String) -> (String, String)? {
-  let lo = line.to_lower()
-  let pairs = [
-    ("$github_env", "GITHUB_ENV"),
-    ("${github_env}", "GITHUB_ENV"),
-    ("$env:github_env", "GITHUB_ENV"),
-    ("${env:github_env}", "GITHUB_ENV"),
-    ("%github_env%", "GITHUB_ENV"),
-    ("$github_path", "GITHUB_PATH"),
-    ("${github_path}", "GITHUB_PATH"),
-    ("$env:github_path", "GITHUB_PATH"),
-    ("${env:github_path}", "GITHUB_PATH"),
-    ("%github_path%", "GITHUB_PATH"),
-  ]
-  for entry in pairs {
-    let (needle, target) = entry
-    match lo.find(needle) {
-      Some(_) => return Some((needle, target))
-      None => ()
-    }
-  }
-  None
-}
-
-///|
+/// `GITHUB_ENV` / `GITHUB_PATH`: bash (`$GITHUB_ENV`/`${GITHUB_ENV}`),
+/// powershell (`$env:GITHUB_ENV`/`${env:GITHUB_ENV}`, case-insensitive), and
+/// cmd (`%GITHUB_ENV%`). See `github_env_target` in `shell_rules.mbt` for
+/// the (now AST-node-text-based, not per-line-regex) implementation.
+///
+/// Tree-sitter-bash replacement (#113) for the old per-line regex scanner
+/// (`detect_github_env_redirect` + `lhs_has_dynamic_token`), which only
+/// ever looked at the single line containing `>>` — so it silently missed
+/// the common `cat <<EOF >> "$GITHUB_ENV" ... EOF` heredoc form entirely
+/// (the dynamic content lives on later lines the old scanner never
+/// inspected). See `analyze_github_env` in `shell_rules.mbt`.
 fn check_github_env(
   ctx : WalkCtx,
   step : StepInfo,
@@ -5519,34 +5193,23 @@ fn check_github_env(
   if !ctx.action_is_composite && !workflow_has_dangerous_trigger(ctx) {
     return
   }
-  // Walk by line; for each redirect to GITHUB_ENV/GITHUB_PATH, fire when
-  // the LHS contains any non-literal token (variable/cmd-sub/template).
-  let lines = run.split("\n")
-  for ln in lines {
-    let line = ln.to_owned()
-    // Only care about lines that include `>>`.
-    if !line.contains(">>") {
-      continue
-    }
-    let (_, target) = match detect_github_env_redirect(line) {
-      Some(p) => p
-      None => continue
-    }
-    match line.find(">>") {
-      Some(idx) => {
-        let lhs = line[:idx].to_owned()
-        if lhs_has_dynamic_token(lhs) {
-          add_diag(
-            out,
-            "github-env",
-            Error,
-            "write to `\{target}` may allow code execution",
-          )
-          return
-        }
+  match ts_parse_json(sanitize_expr_placeholders(run)) {
+    None => ()
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => ()
+        Some(root) =>
+          match analyze_github_env(root, run) {
+            Some(target) =>
+              add_diag(
+                out,
+                "github-env",
+                Error,
+                "write to `\{target}` may allow code execution",
+              )
+            None => ()
+          }
       }
-      None => ()
-    }
   }
 }
 
@@ -5555,13 +5218,16 @@ fn check_github_env(
 // ---------------------------------------------------------------------------
 
 ///|
-/// Checks whether `text` references a secret via a transform that bypasses
-/// GitHub Actions' built-in redaction. Returns `Some(transform-name)` on
-/// hit. Looks for shell pipes that mangle the secret (base64/xxd/tr/cut/sed
-/// /awk) and for `fromJSON(secrets...)` / `fromJson(secrets...)` expressions
-/// (case-insensitive) that destructure JSON-typed secrets — both classes
-/// land an unredacted value in logs.
-fn unredacted_secret_transform(text : String) -> String? {
+/// Checks whether `text` (an `env:` value, not a shell script) references a
+/// secret via a transform that bypasses GitHub Actions' built-in redaction.
+/// Returns `Some(transform-name)` on hit. Looks for shell pipes that mangle
+/// the secret (base64/xxd/tr/cut/sed/awk) and for `fromJSON(secrets...)` /
+/// `fromJson(secrets...)` expressions (case-insensitive) that destructure
+/// JSON-typed secrets — both classes land an unredacted value in logs.
+/// Plain substring matching, same as before #113: an `env:` value is a
+/// GitHub Actions expression string, not shell, so there's no AST for it to
+/// parse.
+fn unredacted_secret_transform_text(text : String) -> String? {
   if !contains_secrets_ref(text) {
     return None
   }
@@ -5585,6 +5251,30 @@ fn unredacted_secret_transform(text : String) -> String? {
 }
 
 ///|
+/// `run:` counterpart of `unredacted_secret_transform_text` — the shell
+/// script IS parseable, so the pipe-transform half is tree-sitter-bash
+/// AST-based (#113, `analyze_unredacted_secrets` in `shell_rules.mbt`),
+/// scoped by real pipeline structure instead of matching `"| base64"`
+/// anywhere in the script text. `fromJSON(secrets...)` isn't a shell
+/// construct either way, so that half stays a plain substring check.
+fn unredacted_secret_transform_run(text : String) -> String? {
+  if !contains_secrets_ref(text) {
+    return None
+  }
+  if text.to_lower().contains("fromjson(secrets") {
+    return Some("fromJSON")
+  }
+  match ts_parse_json(sanitize_expr_placeholders(text)) {
+    None => None
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => None
+        Some(root) => analyze_unredacted_secrets(root)
+      }
+  }
+}
+
+///|
 fn check_unredacted_secrets(
   _ctx : WalkCtx,
   step : StepInfo,
@@ -5592,7 +5282,7 @@ fn check_unredacted_secrets(
 ) -> Unit {
   match step.run {
     Some(r) =>
-      match unredacted_secret_transform(r) {
+      match unredacted_secret_transform_run(r) {
         Some(name) => {
           add_diag(
             out,
@@ -5614,7 +5304,7 @@ fn check_unredacted_secrets(
       env.each(fn(_k, v) {
         match v {
           String(s) =>
-            match unredacted_secret_transform(s) {
+            match unredacted_secret_transform_text(s) {
               Some(name) =>
                 add_diag(
                   out,
@@ -5628,6 +5318,129 @@ fn check_unredacted_secrets(
         }
       })
     _ => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: shell-quote-safety (karinto, #113)
+// ---------------------------------------------------------------------------
+
+///|
+/// Step-level `env:` keys whose value is a GitHub Actions expression
+/// (`${{ … }}`) — i.e. not a literal the workflow author fully controls.
+fn dynamic_env_names_of_step(step : StepInfo) -> Array[String] {
+  let out : Array[String] = []
+  match step.raw.get("env") {
+    Some(Map(env)) =>
+      env.each(fn(k, v) {
+        match v {
+          String(s) => if s.contains("${{") { out.push(k) }
+          _ => ()
+        }
+      })
+    _ => ()
+  }
+  out
+}
+
+///|
+fn check_shell_quote_safety(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let run = match step.run {
+    Some(r) => r
+    None => return
+  }
+  let dynamic_names = dynamic_env_names_of_step(step)
+  if dynamic_names.length() == 0 {
+    return
+  }
+  match ts_parse_json(sanitize_expr_placeholders(run)) {
+    None => ()
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => ()
+        Some(root) =>
+          for name in analyze_quote_safety(root, dynamic_names) {
+            add_diag_step_field(
+              out,
+              ctx,
+              "shell-quote-safety",
+              Warning,
+              "unquoted `$\{name}` expands a value derived from `${{ }}`; quote it (`\"$\{name}\"`) to avoid word-splitting/glob expansion",
+              step,
+              "run",
+            )
+          }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: shell-undefined-var (karinto, #113)
+// ---------------------------------------------------------------------------
+
+///|
+fn collect_env_keys(m : Map[String, @yaml.Yaml], out : Array[String]) -> Unit {
+  match m.get("env") {
+    Some(Map(env)) => env.each(fn(k, _v) { out.push(k) })
+    _ => ()
+  }
+}
+
+///|
+/// Merges `env:` keys declared at workflow, job, and step level — any of
+/// them puts the variable in scope for the step's `run:`.
+fn declared_env_names(ctx : WalkCtx, step : StepInfo) -> Array[String] {
+  let out : Array[String] = []
+  match ctx.workflow_map {
+    Some(m) => collect_env_keys(m, out)
+    None => ()
+  }
+  match step.job {
+    Some(job_name) =>
+      for j in ctx.jobs {
+        if j.name == job_name {
+          collect_env_keys(j.raw, out)
+        }
+      }
+    None => ()
+  }
+  collect_env_keys(step.raw, out)
+  out
+}
+
+///|
+fn check_shell_undefined_var(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  let run = match step.run {
+    Some(r) => r
+    None => return
+  }
+  let declared = declared_env_names(ctx, step)
+  match ts_parse_json(sanitize_expr_placeholders(run)) {
+    None => ()
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => ()
+        Some(root) =>
+          for name in analyze_undefined_vars(root, declared) {
+            add_diag_step_field(
+              out,
+              ctx,
+              "shell-undefined-var",
+              Info,
+              "`$\{name}` has no declared `env:` source and isn't assigned earlier in this script",
+              step,
+              "run",
+            )
+          }
+      }
   }
 }
 

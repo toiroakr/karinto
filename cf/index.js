@@ -74,6 +74,35 @@ function getWorker() {
   return _workerPromise;
 }
 
+// tree-sitter-bash setup for the shell rules (#113). Wrangler's native
+// `.wasm` import compiles both modules at deploy/bundle time (verified
+// against real local `wrangler dev`/workerd, not just Node) — workerd
+// forbids compiling WebAssembly from raw bytes at runtime ("Wasm code
+// generation disallowed by embedder"), so these must already be
+// `WebAssembly.Module` objects by the time `ensureInitWorkerd` runs.
+// `shell_ts_ffi.mbt`'s `ts_is_ready()`/`ts_parse_json()` no-op safely if
+// this is never awaited (or fails) — the shell rules just find nothing,
+// same as every other target/environment that doesn't have tree-sitter.
+import ttsWasmModule from "web-tree-sitter/web-tree-sitter.wasm";
+import bashWasmModule from "tree-sitter-bash/tree-sitter-bash.wasm";
+import { ensureInitWorkerd } from "../shell-ts-adapter/index.mjs";
+
+// Never lets a tree-sitter setup failure break the whole request — the
+// shell rules are additive, not load-bearing, so this is caught and logged
+// rather than propagated. `ts_is_ready()` staying false makes the shell
+// rules no-op the same way it does when this is never awaited at all.
+let _shellTsPromise;
+function getShellTs() {
+  if (!_shellTsPromise) {
+    _shellTsPromise = ensureInitWorkerd(ttsWasmModule, bashWasmModule).catch(
+      (e) => {
+        console.error("shell-ts-adapter init failed:", e);
+      },
+    );
+  }
+  return _shellTsPromise;
+}
+
 // Reject obviously oversized payloads before they reach the linter. GitHub
 // workflow YAML files are well under 100 KB in practice; cap at 1 MiB to keep
 // `count_lines` / `walk_strings` / rule passes bounded.
@@ -622,7 +651,8 @@ async function handle(params, env, pathTarget) {
   const ghalint = sanitizeGhalintConfig(params.ghalint);
   const zizmor = sanitizeZizmorConfig(params.zizmor);
   const useOsv = isTrue(params.osv);
-  const worker = await getWorker();
+  // Independent async setups — resolve together rather than serially.
+  const [worker] = await Promise.all([getWorker(), getShellTs()]);
   // Merge the caller's `archived` list with the live KV baseline and the
   // bundled seed (cold-start fallback before KV is populated). The engine also
   // carries its own hardcoded baseline, so all are additive.
