@@ -11,4 +11,6 @@ Adds a native `karinto.yaml` config file, wired through the CLI's `--config` and
 
 `self-hosted-runner.labels` and `config-variables` reuse `.github/actionlint.yaml`'s own key names and shapes, so an existing actionlint.yaml is already a valid (partial) karinto config for those two settings — pass it straight through. actionlint's own `paths.*.ignore` (a message-regex mechanism against actionlint's own error text) has no karinto equivalent and is not read; use `ignore-paths` instead.
 
+`karinto.yaml` also doubles as a ghalint config and a zizmor config: its top-level `excludes:` (ghalint's own shape) and `rules.<id>.disable`/`.ignore` (zizmor's own shape, nested alongside karinto's `severity`) are read directly, so a `ghalint.yaml` or `zizmor.yml` can be pasted straight into one shared `karinto.yaml` instead of kept in separate files. Every source is additive with any `--ghalint-config`/`--zizmor-config` also passed.
+
 Adds `docs/actionlint-migration.md`, mapping actionlint's check categories and `-ignore` habits onto karinto rule IDs, `disable` globs, inline ignores, and `ignore-paths`.

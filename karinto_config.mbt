@@ -13,6 +13,8 @@
 /// actionlint's own messages — out of scope, see #50): reusing that name
 /// would invite a `.github/actionlint.yaml`'s regex strings to be silently
 /// (mis)matched against karinto rule IDs instead.
+
+///|
 priv struct KarintoConfig {
   self_hosted_runner_labels : Array[String]
   // `None` = disabled (default — matches actionlint's own default), `Some([])`
@@ -79,6 +81,12 @@ fn parse_karinto_config(config : String) -> KarintoConfig {
     Some(Array(items)) => Some(yaml_string_array(items))
     _ => None
   }
+  // `rules.<id>` accepts either a bare severity string (`error`/`warning`/
+  // `info`), or a map with a `severity` key — the latter shape is identical
+  // to zizmor's own `rules.<id>: {disable, ignore}` object, so a zizmor.yml
+  // pasted into this same `rules:` section keeps working (its `disable` /
+  // `ignore` keys are read separately, by `parse_zizmor_config` against this
+  // same text — see `lint()`) and can also carry a `severity` override.
   let rule_severity : Map[String, Severity] = {}
   match top.get("rules") {
     Some(Map(rm)) =>
@@ -88,6 +96,15 @@ fn parse_karinto_config(config : String) -> KarintoConfig {
             match parse_severity_string(s) {
               Some(sev) => rule_severity[rule_id] = sev
               None => ()
+            }
+          Map(rm2) =>
+            match rm2.get("severity") {
+              Some(String(s)) =>
+                match parse_severity_string(s) {
+                  Some(sev) => rule_severity[rule_id] = sev
+                  None => ()
+                }
+              _ => ()
             }
           _ => ()
         }

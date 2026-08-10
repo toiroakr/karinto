@@ -962,6 +962,20 @@ test "karinto config: config-variables allowlist permits listed names only" {
 }
 
 ///|
+test "karinto config: config-variables tolerates whitespace/newlines around the dot" {
+  // `${{ vars\n  .  UNDECLARED }}` must still resolve to context `vars`,
+  // member `UNDECLARED` — matching `check_unknown_context`'s tolerance for
+  // whitespace (including newlines) around `.`.
+  let yaml = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          echo \"${{ vars\n            . UNDECLARED }}\"\n"
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].message.contains("UNDECLARED"))
+}
+
+///|
 test "karinto config: rules.<id> overrides severity" {
   let yaml =
     #|on: push
@@ -1090,6 +1104,142 @@ test "karinto config: a compatible actionlint.yaml is honoured directly" {
   )
   assert_eq(
     res.diagnostics.filter(fn(d) { d.rule == "config-variables" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: excludes: (ghalint shape) is honoured from the same file" {
+  // `excludes:` is ghalint's own top-level key/shape; karinto_config reads it
+  // directly, so a ghalint.yaml's content can be pasted into karinto.yaml
+  // instead of kept in a separate file passed via --ghalint-config.
+  let yaml =
+    #|on: workflow_call
+    #|jobs:
+    #|  build:
+    #|    uses: ./.github/workflows/reusable.yml
+    #|    secrets: inherit
+  let cfg =
+    #|excludes:
+    #|  - policy_name: deny_inherit_secrets
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: rules.<id>.disable/.ignore (zizmor shape) is honoured from the same file" {
+  // `rules.<id>` accepts zizmor's own `{disable, ignore}` object shape;
+  // karinto_config parses it the same way `zizmor_config` does, so a
+  // zizmor.yml's `rules:` section can be pasted into karinto.yaml's `rules:`
+  // instead of kept in a separate file passed via --zizmor-config.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions:
+    #|    disable: true
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: rules.<id> combines zizmor's disable/ignore with karinto's severity" {
+  // The same per-rule object carries zizmor's `ignore` alongside karinto's
+  // `severity` — the two do not conflict, since they're read by separate
+  // parsers (`parse_zizmor_config` / `parse_karinto_config`) over the same
+  // text.
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    ignore:
+    #|      - ci.yml
+    #|  undocumented-permissions:
+    #|    severity: error
+  let res = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
+    0,
+  )
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
+test "karinto config: excludes: / rules: from karinto_config are additive with explicit ghalint_config/zizmor_config" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let ghalint_cfg =
+    #|excludes:
+    #|  - policy_name: job_permissions
+    #|    job_name: build
+  let karinto_cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    disable: true
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "job-permissions-required" })
+    .length() >
+    0,
+  )
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "concurrency-limits" })
+    .length() >
+    0,
+  )
+  let res = @karinto.lint(
+    yaml,
+    ghalint_config=ghalint_cfg,
+    karinto_config=karinto_cfg,
+  )
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "job-permissions-required" })
+    .length(),
+    0,
+  )
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
     0,
   )
 }

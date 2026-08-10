@@ -5459,31 +5459,55 @@ fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             k = k + 1
           }
           let ident = buf.to_string()
-          if ident == "vars" && i < n && chars[i] == '.' {
-            let j0 = i + 1
-            if j0 < n && is_ident_start(chars[j0]) {
-              let mut j = j0
-              while j < n && is_id_cont(chars[j]) {
-                j = j + 1
+          if ident == "vars" {
+            // Skip whitespace (including newlines) between `vars` and `.`,
+            // matching `check_unknown_context`'s tolerance for a
+            // multiline `${{ vars\n.FOO }}`.
+            let mut dot = i
+            while dot < n &&
+                  (
+                    chars[dot] == ' ' ||
+                    chars[dot] == '\t' ||
+                    chars[dot] == '\n' ||
+                    chars[dot] == '\r'
+                  ) {
+              dot = dot + 1
+            }
+            if dot < n && chars[dot] == '.' {
+              let mut j0 = dot + 1
+              while j0 < n &&
+                    (
+                      chars[j0] == ' ' ||
+                      chars[j0] == '\t' ||
+                      chars[j0] == '\n' ||
+                      chars[j0] == '\r'
+                    ) {
+                j0 = j0 + 1
               }
-              let vbuf = StringBuilder::new()
-              let mut m = j0
-              while m < j {
-                vbuf.write_char(chars[m])
-                m = m + 1
+              if j0 < n && is_ident_start(chars[j0]) {
+                let mut j = j0
+                while j < n && is_id_cont(chars[j]) {
+                  j = j + 1
+                }
+                let vbuf = StringBuilder::new()
+                let mut m = j0
+                while m < j {
+                  vbuf.write_char(chars[m])
+                  m = m + 1
+                }
+                let var_name = vbuf.to_string()
+                if !config_variable_allowed(var_name, ctx.config_variables) &&
+                  !seen.contains(var_name) {
+                  seen[var_name] = true
+                  add_diag(
+                    out,
+                    "config-variables",
+                    Error,
+                    "vars.\{var_name} is not declared in `config-variables`",
+                  )
+                }
+                i = j
               }
-              let var_name = vbuf.to_string()
-              if !config_variable_allowed(var_name, ctx.config_variables) &&
-                !seen.contains(var_name) {
-                seen[var_name] = true
-                add_diag(
-                  out,
-                  "config-variables",
-                  Error,
-                  "vars.\{var_name} is not declared in `config-variables`",
-                )
-              }
-              i = j
             }
           }
         } else {

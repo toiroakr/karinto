@@ -56,6 +56,41 @@ fn parse_zizmor_config(config : String) -> ZizmorConfig {
 }
 
 ///|
+/// Union two zizmor configs — used to combine an explicit `zizmor_config`
+/// with the zizmor-shaped `rules:` entries read out of a `karinto_config`
+/// (see `lint()`). `disabled` is deduped; `ignores` concatenates per-rule
+/// entry lists rather than letting one source's key clobber the other's.
+fn merge_zizmor_configs(a : ZizmorConfig, b : ZizmorConfig) -> ZizmorConfig {
+  let disabled : Array[String] = []
+  for d in a.disabled {
+    disabled.push(d)
+  }
+  for d in b.disabled {
+    if !disabled.contains(d) {
+      disabled.push(d)
+    }
+  }
+  let ignores : Map[String, Array[ZizmorIgnore]] = {}
+  a.ignores.each(fn(rule_id, pats) { ignores[rule_id] = pats })
+  b.ignores.each(fn(rule_id, pats) {
+    match ignores.get(rule_id) {
+      Some(existing) => {
+        let merged : Array[ZizmorIgnore] = []
+        for p in existing {
+          merged.push(p)
+        }
+        for p in pats {
+          merged.push(p)
+        }
+        ignores[rule_id] = merged
+      }
+      None => ignores[rule_id] = pats
+    }
+  })
+  ZizmorConfig::{ disabled, ignores }
+}
+
+///|
 /// Split a `filename[:line[:col]]` ignore entry. Lines and columns are 1-based,
 /// so a non-positive (or non-numeric) value is treated as "any" rather than a
 /// value that could never match a diagnostic.

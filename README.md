@@ -239,6 +239,15 @@ the opt-outs authors already wrote for the upstream tools:
   [local CLI](#local-cli)'s `--config`, or over HTTP via the `config`
   parameter.
 
+  `karinto.yaml` also doubles as a ghalint config and a zizmor config, so a
+  `ghalint.yaml`'s `excludes:` list or a `zizmor.yml`'s `rules:` section can
+  be pasted straight in instead of kept in separate files: `karinto_config`
+  is parsed a second and third time as each of those formats, and every
+  source is additive (an opt-out from any of them applies). `rules.<id>`
+  therefore accepts either a bare severity string, *or* a map that combines
+  zizmor's own `disable` / `ignore` keys with karinto's `severity` — the two
+  don't conflict, since they're read independently over the same text.
+
   ```yaml
   # karinto.yaml
   self-hosted-runner:
@@ -247,8 +256,22 @@ the opt-outs authors already wrote for the upstream tools:
   config-variables:
     - ENVIRONMENT
     - DEPLOY_TARGET
+
+  # ghalint's own `excludes:` shape, read directly
+  excludes:
+    - policy_name: deny_inherit_secrets
+      workflow_file_path: .github/workflows/release.yml
+
   rules:
+    # bare severity override
     outdated-action-version: info
+    # zizmor's own `{disable, ignore}` shape, plus a severity override
+    template-injection:
+      severity: warning
+    unpinned-tools:
+      ignore:
+        - ci.yml:42
+
   ignore-paths:
     "fixtures/**":
       - "*"
