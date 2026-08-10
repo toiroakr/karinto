@@ -13,7 +13,7 @@ Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
-72 of 83 catalogued rules are active. They cover syntax, expression typing
+73 of 84 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
@@ -75,6 +75,7 @@ below.
 | `persona` | `regular` \| `pedantic` \| `auditor` | Analysis profile (see [*Personas*](#personas)). Defaults to `auditor` (every finding). An unrecognized value is a `400`. |
 | `ghalint` | string | Verbatim ghalint config (`ghalint.yaml`) text; its `excludes:` list suppresses matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 | `zizmor` | string | Verbatim zizmor config (`zizmor.yml`) text; its `rules.<id>.disable` / `rules.<id>.ignore` suppress matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
+| `config` | string | Verbatim karinto config (`karinto.yaml`) text, or a compatible `.github/actionlint.yaml`; see [*Ignoring findings*](#ignoring-findings). At most 64 KiB. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -199,9 +200,7 @@ the opt-outs authors already wrote for the upstream tools:
   [local CLI](#local-cli)'s `--ghalint-config`, or over HTTP via the `ghalint`
   parameter (the config's verbatim text); the `workflow_file_path` scope then
   resolves against `path` in content mode or each file's repo-relative path in
-  repo mode. actionlint configs are **not** honoured — they ignore by regex
-  against actionlint's own error messages, which do not map onto karinto's
-  findings.
+  repo mode.
 - **zizmor config** — a `zizmor.yml` `rules:` section is honoured. Each rule's
   `disable: true` skips that rule everywhere (rule ids match zizmor's audit
   names verbatim), and an `ignore:` list of `filename[:line[:col]]` entries
@@ -211,6 +210,49 @@ the opt-outs authors already wrote for the upstream tools:
   [local CLI](#local-cli)'s `--zizmor-config`, or over HTTP via the `zizmor`
   parameter; the `ignore` filename resolves against `path` in content mode or
   each file's repo-relative path in repo mode.
+- **karinto config** — a native `karinto.yaml` covers four things with no
+  home in the tools above:
+  - `self-hosted-runner.labels`: glob patterns of labels your self-hosted
+    runners carry. Without this, a `runs-on:` that includes `self-hosted`
+    skips label validation entirely (any custom label is assumed to be a
+    routing hint); with it, the remaining labels are checked against the
+    known set plus your globs, so a typo (`gpu-a1oo` vs `gpu-a100`) is still
+    caught.
+  - `config-variables`: an allowlist of `vars.*` names. Omitted (the
+    default) leaves the check off; `[]` forbids every `vars.*` reference;
+    a non-empty list flags any `vars.<name>` not in it.
+  - `rules`: per-rule severity override (`rule-id: error|warning|info`),
+    for a finding you want to keep but re-rank.
+  - `ignore-paths`: per-path rule suppression, keyed by a glob against the
+    linted file's path — `"*"` suppresses every rule under that glob,
+    a list suppresses just those rule ids.
+
+  `self-hosted-runner.labels` and `config-variables` use the **same key
+  names and shapes as actionlint.yaml**, so an existing
+  `.github/actionlint.yaml` is already a valid (partial) karinto config for
+  those two settings — pass it in as-is. actionlint's own `paths.*.ignore`
+  (which suppresses findings by matching a regex against *actionlint's own*
+  error message text) is a different mechanism with no karinto rule-ID
+  equivalent and is **not** read; use karinto's `ignore-paths` instead (see
+  the [migration guide](docs/actionlint-migration.md) for the general
+  actionlint → karinto mapping). Pass a config through the
+  [local CLI](#local-cli)'s `--config`, or over HTTP via the `config`
+  parameter.
+
+  ```yaml
+  # karinto.yaml
+  self-hosted-runner:
+    labels:
+      - "gpu-*"
+  config-variables:
+    - ENVIRONMENT
+    - DEPLOY_TARGET
+  rules:
+    outdated-action-version: info
+  ignore-paths:
+    "fixtures/**":
+      - "*"
+  ```
 
 ### Examples
 
@@ -470,6 +512,11 @@ moon run --target js cmd/main -- --ghalint-config ghalint.yaml .github/workflows
 
 # honour a zizmor config's `rules.<id>.disable` / `ignore` (see *Ignoring findings*)
 moon run --target js cmd/main -- --zizmor-config zizmor.yml .github/workflows/ci.yml
+
+# honour a karinto config (self-hosted-runner labels, config-variables,
+# per-rule severity, ignore-paths — see *Ignoring findings*); a compatible
+# .github/actionlint.yaml also works here
+moon run --target js cmd/main -- --config karinto.yaml .github/workflows/ci.yml
 
 # SARIF 2.1.0 for GitHub Code Scanning (same as the Worker's `format=sarif`);
 # file arguments become artifact URIs, stdin yields pathless results

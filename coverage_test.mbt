@@ -15,8 +15,8 @@ fn tested_rule_ids() -> Array[String] {
     // actionlint family — fixtures live in actionlint_rules_test.mbt
     "unexpected-keys", "missing-required-keys", "empty-mappings", "invalid-mapping-values",
     "expression-syntax", "expression-type-mismatch", "unknown-context-or-function",
-    "context-availability", "expression-steps-type", "expression-matrix-type", "expression-needs-type",
-    "meaningless-comparison",
+    "config-variables", "context-availability", "expression-steps-type", "expression-matrix-type",
+    "expression-needs-type", "meaningless-comparison",
     // shellcheck / pyflakes: NotPlanned (Worker can't ship native binaries).
      "job-needs-graph", "matrix-values", "webhook-events", "workflow-dispatch-inputs",
     "glob-patterns", "cron-and-timezone", "unknown-runner-label", "uses-syntax",
