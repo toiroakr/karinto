@@ -689,7 +689,14 @@ fn analyze_quote_safety(
 /// `string` node — bash doesn't word-split/glob-expand inside double
 /// quotes, so those don't count (single-quoted regions never contain a live
 /// expansion in the first place — tree-sitter-bash doesn't parse `$` inside
-/// `'...'` as an expansion at all).
+/// `'...'` as an expansion at all) — or a `heredoc_body`: unlike an
+/// unquoted command argument, heredoc content is never word-split or
+/// glob-expanded (it's just literal text handed to the reading command's
+/// stdin, after expansion of `$VAR`/backticks/etc.), so this rule's actual
+/// hazard — an attacker-controlled value injecting extra arguments via
+/// word-splitting — doesn't apply there. `github-env` already covers the
+/// real hazard specific to heredocs (dynamic content written into
+/// `$GITHUB_ENV`), separately.
 fn collect_var_refs(
   node : ShellNode,
   in_string : Bool,
@@ -701,7 +708,9 @@ fn collect_var_refs(
       None => ()
     }
   }
-  let child_in_string = in_string || node.t == "string"
+  let child_in_string = in_string ||
+    node.t == "string" ||
+    node.t == "heredoc_body"
   for c in node.c {
     collect_var_refs(c, child_in_string, out)
   }
@@ -732,30 +741,52 @@ fn is_well_known_prefix(name : String) -> Bool {
 }
 
 ///|
+/// POSIX "special builtins" (plus bash's `.`): unlike an ordinary command, a
+/// prefix assignment on one of these persists in the current shell after it
+/// completes instead of being scoped to just that invocation — e.g. `FOO=bar
+/// export FOO` really does leave `$FOO` set afterward, unlike `FOO=bar echo
+/// hi`. Used by `collect_persistent_assignments` below.
+fn is_special_builtin_keeping_prefix_assignment(name : String) -> Bool {
+  let special_builtins = [
+    "break", ":", "continue", ".", "eval", "exec", "exit", "export", "readonly",
+    "return", "set", "shift", "times", "trap", "unset",
+  ]
+  special_builtins.contains(name.to_lower())
+}
+
+///|
 /// Every `variable_assignment` that actually persists for later statements
 /// — i.e. `FOO=bar` on its own line — as `(name, end_offset)`. Excludes a
-/// *prefix* assignment on a command with its own name (`FOO=bar echo hi`):
-/// in bash that only sets `$FOO` in `echo`'s environment for that one
-/// invocation, it does not persist afterward. tree-sitter-bash represents
-/// the difference structurally: a bare `FOO=bar` statement is a top-level
-/// `variable_assignment` node (a sibling of `command` nodes), while a
-/// prefix assignment is nested *inside* a `command` node alongside that
-/// command's own `command_name` — so a `variable_assignment` child of a
-/// `command` that also has a `command_name` is prefix-only and skipped.
-/// (This also means an assignment inside a `$(...)` command substitution's
-/// own subshell is correctly never treated as persisting to the outer
-/// script — bash subshells don't leak variables back to the parent either.)
+/// *prefix* assignment on an ordinary command with its own name (`FOO=bar
+/// echo hi`): in bash that only sets `$FOO` in `echo`'s environment for
+/// that one invocation, it does not persist afterward. tree-sitter-bash
+/// represents the difference structurally: a bare `FOO=bar` statement is a
+/// top-level `variable_assignment` node (a sibling of `command` nodes),
+/// while a prefix assignment is nested *inside* a `command` node alongside
+/// that command's own `command_name` — so a `variable_assignment` child of
+/// a `command` that also has a `command_name` is normally prefix-only and
+/// skipped, *except* when that command name is a special builtin
+/// (`is_special_builtin_keeping_prefix_assignment`), where the prefix
+/// assignment persists just like a bare one. (This also means an
+/// assignment inside a `$(...)` command substitution's own subshell is
+/// correctly never treated as persisting to the outer script — bash
+/// subshells don't leak variables back to the parent either.)
 fn collect_persistent_assignments(root : ShellNode) -> Array[(String, Int)] {
   let out : Array[(String, Int)] = []
   fn walk(node : ShellNode) -> Unit {
-    if node.t == "command" &&
-      shell_node_find_child(node, "command_name") is Some(_) {
-      for c in node.c {
-        if c.t != "variable_assignment" {
-          walk(c)
-        }
+    if node.t == "command" {
+      match shell_node_find_child(node, "command_name") {
+        Some(cn) =>
+          if !is_special_builtin_keeping_prefix_assignment(cn.x) {
+            for c in node.c {
+              if c.t != "variable_assignment" {
+                walk(c)
+              }
+            }
+            return
+          }
+        None => ()
       }
-      return
     }
     if node.t == "variable_assignment" {
       match shell_node_find_child(node, "variable_name") {

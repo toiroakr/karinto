@@ -454,6 +454,20 @@ test "shell-quote-safety: unquoted expansion of an unrelated (non-dynamic) var i
 }
 
 ///|
+let quote_safe_in_heredoc_body : String = "{\"t\":\"program\",\"s\":0,\"e\":20,\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":20,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":3,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"cat\"}]}]},{\"t\":\"heredoc_redirect\",\"s\":4,\"e\":20,\"c\":[{\"t\":\"heredoc_start\",\"s\":6,\"e\":9},{\"t\":\"heredoc_body\",\"s\":10,\"e\":17,\"c\":[{\"t\":\"simple_expansion\",\"s\":10,\"e\":16,\"c\":[{\"t\":\"variable_name\",\"s\":11,\"e\":16,\"x\":\"TITLE\"}]},{\"t\":\"heredoc_content\",\"s\":17,\"e\":17}]},{\"t\":\"heredoc_end\",\"s\":17,\"e\":20}]}]}]}"
+
+///|
+/// `$TITLE` inside a heredoc body isn't subject to word-splitting/glob
+/// expansion the way an unquoted command argument is — the heredoc content
+/// is just literal text (after expansion) handed to the reading command's
+/// stdin, not re-parsed into words. Must not be flagged, same as a quoted
+/// expansion.
+test "shell-quote-safety: unquoted expansion inside a heredoc body is not flagged" {
+  let root = parse_shell_ast(quote_safe_in_heredoc_body).unwrap()
+  assert_eq(analyze_quote_safety(root, ["TITLE"]), [])
+}
+
+///|
 let undef_unknown_ref : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\"x\":\"echo $MYSTERY_VAR\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":17,\"x\":\"echo $MYSTERY_VAR\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":17,\"x\":\"$MYSTERY_VAR\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":17,\"x\":\"MYSTERY_VAR\"}]}]}]}"
 
 ///|
@@ -496,6 +510,19 @@ let undef_prefix_assignment_does_not_persist : String = "{\"t\":\"program\",\"s\
 test "shell-undefined-var: a prefix assignment on a command (FOO=bar echo hi) does not persist to later statements" {
   let root = parse_shell_ast(undef_prefix_assignment_does_not_persist).unwrap()
   assert_eq(analyze_undefined_vars(root, []), ["FOO"])
+}
+
+///|
+let undef_prefix_assignment_on_export_persists : String = "{\"t\":\"program\",\"s\":0,\"e\":28,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"variable_assignment\",\"s\":0,\"e\":7,\"c\":[{\"t\":\"variable_name\",\"s\":0,\"e\":3,\"x\":\"FOO\"},{\"t\":\"word\",\"s\":4,\"e\":7,\"x\":\"bar\"}]},{\"t\":\"command_name\",\"s\":8,\"e\":14,\"x\":\"export\",\"c\":[{\"t\":\"word\",\"s\":8,\"e\":14,\"x\":\"export\"}]},{\"t\":\"word\",\"s\":15,\"e\":18,\"x\":\"FOO\"}]},{\"t\":\"command\",\"s\":19,\"e\":28,\"c\":[{\"t\":\"command_name\",\"s\":19,\"e\":23,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":19,\"e\":23,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":24,\"e\":28,\"c\":[{\"t\":\"variable_name\",\"s\":25,\"e\":28,\"x\":\"FOO\"}]}]}]}"
+
+///|
+/// Unlike a prefix assignment on an ordinary command, `FOO=bar export FOO`
+/// really does leave `$FOO` set in the current shell afterward — `export`
+/// is a POSIX special builtin, not an ordinary command. Must not be
+/// flagged as undefined.
+test "shell-undefined-var: a prefix assignment on a special builtin (FOO=bar export FOO) persists" {
+  let root = parse_shell_ast(undef_prefix_assignment_on_export_persists).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
 }
 
 ///|
