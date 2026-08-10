@@ -426,41 +426,49 @@ fn is_well_known_prefix(name : String) -> Bool {
 
 ///|
 /// Every referenced variable name with no visible declaration — neither in
-/// `declared` (the caller's merged workflow/job/step `env:` keys) nor
-/// assigned earlier in `root` itself (`FOO=bar` — a `variable_assignment`
-/// node) nor a well-known built-in. Dedup'd, AST-visit order.
+/// `declared` (the caller's merged workflow/job/step `env:` keys, visible
+/// for the whole script) nor assigned *earlier* in `root` itself (`FOO=bar`
+/// — a `variable_assignment` node whose own span ends before the
+/// reference starts) nor a well-known built-in. Position-aware by design:
+/// an assignment later in the script doesn't retroactively excuse an
+/// earlier use-before-def, which is exactly the class of bug this rule
+/// exists to catch. Dedup'd, AST-visit order.
 pub fn analyze_undefined_vars(
   root : ShellNode,
   declared : Array[String],
 ) -> Array[String] {
-  let known : Array[String] = []
-  for d in declared {
-    known.push(d)
-  }
+  let assignments : Array[(String, Int)] = []
   for a in shell_node_find_all(root, "variable_assignment") {
     match shell_node_find_child(a, "variable_name") {
-      Some(vn) => known.push(vn.x)
+      Some(vn) => assignments.push((vn.x, a.e))
       None => ()
     }
   }
-  let refs : Array[String] = []
+  let refs : Array[(String, Int)] = []
   shell_node_walk(root, fn(n) {
     if n.t == "simple_expansion" || n.t == "expansion" {
       match shell_node_find_child(n, "variable_name") {
-        Some(vn) => refs.push(vn.x)
+        Some(vn) => refs.push((vn.x, n.s))
         None => ()
       }
     }
   })
   let out : Array[String] = []
   for r in refs {
-    if known.contains(r) ||
-      well_known_shell_vars.contains(r) ||
-      is_well_known_prefix(r) {
+    let (name, pos) = r
+    if declared.contains(name) ||
+      well_known_shell_vars.contains(name) ||
+      is_well_known_prefix(name) {
       continue
     }
-    if !out.contains(r) {
-      out.push(r)
+    let assigned_before = assignments
+      .iter()
+      .any(fn(a) { a.0 == name && a.1 <= pos })
+    if assigned_before {
+      continue
+    }
+    if !out.contains(name) {
+      out.push(name)
     }
   }
   out

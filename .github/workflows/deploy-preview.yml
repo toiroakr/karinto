@@ -50,6 +50,12 @@ jobs:
           cache: npm
           cache-dependency-path: cf/package-lock.json
 
+      # Root install too: the compiled worker.js now imports
+      # `@karinto/shell-ts-adapter` (#113, tree-sitter-bash), which is only
+      # declared in the root `package.json`/`package-lock.json`, not cf's —
+      # wrangler's bundler resolves it by walking up from `cf/index.js`.
+      - run: npm ci
+
       - working-directory: cf
         run: npm ci
 

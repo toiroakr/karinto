@@ -280,6 +280,17 @@ test "shell-undefined-var: a variable assigned earlier in the same script is not
 }
 
 ///|
+let undef_used_before_assigned : String = "{\"t\":\"program\",\"s\":0,\"e\":17,\"x\":\"echo $FOO\\nFOO=bar\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":9,\"x\":\"echo $FOO\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"simple_expansion\",\"s\":5,\"e\":9,\"x\":\"$FOO\",\"c\":[{\"t\":\"variable_name\",\"s\":6,\"e\":9,\"x\":\"FOO\"}]}]},{\"t\":\"variable_assignment\",\"s\":10,\"e\":17,\"x\":\"FOO=bar\",\"c\":[{\"t\":\"variable_name\",\"s\":10,\"e\":13,\"x\":\"FOO\"},{\"t\":\"word\",\"s\":14,\"e\":17,\"x\":\"bar\"}]}]}"
+
+///|
+/// Position-aware: an assignment *later* in the script doesn't excuse a use
+/// that comes before it — `echo $FOO` on line 1, `FOO=bar` on line 2.
+test "shell-undefined-var: a use before its assignment is still flagged" {
+  let root = parse_shell_ast(undef_used_before_assigned).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), ["FOO"])
+}
+
+///|
 test "shell-undefined-var: a declared env: key is not flagged" {
   let root = parse_shell_ast(undef_unknown_ref).unwrap()
   assert_eq(analyze_undefined_vars(root, ["MYSTERY_VAR"]), [])

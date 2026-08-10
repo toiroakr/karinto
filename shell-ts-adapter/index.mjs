@@ -62,12 +62,25 @@ export async function ensureInitWorkerd(ttsModule, bashModule) {
   // (`createRequire(import.meta.url)`) whenever `process.versions.node` is
   // truthy — which the `nodejs_compat` compatibility flag makes true even
   // under workerd, where `import.meta.url` is undefined in the bundled
-  // module and the call throws. Hide `process` for the duration of this
-  // call only, so the glue falls through to its generic/non-Node branch.
+  // module and the call throws. Hide `process` so the glue falls through to
+  // its generic/non-Node branch instead — but only for the *synchronous*
+  // call below, not the whole `await`: a Workers isolate can interleave
+  // other in-flight requests across an `await`, and one of them observing
+  // `process` as `undefined` here would be a confusing, unrelated bug.
+  // `Parser.init` -> `initializeBinding` -> the Emscripten module factory
+  // reads `process` at its very first line, before that factory's own
+  // first internal `await` (which only happens inside the
+  // `process`-gated branch we're steering it away from) — an async
+  // function runs synchronously up to its first `await`/`return`, so by
+  // the time the call expression below finishes evaluating (handing back a
+  // pending promise), the read has already happened. Restoring `process`
+  // immediately after, before awaiting that promise, closes the window to
+  // zero: nothing can run between two synchronous statements.
   const savedProcess = globalThis.process;
   globalThis.process = undefined;
+  let initPromise;
   try {
-    await Parser.init({
+    initPromise = Parser.init({
       instantiateWasm(imports, successCallback) {
         const instance = new WebAssembly.Instance(ttsModule, imports);
         successCallback(instance, ttsModule);
@@ -77,6 +90,7 @@ export async function ensureInitWorkerd(ttsModule, bashModule) {
   } finally {
     globalThis.process = savedProcess;
   }
+  await initPromise;
   // Requires the root patch-package patch (see patches/) adding a
   // `WebAssembly.Module` branch to `Language.load` — its public API only
   // natively accepts `Uint8Array` (raw bytes, forbidden here) or a
