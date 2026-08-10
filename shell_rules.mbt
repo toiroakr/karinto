@@ -1,7 +1,7 @@
 ///|
 /// Pure, target-agnostic analysis over a parsed `ShellNode` tree (#113).
 /// Each function here is exercised directly by fixture tests using captured
-/// JSON-AST snapshots (see `shell_rules_test.mbt`), so they run under the
+/// JSON-AST snapshots (see `shell_rules_wbtest.mbt`), so they run under the
 /// default `moon test` (wasm-gc) — no tree-sitter needed at test time. The
 /// thin js-only seam that actually produces a `ShellNode` from a live parse
 /// lives in `shell_ts_ffi.mbt` / `shell_ts_ffi_stub.mbt`; the wiring that
@@ -15,7 +15,7 @@
 /// sanitized text still line up with the original source (needed to map a
 /// finding back to a line), and a raw `${{ }}` can't confuse the bash
 /// grammar (it isn't valid shell syntax on its own).
-pub fn sanitize_expr_placeholders(source : String) -> String {
+fn sanitize_expr_placeholders(source : String) -> String {
   let chars = source.to_array()
   let n = chars.length()
   let out = StringBuilder::new()
@@ -93,10 +93,7 @@ fn shell_node_has_expansion(node : ShellNode) -> Bool {
 /// for the AST half of this check to find — so this also checks whether
 /// the node's own source span, read back from `original_source`, still
 /// contains a raw `${{`.
-pub fn analyze_github_env(
-  root : ShellNode,
-  original_source : String,
-) -> String? {
+fn analyze_github_env(root : ShellNode, original_source : String) -> String? {
   for stmt in shell_node_find_all(root, "redirected_statement") {
     let cmd = shell_node_find_child(stmt, "command")
     for redirect in stmt.c {
@@ -233,11 +230,48 @@ fn command_shell_name(cmd : ShellNode) -> String? {
   }
   let head = words[0].to_lower()
   let wrappers = ["sudo", "env", "exec", "nohup"]
-  if wrappers.contains(head) {
+  if head == "env" {
+    // `env` accepts leading `NAME=VALUE` assignments before the command it
+    // runs (`env FOO=bar bash`) — skip those too, not just `-` flags, or
+    // `FOO=bar` is mistaken for the shell name.
+    for w in words[1:] {
+      if !w.has_prefix("-") && !is_env_style_assignment(w) {
+        return Some(w.to_lower())
+      }
+    }
+    None
+  } else if wrappers.contains(head) {
     first_non_flag_word(words[1:])
   } else {
     Some(head)
   }
+}
+
+///|
+/// True if `word` looks like a POSIX `NAME=VALUE` assignment (`env`'s own
+/// argument syntax, e.g. `FOO=bar` in `env FOO=bar bash`) — a leading
+/// `[A-Za-z_][A-Za-z0-9_]*` followed by `=`.
+fn is_env_style_assignment(word : String) -> Bool {
+  let eq = index_of_char(word, '=')
+  if eq <= 0 {
+    return false
+  }
+  for i in 0..<eq {
+    let ch = word.get_char(i).unwrap()
+    let is_head = i == 0
+    let alpha = (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      ch == '_'
+    let digit = ch >= '0' && ch <= '9'
+    if is_head {
+      if !alpha {
+        return false
+      }
+    } else if !alpha && !digit {
+      return false
+    }
+  }
+  true
 }
 
 ///|
@@ -247,7 +281,7 @@ fn command_shell_name(cmd : ShellNode) -> String? {
 /// text that merely mentions both substrings anywhere, in any order. Sees
 /// through `sudo`/`env`/`exec`/`nohup` wrappers (`command_shell_name`), so
 /// `curl x | sudo bash` is caught, not just a bare `curl x | bash`.
-pub fn analyze_unpinned_tools(root : ShellNode) -> Bool {
+fn analyze_unpinned_tools(root : ShellNode) -> Bool {
   let shells = ["sh", "bash", "zsh", "dash"]
   let fetchers = ["curl", "wget"]
   for pipeline in shell_node_find_all(root, "pipeline") {
@@ -284,7 +318,7 @@ pub fn analyze_unpinned_tools(root : ShellNode) -> Bool {
 /// (`check_unredacted_secrets` in rules.mbt) is responsible for the
 /// `secrets.`-reference gate, since that substring lives in the un-sanitized
 /// source (`${{ secrets.X }}` is replaced with underscores before parsing).
-pub fn analyze_unredacted_secrets(root : ShellNode) -> String? {
+fn analyze_unredacted_secrets(root : ShellNode) -> String? {
   let transforms = ["base64", "xxd", "tr", "cut", "sed", "awk"]
   for pipeline in shell_node_find_all(root, "pipeline") {
     let names = pipeline_command_names(pipeline)
@@ -308,7 +342,7 @@ pub fn analyze_unredacted_secrets(root : ShellNode) -> String? {
 /// gives each statement's own command/argument boundaries for free, so a
 /// value like `"--dry-run"` can't be mistaken for a separate token the way
 /// naive whitespace splitting could inside quotes.
-pub fn analyze_trusted_publishing(root : ShellNode) -> Bool {
+fn analyze_trusted_publishing(root : ShellNode) -> Bool {
   for cmd in shell_node_find_all(root, "command") {
     if command_is_publish(cmd) {
       return true
@@ -500,7 +534,7 @@ fn command_is_publish(cmd : ShellNode) -> Bool {
 /// Every variable name from `dynamic_env_names` that's referenced via an
 /// unquoted `$VAR` / `${VAR}` expansion somewhere in `root`. Dedup'd, but
 /// otherwise in AST-visit (source) order.
-pub fn analyze_quote_safety(
+fn analyze_quote_safety(
   root : ShellNode,
   dynamic_env_names : Array[String],
 ) -> Array[String] {
@@ -572,7 +606,7 @@ fn is_well_known_prefix(name : String) -> Bool {
 /// an assignment later in the script doesn't retroactively excuse an
 /// earlier use-before-def, which is exactly the class of bug this rule
 /// exists to catch. Dedup'd, AST-visit order.
-pub fn analyze_undefined_vars(
+fn analyze_undefined_vars(
   root : ShellNode,
   declared : Array[String],
 ) -> Array[String] {

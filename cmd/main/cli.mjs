@@ -4,8 +4,8 @@
 // awaits `shell-ts-adapter`'s async init, so the tree-sitter-bash shell
 // rules (github-env / unpinned-tools / unredacted-secrets /
 // use-trusted-publishing / shell-quote-safety / shell-undefined-var) stay
-// dormant there — `ts_is_ready()` reads false and those rules no-op safely,
-// the same as they do under `moon test`.
+// dormant there — the adapter's readiness check reads false and those rules
+// no-op safely, the same as they do under `moon test`.
 //
 // This wrapper awaits the adapter's init *before* the compiled entry point
 // loads. It can't simply `import` that entry after the fact: the compiled

@@ -10,7 +10,7 @@
 ///
 /// `s`/`e` are UTF-16 code-unit offsets into the (already `${{ }}`-sanitized)
 /// script text tree-sitter parsed, matching tree-sitter's own indexing.
-pub(all) struct ShellNode {
+priv struct ShellNode {
   t : String
   s : Int
   e : Int
@@ -22,7 +22,7 @@ pub(all) struct ShellNode {
 /// Parses the JSON produced by `shell-ts-adapter`'s `parseJson()`. `None` on
 /// malformed JSON (defensive only — the adapter is our own code) or an
 /// empty/non-object payload.
-pub fn parse_shell_ast(json_str : String) -> ShellNode? {
+fn parse_shell_ast(json_str : String) -> ShellNode? {
   let parsed : Json = @json.parse(json_str) catch { _ => Json::null() }
   shell_node_from_json(parsed)
 }
@@ -69,7 +69,7 @@ fn shell_node_from_json(j : Json) -> ShellNode? {
 ///|
 /// Depth-first pre-order walk. `visit` returning early doesn't prune —
 /// every rule so far wants a flat scan, not a cutoff.
-pub fn shell_node_walk(node : ShellNode, visit : (ShellNode) -> Unit) -> Unit {
+fn shell_node_walk(node : ShellNode, visit : (ShellNode) -> Unit) -> Unit {
   visit(node)
   for child in node.c {
     shell_node_walk(child, visit)
@@ -78,7 +78,7 @@ pub fn shell_node_walk(node : ShellNode, visit : (ShellNode) -> Unit) -> Unit {
 
 ///|
 /// Every descendant (including `node` itself) whose type equals `t`.
-pub fn shell_node_find_all(node : ShellNode, t : String) -> Array[ShellNode] {
+fn shell_node_find_all(node : ShellNode, t : String) -> Array[ShellNode] {
   let out : Array[ShellNode] = []
   shell_node_walk(node, fn(n) { if n.t == t { out.push(n) } })
   out
@@ -89,7 +89,7 @@ pub fn shell_node_find_all(node : ShellNode, t : String) -> Array[ShellNode] {
 /// child in this tree) operator token — `>>`/`&>>`/`1>>`/... all append;
 /// anything else (`>`, `2>`, ...) overwrites. Used because tree-sitter-bash
 /// doesn't expose the operator as a named field.
-pub fn shell_node_is_append_redirect(file_redirect : ShellNode) -> Bool {
+fn shell_node_is_append_redirect(file_redirect : ShellNode) -> Bool {
   let t = file_redirect.x.trim(chars=" \t").to_owned()
   // Skip the descriptor digits (`1>>`, `2>>`) and leading `&`, then look for
   // `>>` at the front of what remains.

@@ -738,7 +738,7 @@ test "github-app: scoped properly is silent" {
 /// test still verifies the rest of the pipeline (the workflow's other
 /// diagnostics) and that the shell-parse-dependent rule no-ops safely
 /// rather than erroring. The detection logic itself is unit-tested against
-/// captured AST fixtures in `shell_rules_test.mbt`
+/// captured AST fixtures in `shell_rules_wbtest.mbt`
 /// (`analyze_github_env`); the live parse is covered by
 /// `scripts/test-shell-rules.mjs` (`npm run test:shell-rules`).
 test "github-env: write to $GITHUB_ENV from untrusted input" {
@@ -1860,7 +1860,7 @@ test "use-trusted-publishing: uses long-lived PyPI token" {
 /// same run-based path (`git grep 'tree-sitter-bash-based (#113)'` finds
 /// them) assert `0` hits here for that reason, not because the detection
 /// stopped working. `analyze_trusted_publishing` (`shell_rules.mbt`) is
-/// unit-tested against captured AST fixtures in `shell_rules_test.mbt`,
+/// unit-tested against captured AST fixtures in `shell_rules_wbtest.mbt`,
 /// including the job/step attribution behavior this test used to check
 /// end-to-end (`add_diag_step_field` itself is unchanged and still
 /// exercised by every other job/step-scoped rule's fixtures); the live
@@ -2048,7 +2048,7 @@ test "use-trusted-publishing: a real publish chained after a pkg-pr-new dlx stil
   // under `moon test` — see the comment on "run-based detection fires on a
   // real npm publish" above. The dlx-vs-real-publish distinction this test
   // name describes is unit-tested against captured AST fixtures in
-  // `shell_rules_test.mbt` ("a real publish chained after a pkg-pr-new dlx
+  // `shell_rules_wbtest.mbt` ("a real publish chained after a pkg-pr-new dlx
   // still fires").
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "use-trusted-publishing" })

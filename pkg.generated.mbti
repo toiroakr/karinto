@@ -13,21 +13,7 @@ pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
 
-pub fn analyze_github_env(ShellNode, String) -> String?
-
-pub fn analyze_quote_safety(ShellNode, Array[String]) -> Array[String]
-
-pub fn analyze_trusted_publishing(ShellNode) -> Bool
-
-pub fn analyze_undefined_vars(ShellNode, Array[String]) -> Array[String]
-
-pub fn analyze_unpinned_tools(ShellNode) -> Bool
-
-pub fn analyze_unredacted_secrets(ShellNode) -> String?
-
 pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona, file_path? : String, ghalint_config? : String, zizmor_config? : String) -> LintResult
-
-pub fn parse_shell_ast(String) -> ShellNode?
 
 pub fn persona_from_string(String) -> Persona
 
@@ -35,19 +21,7 @@ pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, sour
 
 pub fn rule_spec(String) -> RuleSpec
 
-pub fn sanitize_expr_placeholders(String) -> String
-
 pub fn sarif_report(Array[SarifEntry], io_errors? : Array[SarifIoError], version? : String) -> Json
-
-pub fn shell_node_find_all(ShellNode, String) -> Array[ShellNode]
-
-pub fn shell_node_is_append_redirect(ShellNode) -> Bool
-
-pub fn shell_node_walk(ShellNode, (ShellNode) -> Unit) -> Unit
-
-pub fn ts_is_ready() -> Bool
-
-pub fn ts_parse_json(String) -> String?
 
 // Errors
 
@@ -149,14 +123,6 @@ pub(all) enum Severity {
   Info
 } derive(Eq, @debug.Debug)
 pub impl ToJson for Severity
-
-pub(all) struct ShellNode {
-  t : String
-  s : Int
-  e : Int
-  x : String
-  c : Array[ShellNode]
-} derive(@debug.Debug)
 
 pub(all) enum Source {
   Actionlint

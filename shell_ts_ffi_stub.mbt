@@ -4,11 +4,6 @@
 /// AST and no-op, the same as they do on the js target whenever the host
 /// never awaited the adapter's init. See `shell_ts_ffi.mbt` for the full
 /// architecture note.
-pub fn ts_is_ready() -> Bool {
-  false
-}
-
-///|
-pub fn ts_parse_json(_source : String) -> String? {
+fn ts_parse_json(_source : String) -> String? {
   None
 }

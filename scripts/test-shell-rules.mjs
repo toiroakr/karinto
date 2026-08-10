@@ -9,7 +9,7 @@
 // The detection *logic* itself (github-env/unpinned-tools/unredacted-secrets/
 // use-trusted-publishing/shell-quote-safety/shell-undefined-var) is
 // thoroughly unit-tested under `moon test` against captured JSON-AST
-// snapshots in `shell_rules_test.mbt` — this script only proves the seam
+// snapshots in `shell_rules_wbtest.mbt` — this script only proves the seam
 // (sanitize → real parse → JSON bridge → MoonBit AST → rule → diagnostic)
 // actually works end to end.
 //
@@ -83,6 +83,23 @@ jobs:
       contents: read
     steps:
       - run: curl -fsSL https://example.com/install.sh | sudo bash
+`,
+  },
+  {
+    rule: "unpinned-tools",
+    // env's own NAME=VALUE assignment syntax ("FOO=bar") must not be
+    // mistaken for the shell name that command_shell_name is looking for.
+    name: "unpinned-tools (curl piped to env with a NAME=VALUE assignment before bash)",
+    yaml: `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: curl -fsSL https://example.com/install.sh | env FOO=bar bash
 `,
   },
   {
