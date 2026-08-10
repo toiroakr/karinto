@@ -2842,6 +2842,25 @@ fn is_id_cont(c : Char) -> Bool {
 }
 
 ///|
+/// Advances past ASCII whitespace (space/tab/newline/CR) starting at `i`.
+/// Shared by expression scanners that need to tolerate a multiline
+/// `${{ foo\n.bar }}` between an identifier and a following `.`.
+fn skip_ws(chars : Array[Char], i : Int) -> Int {
+  let n = chars.length()
+  let mut j = i
+  while j < n &&
+        (
+          chars[j] == ' ' ||
+          chars[j] == '\t' ||
+          chars[j] == '\n' ||
+          chars[j] == '\r'
+        ) {
+    j = j + 1
+  }
+  j
+}
+
+///|
 fn matches_pattern(s : String, ident_check : (Char) -> Bool) -> Bool {
   let len = s.length()
   if len == 0 {
@@ -5376,20 +5395,11 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
               k = k + 1
             }
             let ident = buf.to_string()
-            let mut j = i
             // Match the identifier-scan loop above (and the `expr.mbt` lexer):
             // skip all whitespace — not just spaces — so a tab/newline between
             // the identifier and its `.` (e.g. a multiline `${{ githab\n.ref }}`)
             // does not hide an unknown context.
-            while j < n &&
-                  (
-                    chars[j] == ' ' ||
-                    chars[j] == '\t' ||
-                    chars[j] == '\n' ||
-                    chars[j] == '\r'
-                  ) {
-              j = j + 1
-            }
+            let j = skip_ws(chars, i)
             if j < n && chars[j] == '.' {
               if !array_contains_string(contexts, ident) &&
                 !seen.contains(ident) {
@@ -5437,85 +5447,94 @@ fn config_variable_allowed(name : String, policy : Array[String]?) -> Bool {
 fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   guard ctx.config_variables is Some(_) else { return }
   let seen : Map[String, Bool] = {}
+  fn scan_body(body : String) -> Unit {
+    let chars = strip_expr_string_literals(body).to_array()
+    let n = chars.length()
+    let mut i = 0
+    while i < n {
+      let c = chars[i]
+      if is_ident_start(c) {
+        let start = i
+        while i < n && is_id_cont(chars[i]) {
+          i = i + 1
+        }
+        let buf = StringBuilder::new()
+        let mut k = start
+        while k < i {
+          buf.write_char(chars[k])
+          k = k + 1
+        }
+        let ident = buf.to_string()
+        if ident == "vars" {
+          // Skip whitespace (including newlines) between `vars` and `.`,
+          // matching `check_unknown_context`'s tolerance for a multiline
+          // `${{ vars\n.FOO }}`.
+          let dot = skip_ws(chars, i)
+          if dot < n && chars[dot] == '.' {
+            let j0 = skip_ws(chars, dot + 1)
+            if j0 < n && is_ident_start(chars[j0]) {
+              let mut j = j0
+              while j < n && is_id_cont(chars[j]) {
+                j = j + 1
+              }
+              let vbuf = StringBuilder::new()
+              let mut m = j0
+              while m < j {
+                vbuf.write_char(chars[m])
+                m = m + 1
+              }
+              let var_name = vbuf.to_string()
+              if !config_variable_allowed(var_name, ctx.config_variables) &&
+                !seen.contains(var_name) {
+                seen[var_name] = true
+                add_diag(
+                  out,
+                  "config-variables",
+                  Error,
+                  "vars.\{var_name} is not declared in `config-variables`",
+                )
+              }
+              i = j
+            }
+          }
+        }
+      } else {
+        i = i + 1
+      }
+    }
+  }
+
   walk_strings(ctx.doc, fn(s) {
     if !s.contains("${{") {
       return
     }
     for body in extract_expr_bodies(s) {
-      let chars = strip_expr_string_literals(body).to_array()
-      let n = chars.length()
-      let mut i = 0
-      while i < n {
-        let c = chars[i]
-        if is_ident_start(c) {
-          let start = i
-          while i < n && is_id_cont(chars[i]) {
-            i = i + 1
-          }
-          let buf = StringBuilder::new()
-          let mut k = start
-          while k < i {
-            buf.write_char(chars[k])
-            k = k + 1
-          }
-          let ident = buf.to_string()
-          if ident == "vars" {
-            // Skip whitespace (including newlines) between `vars` and `.`,
-            // matching `check_unknown_context`'s tolerance for a
-            // multiline `${{ vars\n.FOO }}`.
-            let mut dot = i
-            while dot < n &&
-                  (
-                    chars[dot] == ' ' ||
-                    chars[dot] == '\t' ||
-                    chars[dot] == '\n' ||
-                    chars[dot] == '\r'
-                  ) {
-              dot = dot + 1
-            }
-            if dot < n && chars[dot] == '.' {
-              let mut j0 = dot + 1
-              while j0 < n &&
-                    (
-                      chars[j0] == ' ' ||
-                      chars[j0] == '\t' ||
-                      chars[j0] == '\n' ||
-                      chars[j0] == '\r'
-                    ) {
-                j0 = j0 + 1
-              }
-              if j0 < n && is_ident_start(chars[j0]) {
-                let mut j = j0
-                while j < n && is_id_cont(chars[j]) {
-                  j = j + 1
-                }
-                let vbuf = StringBuilder::new()
-                let mut m = j0
-                while m < j {
-                  vbuf.write_char(chars[m])
-                  m = m + 1
-                }
-                let var_name = vbuf.to_string()
-                if !config_variable_allowed(var_name, ctx.config_variables) &&
-                  !seen.contains(var_name) {
-                  seen[var_name] = true
-                  add_diag(
-                    out,
-                    "config-variables",
-                    Error,
-                    "vars.\{var_name} is not declared in `config-variables`",
-                  )
-                }
-                i = j
-              }
-            }
-          }
-        } else {
-          i = i + 1
-        }
-      }
+      scan_body(body)
     }
   })
+  // `if:` is evaluated as an expression by GitHub even without `${{ }}`
+  // delimiters (`if: vars.env == 'prod'`), so the whole-doc scan above
+  // (gated on `${{`) misses it — mirrors `expr_collect_findings_in_if` in
+  // expr.mbt. `job`/`step` `if_cond` is pre-extracted onto `JobInfo` /
+  // `StepInfo` regardless of delimiter, so only the bare (no-`${{`) case
+  // needs a dedicated pass here; the delimited case is already covered
+  // above since `if_cond`'s source string is part of `ctx.doc`.
+  fn scan_if(if_cond : String?) -> Unit {
+    match if_cond {
+      Some(s) => if !s.contains("${{") { scan_body(s) }
+      None => ()
+    }
+  }
+
+  for j in ctx.jobs {
+    scan_if(j.if_cond)
+  }
+  for s in ctx.workflow_steps {
+    scan_if(s.if_cond)
+  }
+  for s in ctx.action_steps {
+    scan_if(s.if_cond)
+  }
 }
 
 // ---------------------------------------------------------------------------

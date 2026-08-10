@@ -976,6 +976,31 @@ test "karinto config: config-variables tolerates whitespace/newlines around the 
 }
 
 ///|
+test "karinto config: config-variables catches bare `if:` (no `${{ }}` delimiters)" {
+  // GitHub evaluates `if:` as an expression even without `${{ }}`, so a bare
+  // `if: vars.UNDECLARED == 'x'` must still be checked — mirrors
+  // `expr_collect_findings_in_if` in expr.mbt. One at job scope, one at step
+  // scope.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    if: vars.JOB_FLAG == 'on'
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - if: vars.STEP_FLAG == 'on'
+    #|        run: echo hi
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 2)
+  let names = hits.map(fn(d) { d.message })
+  assert_true(names.filter(fn(m) { m.contains("JOB_FLAG") }).length() == 1)
+  assert_true(names.filter(fn(m) { m.contains("STEP_FLAG") }).length() == 1)
+}
+
+///|
 test "karinto config: rules.<id> overrides severity" {
   let yaml =
     #|on: push
