@@ -223,6 +223,78 @@ test "use-trusted-publishing: npm publish --dry-run is not a real publish" {
 }
 
 ///|
+let publish_cargo_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":13,\"x\":\"cargo publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":13,\"x\":\"cargo publish\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":5,\"x\":\"cargo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":5,\"x\":\"cargo\"}]},{\"t\":\"word\",\"s\":6,\"e\":13,\"x\":\"publish\"}]}]}"
+
+///|
+let publish_cargo_dry_run : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"x\":\"cargo publish --dry-run\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"x\":\"cargo publish --dry-run\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":5,\"x\":\"cargo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":5,\"x\":\"cargo\"}]},{\"t\":\"word\",\"s\":6,\"e\":13,\"x\":\"publish\"},{\"t\":\"word\",\"s\":14,\"e\":23,\"x\":\"--dry-run\"}]}]}"
+
+///|
+let publish_bun_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":11,\"x\":\"bun publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":11,\"x\":\"bun publish\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"bun\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"bun\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"}]}]}"
+
+///|
+let publish_gem_push : String = "{\"t\":\"program\",\"s\":0,\"e\":25,\"x\":\"gem push my-gem-1.0.0.gem\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":25,\"x\":\"gem push my-gem-1.0.0.gem\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"gem\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"gem\"}]},{\"t\":\"word\",\"s\":4,\"e\":8,\"x\":\"push\"},{\"t\":\"word\",\"s\":9,\"e\":25,\"x\":\"my-gem-1.0.0.gem\"}]}]}"
+
+///|
+let publish_dotnet_nuget_push : String = "{\"t\":\"program\",\"s\":0,\"e\":31,\"x\":\"dotnet nuget push package.nupkg\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":31,\"x\":\"dotnet nuget push package.nupkg\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":6,\"x\":\"dotnet\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":6,\"x\":\"dotnet\"}]},{\"t\":\"word\",\"s\":7,\"e\":12,\"x\":\"nuget\"},{\"t\":\"word\",\"s\":13,\"e\":17,\"x\":\"push\"},{\"t\":\"word\",\"s\":18,\"e\":31,\"x\":\"package.nupkg\"}]}]}"
+
+///|
+let publish_poetry_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":14,\"x\":\"poetry publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":14,\"x\":\"poetry publish\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":6,\"x\":\"poetry\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":6,\"x\":\"poetry\"}]},{\"t\":\"word\",\"s\":7,\"e\":14,\"x\":\"publish\"}]}]}"
+
+///|
+let publish_uv_publish : String = "{\"t\":\"program\",\"s\":0,\"e\":10,\"x\":\"uv publish\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":10,\"x\":\"uv publish\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":2,\"x\":\"uv\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":2,\"x\":\"uv\"}]},{\"t\":\"word\",\"s\":3,\"e\":10,\"x\":\"publish\"}]}]}"
+
+///|
+let publish_uvx_twine_upload : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"x\":\"uvx twine upload dist/*\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"x\":\"uvx twine upload dist/*\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"uvx\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"uvx\"}]},{\"t\":\"word\",\"s\":4,\"e\":9,\"x\":\"twine\"},{\"t\":\"word\",\"s\":10,\"e\":16,\"x\":\"upload\"},{\"t\":\"word\",\"s\":17,\"e\":23,\"x\":\"dist/*\"}]}]}"
+
+///|
+test "use-trusted-publishing: cargo publish" {
+  let root = parse_shell_ast(publish_cargo_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: cargo publish --dry-run is not a real publish" {
+  let root = parse_shell_ast(publish_cargo_dry_run).unwrap()
+  assert_false(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: bun publish" {
+  let root = parse_shell_ast(publish_bun_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: gem push" {
+  let root = parse_shell_ast(publish_gem_push).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: dotnet nuget push" {
+  let root = parse_shell_ast(publish_dotnet_nuget_push).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: poetry publish" {
+  let root = parse_shell_ast(publish_poetry_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: uv publish" {
+  let root = parse_shell_ast(publish_uv_publish).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
+test "use-trusted-publishing: uvx twine upload" {
+  let root = parse_shell_ast(publish_uvx_twine_upload).unwrap()
+  assert_true(analyze_trusted_publishing(root))
+}
+
+///|
 let publish_npm_dry_run_quoted : String = "{\"t\":\"program\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":23,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"publish\"},{\"t\":\"string\",\"s\":12,\"e\":23,\"x\":\"\\\"--dry-run\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":13,\"e\":22,\"x\":\"--dry-run\"}]}]}]}"
 
 ///|

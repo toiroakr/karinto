@@ -387,6 +387,20 @@ fn first_non_flag_word(words : ArrayView[String]) -> String? {
 }
 
 ///|
+/// Every publish-command family the old hand-rolled tokenizer recognized
+/// (`rules_catalog.md`'s `use-trusted-publishing` entry): `cargo`, `twine`,
+/// `npm`/`pnpm`/`bun`/`yarn`, `gem`, `nuget`/`dotnet nuget`, `poetry`,
+/// `hatch`/`pdm`, `uv`/`uvx`, `python -m twine`, `pipx run twine`,
+/// `bundle exec gem push`, `bunx npm publish`. Where the original checked
+/// "does `rest` contain the token `publish` anywhere" for a tool's own
+/// subcommand, this checks `first_non_flag_word(rest) == Some("publish")`
+/// instead — stricter, and the reason a dlx-style wrapper (`pnpm dlx X
+/// publish`) doesn't false-positive without needing the old code's
+/// curated non-registry-tool allowlist (`is_known_non_registry_dlx_tool`,
+/// which only covered `pkg-pr-new` and would still have flagged `pnpm dlx
+/// some-other-tool publish` as a real npm publish): the dlx'd tool's own
+/// `publish` argument is never `rest`'s first non-flag word, `dlx`/`exec`
+/// is.
 fn command_is_publish(cmd : ShellNode) -> Bool {
   let words = command_words(cmd)
   if words.length() == 0 {
@@ -394,38 +408,78 @@ fn command_is_publish(cmd : ShellNode) -> Bool {
   }
   let head = words[0].to_lower()
   let rest = words[1:]
-  match head {
-    "twine" => words_contain(rest, "upload")
-    "npm" | "pnpm" | "yarn" =>
-      first_non_flag_word(rest) == Some("publish") &&
+  if head == "cargo" {
+    return first_non_flag_word(rest) == Some("publish") &&
+      !words_contain(rest, "--dry-run") &&
+      !words_contain(rest, "-n")
+  }
+  if head == "twine" {
+    return words_contain(rest, "upload")
+  }
+  if head == "npm" || head == "pnpm" || head == "bun" {
+    return first_non_flag_word(rest) == Some("publish") &&
       !words_contain(rest, "--dry-run")
-    "python" =>
-      words_contain(rest, "-m") &&
+  }
+  if head == "yarn" {
+    return first_non_flag_word(rest) == Some("publish") &&
+      !words_contain(rest, "--dry-run") &&
+      !words_contain(rest, "-n")
+  }
+  if head == "gem" {
+    return words_contain(rest, "push")
+  }
+  if head == "nuget" || head == "nuget.exe" {
+    return words_contain(rest, "push")
+  }
+  if head == "dotnet" {
+    return words_contain(rest, "nuget") && words_contain(rest, "push")
+  }
+  if head == "poetry" {
+    return first_non_flag_word(rest) == Some("publish") &&
+      !words_contain(rest, "--dry-run")
+  }
+  if head == "hatch" || head == "pdm" {
+    return first_non_flag_word(rest) == Some("publish")
+  }
+  if head == "uv" {
+    if first_non_flag_word(rest) == Some("publish") {
+      return true
+    }
+    return words_contain(rest, "twine") && words_contain(rest, "upload")
+  }
+  if head == "uvx" {
+    let twine_like = words_contain(rest, "twine") ||
+      words_contain_prefix(rest, "twine==") ||
+      words_contain_prefix(rest, "twine@")
+    return twine_like && words_contain(rest, "upload")
+  }
+  if head == "python" || head.has_prefix("python3") {
+    return words_contain(rest, "-m") &&
       words_contain(rest, "twine") &&
       words_contain(rest, "upload")
-    "python3" =>
-      words_contain(rest, "-m") &&
-      words_contain(rest, "twine") &&
-      words_contain(rest, "upload")
-    "pipx" =>
-      rest.length() > 0 &&
-      rest[0].to_lower() == "run" &&
-      (
-        words_contain(rest, "twine") ||
+  }
+  if head == "pipx" {
+    if rest.length() > 0 && rest[0].to_lower() == "run" {
+      let twine_like = words_contain(rest, "twine") ||
         words_contain_prefix(rest, "twine==") ||
         words_contain_prefix(rest, "twine@")
-      ) &&
-      words_contain(rest, "upload")
-    "bundle" =>
-      words_contain(rest, "exec") &&
+      return twine_like && words_contain(rest, "upload")
+    }
+    return false
+  }
+  if head == "bundle" {
+    return words_contain(rest, "exec") &&
       words_contain(rest, "gem") &&
       words_contain(rest, "push")
-    "bunx" =>
-      (words_contain(rest, "npm") || words_contain_prefix(rest, "npm@")) &&
+  }
+  if head == "bunx" {
+    let npm_like = words_contain(rest, "npm") ||
+      words_contain_prefix(rest, "npm@")
+    return npm_like &&
       words_contain(rest, "publish") &&
       !words_contain(rest, "--dry-run")
-    _ => false
   }
+  false
 }
 
 // ---------------------------------------------------------------------------
