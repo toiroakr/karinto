@@ -57,9 +57,36 @@ test "github-env: quoted heredoc delimiter disables expansion" {
 }
 
 ///|
+let ghenv_heredoc_overwrite_not_append : String = "{\"t\":\"program\",\"s\":0,\"e\":45,\"x\":\"cat <<EOF > \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":45,\"x\":\"cat <<EOF > \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"cat\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"cat\"}]}]},{\"t\":\"heredoc_redirect\",\"s\":4,\"e\":45,\"x\":\"<<EOF > \\\"$GITHUB_ENV\\\"\\nVAR=$USER_INPUT\\nEOF\",\"c\":[{\"t\":\"heredoc_start\",\"s\":6,\"e\":9,\"x\":\"EOF\"},{\"t\":\"file_redirect\",\"s\":10,\"e\":25,\"x\":\"> \\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"string\",\"s\":12,\"e\":25,\"x\":\"\\\"$GITHUB_ENV\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":13,\"e\":24,\"x\":\"$GITHUB_ENV\",\"c\":[{\"t\":\"variable_name\",\"s\":14,\"e\":24,\"x\":\"GITHUB_ENV\"}]}]}]},{\"t\":\"heredoc_body\",\"s\":26,\"e\":42,\"x\":\"VAR=$USER_INPUT\\n\",\"c\":[{\"t\":\"simple_expansion\",\"s\":30,\"e\":41,\"x\":\"$USER_INPUT\",\"c\":[{\"t\":\"variable_name\",\"s\":31,\"e\":41,\"x\":\"USER_INPUT\"}]},{\"t\":\"heredoc_content\",\"s\":42,\"e\":42,\"x\":\"\"}]},{\"t\":\"heredoc_end\",\"s\":42,\"e\":45,\"x\":\"EOF\"}]}]}]}"
+
+///|
+/// A heredoc *overwrite* (single `>`, not `>>`) must not fire — the same
+/// append-only guard the direct-redirect case gets. Without it, this would
+/// have been (incorrectly) flagged despite the existing plain `>` test
+/// above covering the non-heredoc case.
+test "github-env: heredoc overwrite (`>`) is not an append, not flagged" {
+  let src = "cat <<EOF > \"$GITHUB_ENV\"\nVAR=$USER_INPUT\nEOF"
+  let root = parse_shell_ast(ghenv_heredoc_overwrite_not_append).unwrap()
+  assert_eq(analyze_github_env(root, src), None)
+}
+
+///|
 test "github-env: overwrite (`>`) is not an append, not flagged" {
   let src = "echo \"VAR=$X\" > $GITHUB_ENV"
   let root = parse_shell_ast(ghenv_overwrite_not_append).unwrap()
+  assert_eq(analyze_github_env(root, src), None)
+}
+
+///|
+let ghenv_similarly_named_not_target : String = "{\"t\":\"program\",\"s\":0,\"e\":42,\"x\":\"echo \\\"VAR=$USER_INPUT\\\" >> $GITHUB_ENV_FILE\",\"c\":[{\"t\":\"redirected_statement\",\"s\":0,\"e\":42,\"x\":\"echo \\\"VAR=$USER_INPUT\\\" >> $GITHUB_ENV_FILE\",\"c\":[{\"t\":\"command\",\"s\":0,\"e\":22,\"x\":\"echo \\\"VAR=$USER_INPUT\\\"\",\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":22,\"x\":\"\\\"VAR=$USER_INPUT\\\"\",\"c\":[{\"t\":\"string_content\",\"s\":6,\"e\":10,\"x\":\"VAR=\"},{\"t\":\"simple_expansion\",\"s\":10,\"e\":21,\"x\":\"$USER_INPUT\",\"c\":[{\"t\":\"variable_name\",\"s\":11,\"e\":21,\"x\":\"USER_INPUT\"}]}]}]},{\"t\":\"file_redirect\",\"s\":23,\"e\":42,\"x\":\">> $GITHUB_ENV_FILE\",\"c\":[{\"t\":\"simple_expansion\",\"s\":26,\"e\":42,\"x\":\"$GITHUB_ENV_FILE\",\"c\":[{\"t\":\"variable_name\",\"s\":27,\"e\":42,\"x\":\"GITHUB_ENV_FILE\"}]}]}]}]}"
+
+///|
+/// `$GITHUB_ENV_FILE` merely *contains* "GITHUB_ENV" as a substring — must
+/// not be treated as a write to the real `$GITHUB_ENV`. `github_env_target`
+/// matches the `variable_name` node's text exactly, not via `contains`.
+test "github-env: a similarly-named-but-different var is not the real target" {
+  let src = "echo \"VAR=$USER_INPUT\" >> $GITHUB_ENV_FILE"
+  let root = parse_shell_ast(ghenv_similarly_named_not_target).unwrap()
   assert_eq(analyze_github_env(root, src), None)
 }
 

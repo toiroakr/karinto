@@ -77,11 +77,6 @@ fn shell_node_has_expansion(node : ShellNode) -> Bool {
   found
 }
 
-///|
-fn string_contains_ci(haystack : String, needle : String) -> Bool {
-  haystack.to_upper().contains(needle.to_upper())
-}
-
 // ---------------------------------------------------------------------------
 // github-env: writing dynamic content into $GITHUB_ENV / $GITHUB_PATH
 // ---------------------------------------------------------------------------
@@ -107,7 +102,7 @@ pub fn analyze_github_env(
     for redirect in stmt.c {
       if redirect.t == "file_redirect" &&
         shell_node_is_append_redirect(redirect) {
-        match github_env_target(redirect.x) {
+        match github_env_target(redirect) {
           Some(target) =>
             match cmd {
               Some(c) =>
@@ -123,12 +118,18 @@ pub fn analyze_github_env(
         let body = shell_node_find_child(redirect, "heredoc_body")
         match (fr, body) {
           (Some(fr), Some(body)) =>
-            match github_env_target(fr.x) {
-              Some(target) =>
-                if content_is_dynamic(body, original_source) {
-                  return Some(target)
-                }
-              None => ()
+            // Heredoc redirects need the same append-only guard as the
+            // direct case above — without it, `cat <<EOF > "$GITHUB_ENV"`
+            // (overwrite, single `>`) would be treated as a hit even
+            // though the rule only means to flag `>>`.
+            if shell_node_is_append_redirect(fr) {
+              match github_env_target(fr) {
+                Some(target) =>
+                  if content_is_dynamic(body, original_source) {
+                    return Some(target)
+                  }
+                None => ()
+              }
             }
           _ => ()
         }
@@ -159,10 +160,27 @@ fn source_slice(source : String, s : Int, e : Int) -> String {
 }
 
 ///|
-fn github_env_target(text : String) -> String? {
-  if string_contains_ci(text, "GITHUB_ENV") {
+/// Exact-match, not substring — `redirect.x` used to be checked with a
+/// plain `contains`, which would false-positive on an unrelated variable
+/// that merely contains "GITHUB_ENV" as a substring (e.g. `$GITHUB_ENV_FILE`).
+/// bash `$VAR`/`${VAR}` surfaces a `variable_name` node to compare exactly;
+/// cmd's `%VAR%` has no such substructure (a bare `word`), but its own `%`
+/// delimiters already act as a boundary, so a literal `%GITHUB_ENV%`
+/// substring check on the redirect's text is still exact-enough there.
+fn github_env_target(redirect : ShellNode) -> String? {
+  for vn in shell_node_find_all(redirect, "variable_name") {
+    let up = vn.x.to_upper()
+    if up == "GITHUB_ENV" {
+      return Some("GITHUB_ENV")
+    }
+    if up == "GITHUB_PATH" {
+      return Some("GITHUB_PATH")
+    }
+  }
+  let up = redirect.x.to_upper()
+  if up.contains("%GITHUB_ENV%") {
     Some("GITHUB_ENV")
-  } else if string_contains_ci(text, "GITHUB_PATH") {
+  } else if up.contains("%GITHUB_PATH%") {
     Some("GITHUB_PATH")
   } else {
     None
