@@ -166,45 +166,55 @@ fn split_path_segments(s : String) -> Array[String] {
 /// segment-blind `*` would let `.github/*` match a nested
 /// `.github/workflows/ci.yml`, and a literal-slash `**/*.yml` would fail to
 /// match a root-level `ci.yml`.
+///
+/// `ignore-paths` globs come from the untrusted `karinto_config` text (the
+/// Worker's `config` parameter), so — same reasoning as `glob_match`'s own
+/// non-backtracking two-pointer design, noted on its doc comment — matching
+/// must stay polynomial however many `**` segments a pattern repeats.
+/// Naive backtracking over multiple `**` segments (try every split point,
+/// recurse, repeat) is combinatorial in the worst case; memoizing each
+/// `(pattern segment, path segment)` pair visited bounds it to
+/// `O(pattern_segments * path_segments)`.
 fn path_glob_match(pattern : String, path : String) -> Bool {
-  path_segments_match(
-    split_path_segments(pattern),
-    0,
-    split_path_segments(path),
-    0,
-  )
-}
-
-///|
-fn path_segments_match(
-  pat : Array[String],
-  pi : Int,
-  path : Array[String],
-  si : Int,
-) -> Bool {
+  let pat = split_path_segments(pattern)
+  let seg = split_path_segments(path)
   let pn = pat.length()
-  let sn = path.length()
-  if pi == pn {
-    return si == sn
-  }
-  if pat[pi] == "**" {
-    // `**` consumes zero or more whole segments; try every split point.
-    let mut k = si
-    while k <= sn {
-      if path_segments_match(pat, pi + 1, path, k) {
-        return true
-      }
-      k = k + 1
+  let sn = seg.length()
+  // -1 = not yet computed, 0 = false, 1 = true.
+  let memo : Array[Int] = Array::make((pn + 1) * (sn + 1), -1)
+  fn go(pi : Int, si : Int) -> Bool {
+    let idx = pi * (sn + 1) + si
+    if memo[idx] != -1 {
+      return memo[idx] == 1
     }
-    return false
+    let result = if pi == pn {
+      si == sn
+    } else if pat[pi] == "**" {
+      // `**` consumes zero or more whole segments; try every split point,
+      // but each `(pi + 1, k)` pair is memoized so repeated `**` segments
+      // don't recompute the same sub-match.
+      let mut found = false
+      let mut k = si
+      while k <= sn {
+        if go(pi + 1, k) {
+          found = true
+          break
+        }
+        k = k + 1
+      }
+      found
+    } else if si == sn {
+      false
+    } else if !glob_match(pat[pi], seg[si]) {
+      false
+    } else {
+      go(pi + 1, si + 1)
+    }
+    memo[idx] = if result { 1 } else { 0 }
+    result
   }
-  if si == sn {
-    return false
-  }
-  if !glob_match(pat[pi], path[si]) {
-    return false
-  }
-  path_segments_match(pat, pi + 1, path, si + 1)
+
+  go(0, 0)
 }
 
 ///|

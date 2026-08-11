@@ -1249,6 +1249,41 @@ test "karinto config: ignore-paths \"**/\" matches a root-level file too" {
 }
 
 ///|
+test "karinto config: ignore-paths handles many `**` segments without blowing up" {
+  // `ignore-paths` globs come from the untrusted `config` HTTP parameter, so
+  // a pattern repeating `**` many times against a non-matching path must
+  // stay fast (memoized DP, not naive backtracking) rather than exploring
+  // combinatorially many split points. This test's own completion time is
+  // the regression signal: a non-memoized matcher on a pattern this deep
+  // would make the whole suite visibly hang rather than merely return
+  // `false`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/no-match":
+    #|    - "*"
+  let res = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path="a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p.yml",
+  )
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
 test "karinto config: config-variables ignores `vars` as a member access, not the context" {
   // `needs.a.outputs.vars.NAME` is a property named `vars` on a job's
   // `outputs`, not the `vars.*` context — must not be flagged, matching
