@@ -170,10 +170,16 @@ fn split_path_segments(s : String) -> Array[String] {
 /// `ignore-paths` globs come from the untrusted `karinto_config` text (the
 /// Worker's `config` parameter), so — same reasoning as `glob_match`'s own
 /// non-backtracking two-pointer design, noted on its doc comment — matching
-/// must stay polynomial however many `**` segments a pattern repeats.
-/// Naive backtracking over multiple `**` segments (try every split point,
-/// recurse, repeat) is combinatorial in the worst case; memoizing each
-/// `(pattern segment, path segment)` pair visited bounds it to
+/// must stay polynomial however many `**` segments a pattern repeats. A
+/// `**` state is resolved by the standard two-way wildcard-matching
+/// recurrence (`go(pi + 1, si) || go(pi, si + 1)`: either stop here and
+/// match zero segments, or consume one more segment and stay on `**`)
+/// rather than trying every split point — trying every split point is
+/// still memo-safe (no combinatorial blowup) but costs `O(path_segments)`
+/// per `**` state, degrading the overall bound to
+/// `O(pattern_segments * path_segments²)` for patterns with many `**`
+/// segments. The two-way recurrence keeps every state O(1) after
+/// memoization, bounding the whole match to
 /// `O(pattern_segments * path_segments)`.
 fn path_glob_match(pattern : String, path : String) -> Bool {
   let pat = split_path_segments(pattern)
@@ -190,19 +196,9 @@ fn path_glob_match(pattern : String, path : String) -> Bool {
     let result = if pi == pn {
       si == sn
     } else if pat[pi] == "**" {
-      // `**` consumes zero or more whole segments; try every split point,
-      // but each `(pi + 1, k)` pair is memoized so repeated `**` segments
-      // don't recompute the same sub-match.
-      let mut found = false
-      let mut k = si
-      while k <= sn {
-        if go(pi + 1, k) {
-          found = true
-          break
-        }
-        k = k + 1
-      }
-      found
+      // Zero segments (drop `**`, move to the next pattern segment here),
+      // or one more segment consumed by this same `**`.
+      go(pi + 1, si) || (si < sn && go(pi, si + 1))
     } else if si == sn {
       false
     } else if !glob_match(pat[pi], seg[si]) {
