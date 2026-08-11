@@ -59,7 +59,7 @@ fn yaml_string_array(items : Array[@yaml.Yaml]) -> Array[String] {
 /// block scalar (`severity: |\n  error\n`, which keeps its trailing
 /// newline) still matches instead of silently falling through to `None`.
 fn parse_severity_string(s : String) -> Severity? {
-  match s.trim(chars=" \t\r\n").to_owned() {
+  match s.trim(chars=" \t\r\n").to_owned().to_lower() {
     "error" => Some(Error)
     "warning" => Some(Warning)
     "info" => Some(Info)
@@ -71,7 +71,11 @@ fn parse_severity_string(s : String) -> Severity? {
 /// Parse a karinto config document (`karinto.yaml`, or a compatible
 /// `.github/actionlint.yaml`) into a `KarintoConfig`. Best-effort: a
 /// malformed config yields the all-default config rather than crashing the
-/// lint, matching `parse_ghalint_excludes` / `parse_zizmor_config`.
+/// lint, matching `parse_ghalint_excludes` / `parse_zizmor_config`. Only the
+/// first YAML document is read (unlike `parse_zizmor_config`, which scans
+/// every document for its zizmor-shaped `rules:`): a multi-document
+/// `karinto.yaml` is not a realistic authoring pattern for this format, so
+/// later documents are ignored rather than merged.
 fn parse_karinto_config(config : String) -> KarintoConfig {
   let empty = empty_karinto_config()
   let parsed = try? @yaml.Yaml::load_from_string(config)

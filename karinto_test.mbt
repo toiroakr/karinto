@@ -1053,6 +1053,28 @@ test "karinto config: rules.<id> overrides severity" {
 }
 
 ///|
+test "karinto config: rules.<id> severity is case-insensitive" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions: Error
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
 test "karinto config: rules.<id> severity as a YAML block scalar still parses" {
   // A literal block scalar (`|`) keeps its trailing newline under YAML's
   // default "clip" chomping — `parse_severity_string` must trim it, not
@@ -1141,12 +1163,9 @@ test "karinto config: ignore-paths \"*\" suppresses every rule under a glob" {
     karinto_config=cfg,
     file_path="fixtures/legacy/ci.yml",
   )
-  assert_eq(
-    res.diagnostics
-    .filter(fn(d) { d.rule == "undocumented-permissions" })
-    .length(),
-    0,
-  )
+  // `"*"` suppresses every rule under the glob, not just one — assert the
+  // whole diagnostics array is empty rather than filtering for a single rule.
+  assert_eq(res.diagnostics.length(), 0)
 }
 
 ///|
