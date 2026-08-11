@@ -1284,6 +1284,40 @@ test "karinto config: ignore-paths handles many `**` segments without blowing up
 }
 
 ///|
+test "karinto config: ignore-paths glob past the segment cap fails closed" {
+  // A glob deeper than `max_path_glob_segments()` (an untrusted `config`
+  // pattern could pack thousands of segments into the 64 KiB cap) must not
+  // match — and, more importantly, must not allocate a memo table sized to
+  // it. Failing closed means the diagnostic simply isn't suppressed, rather
+  // than the match blowing up memory.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let buf = StringBuilder::new()
+  buf.write_string("ignore-paths:\n  \"")
+  let mut i = 0
+  while i < 100 {
+    buf.write_string("a/")
+    i = i + 1
+  }
+  buf.write_string("ci.yml\":\n    - \"*\"\n")
+  let cfg = buf.to_string()
+  let res = @karinto.lint(yaml, karinto_config=cfg, file_path="ci.yml")
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
 test "karinto config: config-variables ignores `vars` as a member access, not the context" {
   // `needs.a.outputs.vars.NAME` is a property named `vars` on a job's
   // `outputs`, not the `vars.*` context — must not be flagged, matching

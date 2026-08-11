@@ -181,11 +181,29 @@ fn split_path_segments(s : String) -> Array[String] {
 /// segments. The two-way recurrence keeps every state O(1) after
 /// memoization, bounding the whole match to
 /// `O(pattern_segments * path_segments)`.
+///
+/// That bound is still a function of the (untrusted) pattern's own segment
+/// count, and this runs once per `(diagnostic, ignore-paths entry)` pair —
+/// so a pattern packed with thousands of tiny segments (e.g. `a/` repeated
+/// to fill the 64 KiB `config` cap) would still allocate a memo table sized
+/// to match, repeatedly. `max_path_glob_segments` caps both the pattern and
+/// the path at a generous depth no real repository path approaches, and
+/// fails closed (no match, no allocation) past it — a pattern this deep is
+/// never going to usefully identify a real file anyway.
+fn max_path_glob_segments() -> Int {
+  64
+}
+
+///|
 fn path_glob_match(pattern : String, path : String) -> Bool {
   let pat = split_path_segments(pattern)
   let seg = split_path_segments(path)
   let pn = pat.length()
   let sn = seg.length()
+  let cap = max_path_glob_segments()
+  if pn > cap || sn > cap {
+    return false
+  }
   // -1 = not yet computed, 0 = false, 1 = true.
   let memo : Array[Int] = Array::make((pn + 1) * (sn + 1), -1)
   fn go(pi : Int, si : Int) -> Bool {
