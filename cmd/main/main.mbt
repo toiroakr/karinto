@@ -465,7 +465,14 @@ fn lint_files(
             entries.push(entry.to_json())
           }
           Sarif =>
-            sarif_entries.push(@karinto.SarifEntry::{ path: Some(path), result })
+            // SARIF's `artifactLocation.uri` is a URI, which conventionally
+            // uses `/` — the same normalized path already computed for the
+            // engine's own path matching, not the original (possibly
+            // `\`-separated on Windows) `path`.
+            sarif_entries.push(@karinto.SarifEntry::{
+              path: Some(lint_path),
+              result,
+            })
         }
       }
     }
