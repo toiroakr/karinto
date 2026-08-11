@@ -353,6 +353,8 @@ async function replayOne(targetUrl, request) {
   if (request.forbidden) body.set("forbidden", request.forbidden);
   if (request.archived) body.set("archived", request.archived);
   if (request.ghalint) body.set("ghalint", request.ghalint);
+  if (request.zizmor) body.set("zizmor", request.zizmor);
+  if (request.config) body.set("config", request.config);
   if (request.path) body.set("path", request.path);
   if (request.persona) body.set("persona", request.persona);
   // Never let the rebaseline traffic itself create captures.

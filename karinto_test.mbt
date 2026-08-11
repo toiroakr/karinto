@@ -1150,6 +1150,110 @@ test "karinto config: ignore-paths \"*\" suppresses every rule under a glob" {
 }
 
 ///|
+test "karinto config: ignore-paths glob is segment-aware, not substring-blind" {
+  // A single `*` must not cross a `/` boundary (unlike `glob_match`, shared
+  // with rule-ID matching where there is no `/` to reason about): `.github/*`
+  // should match a direct child but not a nested descendant.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  ".github/*":
+    #|    - "*"
+  let direct_child = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/ci.yml",
+  )
+  assert_eq(
+    direct_child.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  let nested = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_true(
+    nested.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
+test "karinto config: ignore-paths \"**/\" matches a root-level file too" {
+  // `**` matches zero or more whole segments, so `**/*.yml` must match a
+  // root-level `ci.yml` (zero segments consumed by `**`), not just a nested
+  // one.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "**/*.yml":
+    #|    - "*"
+  let root = @karinto.lint(yaml, karinto_config=cfg, file_path="ci.yml")
+  assert_eq(
+    root.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  let nested = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    nested.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: config-variables ignores `vars` as a member access, not the context" {
+  // `needs.a.outputs.vars.NAME` is a property named `vars` on a job's
+  // `outputs`, not the `vars.*` context — must not be flagged, matching
+  // `check_unknown_context`'s `prev_dot` handling for the same shape.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  a:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+    #|  b:
+    #|    needs: a
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ needs.a.outputs.vars.NAME }}"
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 0)
+}
+
+///|
 test "karinto config: a compatible actionlint.yaml is honoured directly" {
   // `self-hosted-runner.labels` / `config-variables` share actionlint.yaml's
   // own key names and shapes, so an existing actionlint.yaml works without

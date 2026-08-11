@@ -1,10 +1,12 @@
 # Migrating from actionlint
 
-karinto reimplements actionlint's checks (plus zizmor's and ghalint's) on a
-different engine, so nothing here requires actionlint to keep running
-alongside it. This page maps what you already have — actionlint's check
-categories (`Kind`) and its `-ignore` / `actionlint.yaml` opt-outs — onto
-their karinto equivalents.
+karinto reimplements the checks it covers from actionlint (plus selected
+zizmor and ghalint rules) on a different engine — but it does **not** cover
+everything actionlint does; see the gaps below (`shellcheck` / `pyflakes`)
+before dropping actionlint from your CI. This page maps what you already
+have — actionlint's check categories (`Kind`) and its `-ignore` /
+`actionlint.yaml` opt-outs — onto their karinto equivalents, for whatever
+karinto does implement.
 
 ## Check categories → karinto rule IDs
 
@@ -44,9 +46,11 @@ CI already. See
 [#113](https://github.com/toiroakr/karinto/issues/113) for the narrower,
 targeted shell-script rules karinto is building instead of a shellcheck port.
 
-Beyond actionlint's own checks, karinto also folds in every
+Beyond actionlint's own checks, karinto also folds in most
 [zizmor](https://docs.zizmor.sh) and [ghalint](https://github.com/suzuki-shunsuke/ghalint)
-rule — see the [Coverage](../README.md#coverage) table for the full set.
+rules — see [`rules_catalog.md`](../rules_catalog.md) for the exact status of
+each (`Implemented` / `Planned` / `Not planned`) and the
+[Coverage](../README.md#coverage) table for the running total.
 
 ## `-ignore` → `disable` / inline ignores
 

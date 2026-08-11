@@ -140,6 +140,70 @@ fn parse_karinto_config(config : String) -> KarintoConfig {
 }
 
 ///|
+/// Splits `s` on `/`, dropping empty segments — so a leading/trailing/
+/// doubled slash doesn't introduce phantom empty path components.
+fn split_path_segments(s : String) -> Array[String] {
+  let out : Array[String] = []
+  for seg in s.split("/") {
+    let seg = seg.to_owned()
+    if seg != "" {
+      out.push(seg)
+    }
+  }
+  out
+}
+
+///|
+/// Path-glob match, gitignore-style: `*` matches within a single path
+/// segment (never crosses `/`), `**` matches zero or more whole segments,
+/// `?` matches one character. Deliberately distinct from `glob_match`
+/// (shared with rule-ID / runner-label matching, where there is no `/` to
+/// reason about and a bare `*` is expected to match anything): a
+/// segment-blind `*` would let `.github/*` match a nested
+/// `.github/workflows/ci.yml`, and a literal-slash `**/*.yml` would fail to
+/// match a root-level `ci.yml`.
+fn path_glob_match(pattern : String, path : String) -> Bool {
+  path_segments_match(
+    split_path_segments(pattern),
+    0,
+    split_path_segments(path),
+    0,
+  )
+}
+
+///|
+fn path_segments_match(
+  pat : Array[String],
+  pi : Int,
+  path : Array[String],
+  si : Int,
+) -> Bool {
+  let pn = pat.length()
+  let sn = path.length()
+  if pi == pn {
+    return si == sn
+  }
+  if pat[pi] == "**" {
+    // `**` consumes zero or more whole segments; try every split point.
+    let mut k = si
+    while k <= sn {
+      if path_segments_match(pat, pi + 1, path, k) {
+        return true
+      }
+      k = k + 1
+    }
+    return false
+  }
+  if si == sn {
+    return false
+  }
+  if !glob_match(pat[pi], path[si]) {
+    return false
+  }
+  path_segments_match(pat, pi + 1, path, si + 1)
+}
+
+///|
 /// Whether diagnostic `d`'s rule is ignored under `ignore-paths` for the file
 /// under lint. `"*"` in a glob's rule-id list ignores every rule matched by
 /// that glob. An empty `file_path` matches nothing (mirrors ghalint's
@@ -156,7 +220,7 @@ fn karinto_config_path_ignored(
   let f = strip_dot_slash(file_path)
   for entry in ignore_paths {
     let (glob, rules) = entry
-    if !glob_match(strip_dot_slash(glob), f) {
+    if !path_glob_match(strip_dot_slash(glob), f) {
       continue
     }
     for r in rules {

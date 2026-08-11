@@ -5453,9 +5453,19 @@ fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
     let chars = strip_expr_string_literals(body).to_array()
     let n = chars.length()
     let mut i = 0
+    // Tracks whether the identifier about to be scanned follows a `.` —
+    // matching `check_unknown_context`'s `prev_dot`. Without this, a member
+    // access like `needs.build.outputs.vars.NAME` would misread `.vars` as
+    // the `vars` context instead of a property named `vars`.
+    let mut prev_dot = false
     while i < n {
       let c = chars[i]
-      if is_ident_start(c) {
+      if c == '.' {
+        prev_dot = true
+        i = i + 1
+      } else if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+        i = i + 1
+      } else if is_ident_start(c) {
         let start = i
         while i < n && is_id_cont(chars[i]) {
           i = i + 1
@@ -5467,7 +5477,7 @@ fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
           k = k + 1
         }
         let ident = buf.to_string()
-        if ident == "vars" {
+        if ident == "vars" && !prev_dot {
           // Skip whitespace (including newlines) between `vars` and `.`,
           // matching `check_unknown_context`'s tolerance for a multiline
           // `${{ vars\n.FOO }}`.
@@ -5500,7 +5510,9 @@ fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
             }
           }
         }
+        prev_dot = false
       } else {
+        prev_dot = false
         i = i + 1
       }
     }

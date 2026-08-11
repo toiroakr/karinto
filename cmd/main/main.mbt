@@ -432,12 +432,18 @@ fn lint_files(
           Unknown => kind_from_path(path)
           _ => kind
         }
+        // Normalize `\`-separated Windows paths to `/` before handing them
+        // to the engine: `ghalint_config` / `zizmor_config` / `karinto_config`
+        // path matching (`workflow_file_path`, `ignore`, `ignore-paths`) all
+        // assume `/`-separated suffixes, same reasoning as `kind_from_path`
+        // below.
+        let lint_path = path.replace_all(old="\\", new="/")
         let result = @karinto.lint(
           content,
           kind=file_kind,
           disabled~,
           persona~,
-          file_path=path,
+          file_path=lint_path,
           ghalint_config~,
           zizmor_config~,
           karinto_config~,
