@@ -111,6 +111,20 @@ fn run() -> Int {
       }
     }
   }
+  let actionlint_config_path = last_value(matches, "actionlint-config")
+  let actionlint_config = if actionlint_config_path == "" {
+    ""
+  } else {
+    match js_read_file(actionlint_config_path) {
+      Some(c) => c
+      None => {
+        eprintln(
+          "error: cannot read actionlint config '\{actionlint_config_path}'",
+        )
+        return 2
+      }
+    }
+  }
   let karinto_config_path = last_value(matches, "config")
   let karinto_config = if karinto_config_path == "" {
     ""
@@ -139,10 +153,12 @@ fn run() -> Int {
     }
     lint_stdin(
       kind, disabled, format, persona, ghalint_config, zizmor_config, karinto_config,
+      actionlint_config,
     )
   } else {
     lint_files(
       files, kind, disabled, format, persona, ghalint_config, zizmor_config, karinto_config,
+      actionlint_config,
     )
   }
 }
@@ -187,6 +203,11 @@ fn build_command() -> @argparse.Command {
         "zizmor-config",
         long="zizmor-config",
         about="Path to a zizmor config (zizmor.yml); its `rules.<id>.disable`/`ignore` are honoured",
+      ),
+      @argparse.OptionArg::new(
+        "actionlint-config",
+        long="actionlint-config",
+        about="Path to an actionlint config (.github/actionlint.yaml); its `paths.<glob>.ignore` patterns are matched against actionlint's own canonical messages to suppress the corresponding karinto rule(s)",
       ),
       @argparse.OptionArg::new(
         "config",
@@ -352,6 +373,7 @@ fn lint_stdin(
   ghalint_config : String,
   zizmor_config : String,
   karinto_config : String,
+  actionlint_config : String,
 ) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
@@ -361,8 +383,8 @@ fn lint_stdin(
     }
   }
   // stdin has no path, so path-scoped ghalint excludes, zizmor location
-  // ignores, and karinto ignore-paths can't match; path-less opt-outs (e.g.
-  // zizmor `disable`) still apply.
+  // ignores, actionlint path-glob excludes, and karinto ignore-paths can't
+  // match; path-less opt-outs (e.g. zizmor `disable`) still apply.
   let result = @karinto.lint(
     content,
     kind~,
@@ -371,6 +393,7 @@ fn lint_stdin(
     ghalint_config~,
     zizmor_config~,
     karinto_config~,
+    actionlint_config~,
   )
   match format {
     Envelope => {
@@ -405,6 +428,7 @@ fn lint_files(
   ghalint_config : String,
   zizmor_config : String,
   karinto_config : String,
+  actionlint_config : String,
 ) -> Int {
   let entries : Array[Json] = []
   let sarif_entries : Array[@karinto.SarifEntry] = []
@@ -443,10 +467,11 @@ fn lint_files(
           _ => kind
         }
         // Normalize `\`-separated Windows paths to `/` before handing them
-        // to the engine: `ghalint_config` / `zizmor_config` / `karinto_config`
-        // path matching (`workflow_file_path`, `ignore`, `ignore-paths`) all
-        // assume `/`-separated suffixes, same reasoning as `kind_from_path`
-        // below.
+        // to the engine: `ghalint_config` / `zizmor_config` /
+        // `actionlint_config` / `karinto_config` path matching
+        // (`workflow_file_path`, `ignore`, `paths.<glob>`, `ignore-paths`)
+        // all assume `/`-separated suffixes, same reasoning as
+        // `kind_from_path` below.
         let lint_path = path.replace_all(old="\\", new="/")
         let result = @karinto.lint(
           content,
@@ -457,6 +482,7 @@ fn lint_files(
           ghalint_config~,
           zizmor_config~,
           karinto_config~,
+          actionlint_config~,
         )
         let ok = result.parse_error is None
         if !ok {

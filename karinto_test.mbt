@@ -504,6 +504,143 @@ test "ghalint config: workflow_file_path scopes the exclude" {
 }
 
 ///|
+test "actionlint config: paths.<glob>.ignore fingerprints a check and scopes by glob" {
+  // The exact example from the actionlint docs / #50 itself (also vendored
+  // at fixtures/upstream/actionlint/testdata/projects/paths_config/
+  // actionlint.yaml): a message-regex ignore for the "unknown runner label"
+  // finding, scoped to a `workflows/*.yaml` glob.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubunto-latest
+    #|    steps:
+    #|      - run: echo hi
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "unknown-runner-label" })
+    .length() >
+    0,
+  )
+  let cfg =
+    #|paths:
+    #|  "workflows/*.yaml":
+    #|    ignore:
+    #|      - 'label ".+" is unknown\. available labels are'
+  // Matching path: suppressed.
+  let hit = @karinto.lint(
+    yaml,
+    actionlint_config=cfg,
+    file_path="workflows/bar.yaml",
+  )
+  assert_eq(
+    hit.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length(),
+    0,
+  )
+  // A path outside the glob (first segment doesn't match "workflows") is
+  // unaffected — the glob is `/`-segment-aware, not a substring match.
+  let miss = @karinto.lint(
+    yaml,
+    actionlint_config=cfg,
+    file_path="other/bar.yaml",
+  )
+  assert_true(
+    miss.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length() >
+    0,
+  )
+}
+
+///|
+test "actionlint config: a pattern matching no curated check is a silent no-op" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubunto-latest
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|paths:
+    #|  "workflows/*.yaml":
+    #|    ignore:
+    #|      - 'this pattern does not match any canonical actionlint message'
+  let res = @karinto.lint(
+    yaml,
+    actionlint_config=cfg,
+    file_path="workflows/bar.yaml",
+  )
+  assert_true(
+    res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length() >
+    0,
+  )
+}
+
+///|
+test "actionlint config: an uncompilable pattern does not crash the lint" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubunto-latest
+    #|    steps:
+    #|      - run: echo hi
+  // Unbalanced parenthesis: fails to compile as a regex.
+  let cfg =
+    #|paths:
+    #|  "workflows/*.yaml":
+    #|    ignore:
+    #|      - 'label "('
+  let res = @karinto.lint(
+    yaml,
+    actionlint_config=cfg,
+    file_path="workflows/bar.yaml",
+  )
+  assert_true(
+    res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length() >
+    0,
+  )
+}
+
+///|
+test "actionlint config: does not suppress a zizmor-origin rule" {
+  // `undocumented-permissions` has no actionlint origin, so even a
+  // broadly-scoped actionlint config must never touch it.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+  let cfg =
+    #|paths:
+    #|  "**":
+    #|    ignore:
+    #|      - 'label ".+" is unknown\. available labels are'
+  let res = @karinto.lint(
+    yaml,
+    actionlint_config=cfg,
+    file_path="workflows/ci.yaml",
+  )
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
 test "zizmor config: rules.<id>.disable drops the rule everywhere" {
   // Mirrors a real `zizmor.yml` that turns off `undocumented-permissions`.
   let yaml =

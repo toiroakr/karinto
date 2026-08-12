@@ -1,6 +1,7 @@
 import {
   "toiroakr/karinto/yamlpos" @yaml,
   "moonbitlang/core/json",
+  "moonbitlang/regexp",
 }
 
 options(

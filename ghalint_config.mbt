@@ -11,8 +11,11 @@
 /// karinto rule IDs through the `origins` metadata in `rules_catalog.mbt`
 /// (e.g. `ghalint:ghl-004 (deny_inherit_secrets)` ties the policy
 /// `deny_inherit_secrets` to whichever karinto rule absorbed it). actionlint
-/// is deliberately not handled here: its config ignores by regex against the
-/// (tool-specific) error message, which does not map onto karinto's findings.
+/// is not handled here: unlike ghalint's `policy_name`, its config ignores by
+/// regex against the (tool-specific) error message, with no rule-ID key to
+/// translate. See `actionlint_config.mbt` for how that gap is bridged
+/// instead — a curated table of actionlint's own canonical messages, matched
+/// against the same regexes.
 
 ///|
 /// One `excludes:` entry. `policy` is required; the rest narrow *where* the

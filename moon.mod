@@ -9,3 +9,7 @@ license = "Apache-2.0"
 keywords = [ ]
 
 description = ""
+
+import {
+  "moonbitlang/regexp@0.3.5",
+}

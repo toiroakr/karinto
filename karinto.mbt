@@ -205,16 +205,28 @@ pub impl ToJson for LintResult with fn to_json(self) {
 ///
 /// - `file_path`: the path of the file under lint, relative to the repo root.
 ///   Used to scope `ghalint_config` excludes by `workflow_file_path`, zizmor
-///   `ignore` filenames, and `karinto_config`'s `ignore-paths`; leave empty
-///   to apply only the path-less opt-outs of each.
+///   `ignore` filenames, `actionlint_config`'s `paths.<glob>`, and
+///   `karinto_config`'s `ignore-paths`; leave empty to apply only the
+///   path-less opt-outs of each.
 /// - `ghalint_config`: the raw text of a ghalint config (`ghalint.yaml`). Its
 ///   `excludes` are mapped onto karinto rules via the catalogue's `origins`
 ///   and applied with their `workflow_file_path` / `job_name` / `action_name`
-///   / `step_id` scoping. actionlint's own message-regex ignores
-///   (`paths.*.ignore` in `.github/actionlint.yaml`) are not honoured here:
-///   they match against actionlint's own error text, which does not map onto
-///   karinto's messages — see `karinto_config`'s `ignore-paths` for karinto's
-///   rule-ID-based equivalent.
+///   / `step_id` scoping.
+/// - `actionlint_config`: the raw text of an actionlint config
+///   (`.github/actionlint.yaml`). Its `paths.<glob>.ignore` message-regex
+///   patterns are matched (via `moonbitlang/regexp`) against a curated table
+///   of actionlint's own canonical message text to identify which
+///   actionlint check — and therefore which karinto rule(s), via the
+///   catalogue's `origins` — each pattern targets; a match suppresses that
+///   rule under the matching path glob. This is rule-grained, not
+///   message-grained: unlike actionlint itself, it cannot honour a pattern
+///   that only ignores one specific dynamic value (e.g. one label name) —
+///   see `actionlint_config.mbt` for the full rationale. A pattern that
+///   fails to compile, or matches none of the curated checks, is a silent
+///   no-op (best-effort, matching `ghalint_config` / `zizmor_config`).
+///   `karinto_config`'s `ignore-paths` remains the precise, rule-ID-based
+///   alternative when exact control matters more than reusing an existing
+///   `actionlint.yaml`.
 /// - `karinto_config`: the raw text of a karinto config (`karinto.yaml`), or
 ///   a compatible `.github/actionlint.yaml` — its `self-hosted-runner.labels`
 ///   and `config-variables` keys are read directly (same names/shapes as
@@ -238,6 +250,7 @@ pub fn lint(
   ghalint_config? : String = "",
   zizmor_config? : String = "",
   karinto_config? : String = "",
+  actionlint_config? : String = "",
 ) -> LintResult {
   let lines = count_lines(content)
   // Inline ignores: parsed up front, applied as a post-pass (below) rather than
@@ -271,6 +284,27 @@ pub fn lint(
     ghalint_policy_map()
   } else {
     {}
+  }
+  // actionlint config `paths.<glob>.ignore` (if any): parsed up front and
+  // resolved to karinto rule-ID excludes via a curated table of actionlint's
+  // own canonical message text (see `actionlint_config.mbt`), applied as a
+  // post-pass below alongside the ghalint/zizmor/karinto-config filters.
+  // Unlike `ghalint_config` / `zizmor_config`, this is not also read out of
+  // `karinto_config` — actionlint's `paths:` key is deliberately not one
+  // `karinto_config` doubles as (see `karinto_config.mbt`). `paths.<glob>` is
+  // always path-scoped, so an empty `file_path` (stdin / content mode with no
+  // path) can never match one of its excludes — skip the YAML parse and the
+  // per-pattern regex compiles entirely in that case rather than doing the
+  // work only to have `actionlint_excluded` discard it.
+  let actionlint_path_ignores = if actionlint_config == "" || file_path == "" {
+    []
+  } else {
+    parse_actionlint_paths(actionlint_config)
+  }
+  let actionlint_excludes = if actionlint_path_ignores.length() > 0 {
+    resolve_actionlint_excludes(actionlint_path_ignores, actionlint_check_map())
+  } else {
+    []
   }
   // zizmor config (if any): `rules.<id>.disable` / `.ignore`, applied as a
   // post-pass below alongside the inline-ignore and ghalint-exclude passes.
@@ -363,6 +397,9 @@ pub fn lint(
           ghalint_excluded(
             d, ghalint_excludes, ghalint_policies, file_path, doc,
           ) {
+          ignored.push(d)
+        } else if actionlint_excludes.length() > 0 &&
+          actionlint_excluded(d, actionlint_excludes, file_path) {
           ignored.push(d)
         } else if zizmor_cfg_active &&
           zizmor_config_excluded(d, zizmor_cfg, file_path) {
