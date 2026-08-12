@@ -204,13 +204,28 @@ pub impl ToJson for LintResult with fn to_json(self) {
 /// where it fires.
 ///
 /// - `file_path`: the path of the file under lint, relative to the repo root.
-///   Used only to scope `ghalint_config` excludes by `workflow_file_path`;
-///   leave empty to apply path-less excludes only.
+///   Used to scope `ghalint_config` excludes by `workflow_file_path`, zizmor
+///   `ignore` filenames, and `karinto_config`'s `ignore-paths`; leave empty
+///   to apply only the path-less opt-outs of each.
 /// - `ghalint_config`: the raw text of a ghalint config (`ghalint.yaml`). Its
 ///   `excludes` are mapped onto karinto rules via the catalogue's `origins`
 ///   and applied with their `workflow_file_path` / `job_name` / `action_name`
-///   / `step_id` scoping. actionlint configs are not honoured: they ignore by
-///   regex against tool-specific messages, which do not map onto karinto.
+///   / `step_id` scoping. actionlint's own message-regex ignores
+///   (`paths.*.ignore` in `.github/actionlint.yaml`) are not honoured here:
+///   they match against actionlint's own error text, which does not map onto
+///   karinto's messages — see `karinto_config`'s `ignore-paths` for karinto's
+///   rule-ID-based equivalent.
+/// - `karinto_config`: the raw text of a karinto config (`karinto.yaml`), or
+///   a compatible `.github/actionlint.yaml` — its `self-hosted-runner.labels`
+///   and `config-variables` keys are read directly (same names/shapes as
+///   actionlint's own config), while `rules` (per-rule severity override) and
+///   `ignore-paths` (per-path rule ignores) are karinto-native additions with
+///   no actionlint equivalent. `karinto_config` doubles as a ghalint config
+///   (its `excludes:`) and a zizmor config (its `rules.<id>.disable` /
+///   `.ignore`, nested in the same per-rule object as karinto's `severity`)
+///   — a ghalint.yaml / zizmor.yml can be pasted straight into karinto.yaml
+///   instead of kept in separate files, and opt-outs from all three sources
+///   are additive with any `ghalint_config` / `zizmor_config` also passed.
 pub fn lint(
   content : String,
   kind? : FileKind = Unknown,
@@ -222,6 +237,7 @@ pub fn lint(
   file_path? : String = "",
   ghalint_config? : String = "",
   zizmor_config? : String = "",
+  karinto_config? : String = "",
 ) -> LintResult {
   let lines = count_lines(content)
   // Inline ignores: parsed up front, applied as a post-pass (below) rather than
@@ -229,11 +245,27 @@ pub fn lint(
   // line-scoped; position-less findings fall back to a file-wide match.
   let inline_ignores = parse_inline_ignores(content)
   // ghalint config excludes (if any): parsed up front, applied as a post-pass
-  // (below) scoped by file path / job / step / action.
-  let ghalint_excludes = if ghalint_config == "" {
+  // (below) scoped by file path / job / step / action. `karinto_config` is
+  // also consulted for a top-level `excludes:` — the same key/shape ghalint
+  // itself uses, so a ghalint.yaml's content can be pasted straight into
+  // karinto.yaml instead of kept in a separate file. Both sources are
+  // additive (an entry from either applies).
+  let ghalint_excludes_explicit = if ghalint_config == "" {
     []
   } else {
     parse_ghalint_excludes(ghalint_config)
+  }
+  let ghalint_excludes_from_karinto = if karinto_config == "" {
+    []
+  } else {
+    parse_ghalint_excludes(karinto_config)
+  }
+  let ghalint_excludes : Array[GhalintExclude] = []
+  for e in ghalint_excludes_explicit {
+    ghalint_excludes.push(e)
+  }
+  for e in ghalint_excludes_from_karinto {
+    ghalint_excludes.push(e)
   }
   let ghalint_policies = if ghalint_excludes.length() > 0 {
     ghalint_policy_map()
@@ -242,10 +274,34 @@ pub fn lint(
   }
   // zizmor config (if any): `rules.<id>.disable` / `.ignore`, applied as a
   // post-pass below alongside the inline-ignore and ghalint-exclude passes.
-  let zizmor_cfg = if zizmor_config == "" {
+  // `karinto_config` is also consulted here: its own `rules:` section uses
+  // the same per-rule-ID shape as zizmor's (plus an optional `severity` key
+  // karinto adds on top — see `parse_karinto_config`), so a zizmor.yml's
+  // `rules.<id>.disable`/`.ignore` entries can be pasted straight into
+  // karinto.yaml's `rules:` too. Both sources are additive.
+  let zizmor_cfg_explicit = if zizmor_config == "" {
     ZizmorConfig::{ disabled: [], ignores: {} }
   } else {
     parse_zizmor_config(zizmor_config)
+  }
+  let zizmor_cfg_from_karinto = if karinto_config == "" {
+    ZizmorConfig::{ disabled: [], ignores: {} }
+  } else {
+    parse_zizmor_config(karinto_config)
+  }
+  let zizmor_cfg = merge_zizmor_configs(
+    zizmor_cfg_explicit, zizmor_cfg_from_karinto,
+  )
+  let zizmor_cfg_active = zizmor_config != "" || karinto_config != ""
+  // karinto-native config (`karinto.yaml`, or a compatible
+  // `.github/actionlint.yaml`): self-hosted runner labels and a `vars.*`
+  // allowlist feed rule evaluation directly (below, via `WalkCtx`); per-rule
+  // severity overrides and `ignore-paths` are applied as a post-pass
+  // alongside the ghalint/zizmor filters.
+  let karinto_cfg = if karinto_config == "" {
+    empty_karinto_config()
+  } else {
+    parse_karinto_config(karinto_config)
   }
   // Single parse pass: the value tree (for rules), the position node tree, and
   // the line counter all come from one lex+parse of `content`.
@@ -278,6 +334,8 @@ pub fn lint(
         content,
         forbidden_uses,
         archived_uses,
+        karinto_cfg.self_hosted_runner_labels,
+        karinto_cfg.config_variables,
         lp.position_root,
         Some(lp.line_counter),
       )
@@ -306,11 +364,23 @@ pub fn lint(
             d, ghalint_excludes, ghalint_policies, file_path, doc,
           ) {
           ignored.push(d)
-        } else if zizmor_config != "" &&
+        } else if zizmor_cfg_active &&
           zizmor_config_excluded(d, zizmor_cfg, file_path) {
           ignored.push(d)
+        } else if karinto_config_path_ignored(
+            d.rule,
+            file_path,
+            karinto_cfg.ignore_paths,
+          ) {
+          ignored.push(d)
         } else {
-          kept.push(d)
+          // Per-rule severity override (karinto.yaml `rules:`), applied last
+          // so it rewrites only findings that survive every exclude/ignore
+          // pass above.
+          match karinto_cfg.rule_severity.get(d.rule) {
+            Some(sev) => kept.push(Diagnostic::{ ..d, severity: sev })
+            None => kept.push(d)
+          }
         }
       }
       // Persona gate: keep findings whose minimum persona is at or below the
@@ -646,6 +716,8 @@ fn run_rules(
   source : String,
   forbidden_uses : Array[String],
   archived_uses : Array[String],
+  self_hosted_runner_labels : Array[String]?,
+  config_variables : Array[String]?,
   position_root : @yaml.Node?,
   line_counter : @yaml.LineCounter?,
 ) -> Array[Diagnostic] {
@@ -656,6 +728,8 @@ fn run_rules(
     source~,
     forbidden_uses~,
     archived_uses~,
+    self_hosted_runner_labels~,
+    config_variables~,
     position_root~,
     line_counter~,
   )

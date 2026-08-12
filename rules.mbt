@@ -74,6 +74,19 @@ pub(all) struct WalkCtx {
   // GitHub before linting; comparison is case-insensitive and operates on
   // the bare `owner/repo` (subpath stripped).
   archived_uses : Array[String]
+  // Optional caller-supplied glob patterns naming known self-hosted runner
+  // labels (karinto.yaml's / actionlint.yaml's `self-hosted-runner.labels`).
+  // `None` means "not configured": `check_unknown_runner_label` then keeps
+  // its historical behaviour of skipping validation entirely once
+  // `self-hosted` appears. `Some([])` means "configured, no extra labels" —
+  // validation runs strictly (every custom label alongside `self-hosted` is
+  // unknown); `Some([...])` validates against the known set plus these globs.
+  self_hosted_runner_labels : Array[String]?
+  // Optional caller-supplied `vars.*` allowlist (karinto.yaml's /
+  // actionlint.yaml's `config-variables`). `None` disables the check
+  // (default, matches actionlint); `Some([])` forbids every `vars.*`
+  // reference; `Some([...])` allows only the listed names.
+  config_variables : Array[String]?
   // Resolved file kind, so rules can disambiguate workflow vs action when
   // structural cues alone aren't reliable (e.g. action.yml that's missing
   // its `runs:` key entirely).
@@ -199,6 +212,8 @@ pub fn prewalk(
   source? : String = "",
   forbidden_uses? : Array[String] = [],
   archived_uses? : Array[String] = [],
+  self_hosted_runner_labels? : Array[String]? = None,
+  config_variables? : Array[String]? = None,
   position_root? : @yaml.Node? = None,
   line_counter? : @yaml.LineCounter? = None,
 ) -> WalkCtx {
@@ -291,6 +306,8 @@ pub fn prewalk(
     source,
     forbidden_uses,
     archived_uses,
+    self_hosted_runner_labels,
+    config_variables,
     position_root,
     line_counter,
   }
@@ -688,6 +705,14 @@ pub fn all_rules() -> Array[Rule] {
       title: "Unknown context or function",
       applies: workflow_or_action,
       on_doc: Some(check_unknown_context),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "config-variables",
+      title: "`vars.*` reference not declared in `config-variables`",
+      applies: workflow_or_action,
+      on_doc: Some(check_config_variables),
       on_job: no_job(),
       on_step: no_step(),
     },
@@ -2565,6 +2590,25 @@ fn is_ident_cont(c : Char) -> Bool {
 ///|
 fn is_id_cont(c : Char) -> Bool {
   is_ident_cont(c) || c == '-'
+}
+
+///|
+/// Advances past ASCII whitespace (space/tab/newline/CR) starting at `i`.
+/// Shared by expression scanners that need to tolerate a multiline
+/// `${{ foo\n.bar }}` between an identifier and a following `.`.
+fn skip_ws(chars : Array[Char], i : Int) -> Int {
+  let n = chars.length()
+  let mut j = i
+  while j < n &&
+        (
+          chars[j] == ' ' ||
+          chars[j] == '\t' ||
+          chars[j] == '\n' ||
+          chars[j] == '\r'
+        ) {
+    j = j + 1
+  }
+  j
 }
 
 ///|
@@ -5106,20 +5150,11 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
               k = k + 1
             }
             let ident = buf.to_string()
-            let mut j = i
             // Match the identifier-scan loop above (and the `expr.mbt` lexer):
             // skip all whitespace — not just spaces — so a tab/newline between
             // the identifier and its `.` (e.g. a multiline `${{ githab\n.ref }}`)
             // does not hide an unknown context.
-            while j < n &&
-                  (
-                    chars[j] == ' ' ||
-                    chars[j] == '\t' ||
-                    chars[j] == '\n' ||
-                    chars[j] == '\r'
-                  ) {
-              j = j + 1
-            }
+            let j = skip_ws(chars, i)
             if j < n && chars[j] == '.' {
               if !array_contains_string(contexts, ident) &&
                 !seen.contains(ident) {
@@ -5141,6 +5176,132 @@ fn check_unknown_context(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// Rule: config-variables (actionlint; karinto.yaml/actionlint.yaml
+// `config-variables`)
+// ---------------------------------------------------------------------------
+
+///|
+/// Whether `name` is allowed under `policy` (`ctx.config_variables`). `None`
+/// (unconfigured) allows everything — the check stays dormant, mirroring how
+/// `forbidden-uses` / `archived-uses` no-op with no caller-supplied data.
+fn config_variable_allowed(name : String, policy : Array[String]?) -> Bool {
+  match policy {
+    None => true
+    Some(allowed) => array_contains_string(allowed, name)
+  }
+}
+
+///|
+/// Flags `vars.<NAME>` references not present in the caller-supplied
+/// `config-variables` allowlist. Dormant when `ctx.config_variables` is
+/// `None` (no config supplied) — actionlint's own default, where the check
+/// only activates once `config-variables` appears in config, even as `[]`.
+fn check_config_variables(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  guard ctx.config_variables is Some(_) else { return }
+  let seen : Map[String, Bool] = {}
+  fn scan_body(body : String) -> Unit {
+    let chars = strip_expr_string_literals(body).to_array()
+    let n = chars.length()
+    let mut i = 0
+    // Tracks whether the identifier about to be scanned follows a `.` —
+    // matching `check_unknown_context`'s `prev_dot`. Without this, a member
+    // access like `needs.build.outputs.vars.NAME` would misread `.vars` as
+    // the `vars` context instead of a property named `vars`.
+    let mut prev_dot = false
+    while i < n {
+      let c = chars[i]
+      if c == '.' {
+        prev_dot = true
+        i = i + 1
+      } else if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+        i = i + 1
+      } else if is_ident_start(c) {
+        let start = i
+        while i < n && is_id_cont(chars[i]) {
+          i = i + 1
+        }
+        let buf = StringBuilder::new()
+        let mut k = start
+        while k < i {
+          buf.write_char(chars[k])
+          k = k + 1
+        }
+        let ident = buf.to_string()
+        if ident == "vars" && !prev_dot {
+          // Skip whitespace (including newlines) between `vars` and `.`,
+          // matching `check_unknown_context`'s tolerance for a multiline
+          // `${{ vars\n.FOO }}`.
+          let dot = skip_ws(chars, i)
+          if dot < n && chars[dot] == '.' {
+            let j0 = skip_ws(chars, dot + 1)
+            if j0 < n && is_ident_start(chars[j0]) {
+              let mut j = j0
+              while j < n && is_id_cont(chars[j]) {
+                j = j + 1
+              }
+              let vbuf = StringBuilder::new()
+              let mut m = j0
+              while m < j {
+                vbuf.write_char(chars[m])
+                m = m + 1
+              }
+              let var_name = vbuf.to_string()
+              if !config_variable_allowed(var_name, ctx.config_variables) &&
+                !seen.contains(var_name) {
+                seen[var_name] = true
+                add_diag(
+                  out,
+                  "config-variables",
+                  Error,
+                  "vars.\{var_name} is not declared in `config-variables`",
+                )
+              }
+              i = j
+            }
+          }
+        }
+        prev_dot = false
+      } else {
+        prev_dot = false
+        i = i + 1
+      }
+    }
+  }
+
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") {
+      return
+    }
+    for body in extract_expr_bodies(s) {
+      scan_body(body)
+    }
+  })
+  // `if:` is evaluated as an expression by GitHub even without `${{ }}`
+  // delimiters (`if: vars.env == 'prod'`), so the whole-doc scan above
+  // (gated on `${{`) misses it — mirrors `expr_collect_findings_in_if` in
+  // expr.mbt. `job`/`step` `if_cond` is pre-extracted onto `JobInfo` /
+  // `StepInfo` regardless of delimiter, so only the bare (no-`${{`) case
+  // needs a dedicated pass here; the delimited case is already covered
+  // above since `if_cond`'s source string is part of `ctx.doc`.
+  fn scan_if(if_cond : String?) -> Unit {
+    match if_cond {
+      Some(s) => if !s.contains("${{") { scan_body(s) }
+      None => ()
+    }
+  }
+
+  for j in ctx.jobs {
+    scan_if(j.if_cond)
+  }
+  for s in ctx.workflow_steps {
+    scan_if(s.if_cond)
+  }
+  for s in ctx.action_steps {
+    scan_if(s.if_cond)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -6513,7 +6674,11 @@ fn known_runner_labels() -> Array[String] {
 }
 
 ///|
-fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
+fn flag_runner_label(
+  label : String,
+  out : Array[Diagnostic],
+  configured_labels : Array[String]?,
+) -> Unit {
   // Skip GHA expression labels (`${{ ... }}`) and the empty string.
   if label == "" || label.contains("${{") {
     return
@@ -6521,6 +6686,18 @@ fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
   let labels = known_runner_labels()
   if array_contains_string(labels, label) {
     return
+  }
+  // Caller-supplied self-hosted runner labels (karinto.yaml /
+  // actionlint.yaml `self-hosted-runner.labels`), glob-capable. `None`
+  // (not configured) contributes no extra allowed labels.
+  match configured_labels {
+    Some(extra) =>
+      for pat in extra {
+        if glob_match(pat, label) {
+          return
+        }
+      }
+    None => ()
   }
   let hint = suggest(label, labels)
   // Flag every label not in the known list. This matches actionlint behaviour:
@@ -6536,16 +6713,21 @@ fn flag_runner_label(label : String, out : Array[Diagnostic]) -> Unit {
 
 ///|
 fn check_unknown_runner_label(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
   match job.raw.get("runs-on") {
-    Some(String(s)) => flag_runner_label(s, out)
+    Some(String(s)) => flag_runner_label(s, out, ctx.self_hosted_runner_labels)
     Some(Array(arr)) => {
       // When `self-hosted` is one of the labels, the rest are routing hints
-      // for self-hosted infrastructure. actionlint skips the unknown-label
-      // check in that case, so we do the same.
+      // for self-hosted infrastructure. Absent a caller-supplied
+      // `self-hosted-runner.labels` config, actionlint skips the
+      // unknown-label check entirely in that case, so we do the same. With a
+      // config present — even `Some([])`, "configured, no extra labels" —
+      // validate the remaining labels against the known set plus the
+      // configured globs instead of skipping; presence of the config is
+      // what opts in, not whether it lists any globs.
       let mut has_self_hosted = false
       for item in arr {
         match item {
@@ -6553,10 +6735,11 @@ fn check_unknown_runner_label(
           _ => ()
         }
       }
-      if not(has_self_hosted) {
+      if not(has_self_hosted) || ctx.self_hosted_runner_labels is Some(_) {
         for item in arr {
           match item {
-            String(s) => flag_runner_label(s, out)
+            String(s) =>
+              flag_runner_label(s, out, ctx.self_hosted_runner_labels)
             _ => ()
           }
         }

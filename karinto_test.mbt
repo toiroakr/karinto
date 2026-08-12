@@ -873,3 +873,653 @@ test "ignored: empty when nothing is suppressed" {
     },
   )
 }
+
+///|
+test "karinto config: self-hosted-runner.labels validates the remaining labels instead of skipping" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, gpu-a100]
+    #|    steps:
+    #|      - run: echo hi
+  // Without config: legacy skip-all behaviour (bugfix_test.mbt covers this
+  // baseline directly), so `gpu-a100` is not flagged.
+  let cfg =
+    #|self-hosted-runner:
+    #|  labels:
+    #|    - "gpu-*"
+  let allowed = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    allowed.diagnostics
+    .filter(fn(d) { d.rule == "unknown-runner-label" })
+    .length(),
+    0,
+  )
+  let cfg_no_match =
+    #|self-hosted-runner:
+    #|  labels:
+    #|    - "cpu-*"
+  let flagged = @karinto.lint(yaml, karinto_config=cfg_no_match)
+  assert_eq(
+    flagged.diagnostics
+    .filter(fn(d) { d.rule == "unknown-runner-label" })
+    .length(),
+    1,
+  )
+}
+
+///|
+test "karinto config: self-hosted-runner.labels: [] means \"configured, no extra labels\" (strict), not \"unconfigured\"" {
+  // `Some([])` (an explicit empty list) must validate strictly — every
+  // custom label alongside `self-hosted` is flagged — the same as it would
+  // if a non-empty list were given and the label just didn't match any glob.
+  // It must NOT fall back to the `None` (unconfigured) skip-all behaviour,
+  // which only an *absent* `self-hosted-runner.labels` key triggers.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, gpu-a100]
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|self-hosted-runner:
+    #|  labels: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length(),
+    1,
+  )
+}
+
+///|
+test "karinto config: config-variables is dormant without config" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ vars.ANYTHING }}"
+  let res = @karinto.lint(yaml)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "config-variables" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: config-variables empty array forbids every vars.*" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ vars.ENVIRONMENT }}"
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "config-variables" }).length(),
+    1,
+  )
+}
+
+///|
+test "karinto config: config-variables allowlist permits listed names only" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ vars.ENVIRONMENT }} ${{ vars.UNDECLARED }}"
+  let cfg =
+    #|config-variables:
+    #|  - ENVIRONMENT
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].message.contains("UNDECLARED"))
+}
+
+///|
+test "karinto config: config-variables tolerates whitespace/newlines around the dot" {
+  // `${{ vars\n  .  UNDECLARED }}` must still resolve to context `vars`,
+  // member `UNDECLARED` — matching `check_unknown_context`'s tolerance for
+  // whitespace (including newlines) around `.`.
+  let yaml = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          echo \"${{ vars\n            . UNDECLARED }}\"\n"
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].message.contains("UNDECLARED"))
+}
+
+///|
+test "karinto config: config-variables catches bare `if:` (no `${{ }}` delimiters)" {
+  // GitHub evaluates `if:` as an expression even without `${{ }}`, so a bare
+  // `if: vars.UNDECLARED == 'x'` must still be checked — mirrors
+  // `expr_collect_findings_in_if` in expr.mbt. One at job scope, one at step
+  // scope.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    if: vars.JOB_FLAG == 'on'
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - if: vars.STEP_FLAG == 'on'
+    #|        run: echo hi
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 2)
+  let names = hits.map(fn(d) { d.message })
+  assert_true(names.filter(fn(m) { m.contains("JOB_FLAG") }).length() == 1)
+  assert_true(names.filter(fn(m) { m.contains("STEP_FLAG") }).length() == 1)
+}
+
+///|
+test "karinto config: rules.<id> overrides severity" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let baseline = @karinto.lint(yaml)
+  let base_hit = baseline.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(base_hit.length(), 1)
+  assert_true(base_hit[0].severity is Info)
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions: error
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
+test "karinto config: rules.<id> severity is case-insensitive" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions: Error
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
+test "karinto config: rules.<id> severity as a YAML block scalar still parses" {
+  // A literal block scalar (`|`) keeps its trailing newline under YAML's
+  // default "clip" chomping — `parse_severity_string` must trim it, not
+  // just spaces/tabs, or the override silently falls through.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions: |
+    #|    error
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
+test "karinto config: ignore-paths suppresses a rule under a matching glob" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "fixtures/**":
+    #|    - undocumented-permissions
+  let other = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_true(
+    other.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+  let hit = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path="fixtures/legacy/ci.yml",
+  )
+  assert_eq(
+    hit.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  assert_true(
+    hit.ignored.filter(fn(d) { d.rule == "undocumented-permissions" }).length() >
+    0,
+  )
+}
+
+///|
+test "karinto config: ignore-paths \"*\" suppresses every rule under a glob" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, gpu-a100]
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "fixtures/**":
+    #|    - "*"
+  let res = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path="fixtures/legacy/ci.yml",
+  )
+  // `"*"` suppresses every rule under the glob, not just one — assert the
+  // whole diagnostics array is empty rather than filtering for a single rule.
+  assert_eq(res.diagnostics.length(), 0)
+}
+
+///|
+test "karinto config: ignore-paths glob is segment-aware, not substring-blind" {
+  // A single `*` must not cross a `/` boundary (unlike `glob_match`, shared
+  // with rule-ID matching where there is no `/` to reason about): `.github/*`
+  // should match a direct child but not a nested descendant.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  ".github/*":
+    #|    - "*"
+  let direct_child = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/ci.yml",
+  )
+  assert_eq(
+    direct_child.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  let nested = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_true(
+    nested.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
+test "karinto config: ignore-paths \"**/\" matches a root-level file too" {
+  // `**` matches zero or more whole segments, so `**/*.yml` must match a
+  // root-level `ci.yml` (zero segments consumed by `**`), not just a nested
+  // one.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "**/*.yml":
+    #|    - "*"
+  let root = @karinto.lint(yaml, karinto_config=cfg, file_path="ci.yml")
+  assert_eq(
+    root.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+  let nested = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    nested.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: ignore-paths handles many `**` segments without blowing up" {
+  // `ignore-paths` globs come from the untrusted `config` HTTP parameter, so
+  // a pattern repeating `**` many times against a non-matching path must
+  // stay fast (memoized DP, not naive backtracking) rather than exploring
+  // combinatorially many split points. This test's own completion time is
+  // the regression signal: a non-memoized matcher on a pattern this deep
+  // would make the whole suite visibly hang rather than merely return
+  // `false`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|ignore-paths:
+    #|  "**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/no-match":
+    #|    - "*"
+  let res = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path="a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p.yml",
+  )
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
+test "karinto config: ignore-paths glob past the segment cap fails closed" {
+  // A glob deeper than `max_path_glob_segments()` (an untrusted `config`
+  // pattern could pack thousands of segments into the 64 KiB cap) must not
+  // match — and, more importantly, must not allocate a memo table sized to
+  // it. Failing closed means the diagnostic simply isn't suppressed, rather
+  // than the match blowing up memory.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let buf = StringBuilder::new()
+  buf.write_string("ignore-paths:\n  \"")
+  let mut i = 0
+  while i < 100 {
+    buf.write_string("a/")
+    i = i + 1
+  }
+  buf.write_string("ci.yml\":\n    - \"*\"\n")
+  let cfg = buf.to_string()
+  let res = @karinto.lint(yaml, karinto_config=cfg, file_path="ci.yml")
+  assert_true(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length() >
+    0,
+  )
+}
+
+///|
+test "karinto config: config-variables ignores `vars` as a member access, not the context" {
+  // `needs.a.outputs.vars.NAME` is a property named `vars` on a job's
+  // `outputs`, not the `vars.*` context — must not be flagged, matching
+  // `check_unknown_context`'s `prev_dot` handling for the same shape.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  a:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+    #|  b:
+    #|    needs: a
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo "${{ needs.a.outputs.vars.NAME }}"
+  let cfg =
+    #|config-variables: []
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "config-variables" })
+  assert_eq(hits.length(), 0)
+}
+
+///|
+test "karinto config: a compatible actionlint.yaml is honoured directly" {
+  // `self-hosted-runner.labels` / `config-variables` share actionlint.yaml's
+  // own key names and shapes, so an existing actionlint.yaml works without
+  // translation. Its own `paths.*.ignore` (unrelated, message-regex, #50) is
+  // simply not read.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: [self-hosted, gpu-a100]
+    #|    steps:
+    #|      - run: echo "${{ vars.ENVIRONMENT }}"
+  let actionlint_yaml =
+    #|self-hosted-runner:
+    #|  labels:
+    #|    - "gpu-*"
+    #|config-variables:
+    #|  - ENVIRONMENT
+    #|paths:
+    #|  .github/workflows/**:
+    #|    ignore:
+    #|      - "unrelated actionlint-only regex"
+  let res = @karinto.lint(yaml, karinto_config=actionlint_yaml)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "unknown-runner-label" }).length(),
+    0,
+  )
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "config-variables" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: excludes: (ghalint shape) is honoured from the same file" {
+  // `excludes:` is ghalint's own top-level key/shape; karinto_config reads it
+  // directly, so a ghalint.yaml's content can be pasted into karinto.yaml
+  // instead of kept in a separate file passed via --ghalint-config.
+  let yaml =
+    #|on: workflow_call
+    #|jobs:
+    #|  build:
+    #|    uses: ./.github/workflows/reusable.yml
+    #|    secrets: inherit
+  let cfg =
+    #|excludes:
+    #|  - policy_name: deny_inherit_secrets
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "secrets-inherit" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: rules.<id>.disable/.ignore (zizmor shape) is honoured from the same file" {
+  // `rules.<id>` accepts zizmor's own `{disable, ignore}` object shape;
+  // karinto_config parses it the same way `zizmor_config` does, so a
+  // zizmor.yml's `rules:` section can be pasted into karinto.yaml's `rules:`
+  // instead of kept in a separate file passed via --zizmor-config.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  undocumented-permissions:
+    #|    disable: true
+  let res = @karinto.lint(yaml, karinto_config=cfg)
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "undocumented-permissions" })
+    .length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: rules.<id> combines zizmor's disable/ignore with karinto's severity" {
+  // The same per-rule object carries zizmor's `ignore` alongside karinto's
+  // `severity` — the two do not conflict, since they're read by separate
+  // parsers (`parse_zizmor_config` / `parse_karinto_config`) over the same
+  // text.
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  contents: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      pull-requests: read
+    #|    steps:
+    #|      - run: echo hi
+  let cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    ignore:
+    #|      - ci.yml
+    #|  undocumented-permissions:
+    #|    severity: error
+  let res = @karinto.lint(
+    yaml,
+    karinto_config=cfg,
+    file_path=".github/workflows/ci.yml",
+  )
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
+    0,
+  )
+  let hit = res.diagnostics.filter(fn(d) {
+    d.rule == "undocumented-permissions"
+  })
+  assert_eq(hit.length(), 1)
+  assert_true(hit[0].severity is Error)
+}
+
+///|
+test "karinto config: excludes: / rules: from karinto_config are additive with explicit ghalint_config/zizmor_config" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let ghalint_cfg =
+    #|excludes:
+    #|  - policy_name: job_permissions
+    #|    job_name: build
+  let karinto_cfg =
+    #|rules:
+    #|  concurrency-limits:
+    #|    disable: true
+  let baseline = @karinto.lint(yaml)
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "job-permissions-required" })
+    .length() >
+    0,
+  )
+  assert_true(
+    baseline.diagnostics
+    .filter(fn(d) { d.rule == "concurrency-limits" })
+    .length() >
+    0,
+  )
+  let res = @karinto.lint(
+    yaml,
+    ghalint_config=ghalint_cfg,
+    karinto_config=karinto_cfg,
+  )
+  assert_eq(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "job-permissions-required" })
+    .length(),
+    0,
+  )
+  assert_eq(
+    res.diagnostics.filter(fn(d) { d.rule == "concurrency-limits" }).length(),
+    0,
+  )
+}
+
+///|
+test "karinto config: malformed config yields the all-default config" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml, karinto_config="not: [valid")
+  assert_true(res.parse_error is None)
+}

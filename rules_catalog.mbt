@@ -60,7 +60,7 @@ pub(all) struct RuleSpec {
 } derive(Eq, Debug)
 
 ///|
-/// The full catalogue: 83 rules spanning actionlint (37), zizmor (36) and
+/// The full catalogue: 84 rules spanning actionlint (38), zizmor (36) and
 /// ghalint (10). 4 deliberate consolidations are recorded in `origins`
 /// (zizmor entries that also absorb the matching actionlint or ghalint
 /// check), and 7 rules are marked `NotPlanned` (out of scope, see status
@@ -143,6 +143,17 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Actionlint,
       ["actionlint:unknown-context-or-function"],
       Expression,
+      Error,
+      Implemented,
+      true,
+      true,
+    ),
+    spec(
+      "config-variables",
+      "`vars.*` reference not declared in `config-variables`",
+      Actionlint,
+      ["actionlint:config-variables"],
+      Config,
       Error,
       Implemented,
       true,

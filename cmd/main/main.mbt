@@ -111,6 +111,18 @@ fn run() -> Int {
       }
     }
   }
+  let karinto_config_path = last_value(matches, "config")
+  let karinto_config = if karinto_config_path == "" {
+    ""
+  } else {
+    match js_read_file(karinto_config_path) {
+      Some(c) => c
+      None => {
+        eprintln("error: cannot read config '\{karinto_config_path}'")
+        return 2
+      }
+    }
+  }
   let files = match matches.values.get("files") {
     Some(fs) => fs
     None => []
@@ -125,10 +137,12 @@ fn run() -> Int {
       eprintln(build_command().render_help())
       return 2
     }
-    lint_stdin(kind, disabled, format, persona, ghalint_config, zizmor_config)
+    lint_stdin(
+      kind, disabled, format, persona, ghalint_config, zizmor_config, karinto_config,
+    )
   } else {
     lint_files(
-      files, kind, disabled, format, persona, ghalint_config, zizmor_config,
+      files, kind, disabled, format, persona, ghalint_config, zizmor_config, karinto_config,
     )
   }
 }
@@ -173,6 +187,11 @@ fn build_command() -> @argparse.Command {
         "zizmor-config",
         long="zizmor-config",
         about="Path to a zizmor config (zizmor.yml); its `rules.<id>.disable`/`ignore` are honoured",
+      ),
+      @argparse.OptionArg::new(
+        "config",
+        long="config",
+        about="Path to a karinto config (karinto.yaml), or a compatible actionlint.yaml; self-hosted-runner labels, config-variables, per-rule severity, and ignore-paths are honoured",
       ),
     ],
     positionals=[
@@ -332,6 +351,7 @@ fn lint_stdin(
   persona : @karinto.Persona,
   ghalint_config : String,
   zizmor_config : String,
+  karinto_config : String,
 ) -> Int {
   let content = match js_read_stdin() {
     Some(c) => c
@@ -340,8 +360,9 @@ fn lint_stdin(
       return 2
     }
   }
-  // stdin has no path, so path-scoped ghalint excludes and zizmor location
-  // ignores can't match; path-less ones (e.g. zizmor `disable`) still apply.
+  // stdin has no path, so path-scoped ghalint excludes, zizmor location
+  // ignores, and karinto ignore-paths can't match; path-less opt-outs (e.g.
+  // zizmor `disable`) still apply.
   let result = @karinto.lint(
     content,
     kind~,
@@ -349,6 +370,7 @@ fn lint_stdin(
     persona~,
     ghalint_config~,
     zizmor_config~,
+    karinto_config~,
   )
   match format {
     Envelope => {
@@ -382,6 +404,7 @@ fn lint_files(
   persona : @karinto.Persona,
   ghalint_config : String,
   zizmor_config : String,
+  karinto_config : String,
 ) -> Int {
   let entries : Array[Json] = []
   let sarif_entries : Array[@karinto.SarifEntry] = []
@@ -419,14 +442,21 @@ fn lint_files(
           Unknown => kind_from_path(path)
           _ => kind
         }
+        // Normalize `\`-separated Windows paths to `/` before handing them
+        // to the engine: `ghalint_config` / `zizmor_config` / `karinto_config`
+        // path matching (`workflow_file_path`, `ignore`, `ignore-paths`) all
+        // assume `/`-separated suffixes, same reasoning as `kind_from_path`
+        // below.
+        let lint_path = path.replace_all(old="\\", new="/")
         let result = @karinto.lint(
           content,
           kind=file_kind,
           disabled~,
           persona~,
-          file_path=path,
+          file_path=lint_path,
           ghalint_config~,
           zizmor_config~,
+          karinto_config~,
         )
         let ok = result.parse_error is None
         if !ok {
@@ -445,7 +475,14 @@ fn lint_files(
             entries.push(entry.to_json())
           }
           Sarif =>
-            sarif_entries.push(@karinto.SarifEntry::{ path: Some(path), result })
+            // SARIF's `artifactLocation.uri` is a URI, which conventionally
+            // uses `/` — the same normalized path already computed for the
+            // engine's own path matching, not the original (possibly
+            // `\`-separated on Windows) `path`.
+            sarif_entries.push(@karinto.SarifEntry::{
+              path: Some(lint_path),
+              result,
+            })
         }
       }
     }

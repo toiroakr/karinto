@@ -13,11 +13,11 @@ pub fn all_rule_specs() -> Array[RuleSpec]
 
 pub fn all_rules() -> Array[Rule]
 
-pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona, file_path? : String, ghalint_config? : String, zizmor_config? : String) -> LintResult
+pub fn lint(String, kind? : FileKind, disabled? : Array[String], vuln_uses? : Array[String], forbidden_uses? : Array[String], archived_uses? : Array[String], persona? : Persona, file_path? : String, ghalint_config? : String, zizmor_config? : String, karinto_config? : String) -> LintResult
 
 pub fn persona_from_string(String) -> Persona
 
-pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
+pub fn prewalk(@yamlpos.Yaml, vuln_uses? : Array[String], kind? : FileKind, source? : String, forbidden_uses? : Array[String], archived_uses? : Array[String], self_hosted_runner_labels? : Array[String]?, config_variables? : Array[String]?, position_root? : @yamlpos.Node?, line_counter? : @yamlpos.LineCounter?) -> WalkCtx
 
 pub fn rule_spec(String) -> RuleSpec
 
@@ -181,6 +181,8 @@ pub(all) struct WalkCtx {
   vuln_uses : Array[String]
   forbidden_uses : Array[String]
   archived_uses : Array[String]
+  self_hosted_runner_labels : Array[String]?
+  config_variables : Array[String]?
   kind : FileKind
   source : String
   position_root : @yamlpos.Node?
