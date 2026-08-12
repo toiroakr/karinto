@@ -451,6 +451,14 @@ Lint local files without deploying anything or making a network
 round-trip — same engine, same JSON envelope as the Worker. Requires
 Node.js (the CLI targets MoonBit's js backend).
 
+The examples below (`moon run --target js cmd/main`) never fire the
+tree-sitter-bash shell rules (`github-env`, `unpinned-tools`,
+`unredacted-secrets`, `use-trusted-publishing`, `shell-quote-safety`,
+`shell-undefined-var`) — they need an async setup step this invocation
+doesn't await, so those rules just no-op. For shell-rule-enabled linting,
+build once and use the `cli.mjs` wrapper instead:
+`moon build --target js --release && node cmd/main/cli.mjs -- ci.yml`.
+
 ```sh
 # stdin
 cat .github/workflows/ci.yml | moon run --target js cmd/main

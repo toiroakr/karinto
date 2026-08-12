@@ -1,0 +1,11 @@
+{
+  "name": "@karinto/shell-ts-adapter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./index.mjs",
+  "dependencies": {
+    "web-tree-sitter": "0.26.12",
+    "tree-sitter-bash": "0.25.1"
+  }
+}

@@ -129,6 +129,7 @@ pub(all) enum Source {
   Zizmor
   Ghalint
   Curllint
+  Karinto
 } derive(Eq, @debug.Debug)
 
 pub(all) struct Stats {

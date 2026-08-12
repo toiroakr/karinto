@@ -13,6 +13,8 @@ distributed under the MIT License; their license texts are reproduced below.
 | zizmor | <https://github.com/zizmorcore/zizmor> | MIT | Rule taxonomy inspiration |
 | ghalint | <https://github.com/suzuki-shunsuke/ghalint> | MIT | Rule taxonomy inspiration |
 | eemeli/yaml | <https://github.com/eemeli/yaml> | ISC | Parser design ported into the in-tree `yamlpos` package |
+| tree-sitter / web-tree-sitter | <https://github.com/tree-sitter/tree-sitter> | MIT | `run:` shell parsing (#113), bundled as a Worker runtime dependency |
+| tree-sitter-bash | <https://github.com/tree-sitter/tree-sitter-bash> | MIT | Bash grammar for the shell-script rules (#113), bundled as a Worker runtime dependency |
 
 Rule IDs in karinto are prefixed with `act-`, `ziz-`, or `ghl-` to indicate
 which upstream linter the rule originated from. `cl-*` IDs are karinto-only.
@@ -128,4 +130,67 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
 OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
+```
+
+## tree-sitter / web-tree-sitter
+
+`web-tree-sitter` (the WASM runtime) and its `web-tree-sitter.wasm` engine are
+bundled into the Worker artifact (`cf/`) to parse `run:` shell script bodies
+for the shell rules added in #113 — see `shell-ts-adapter/`. `web-tree-sitter`
+is patched locally (`patches/web-tree-sitter+0.26.12.patch`, applied via
+`patch-package` on `npm install`) to let `Language.load` accept a precompiled
+`WebAssembly.Module`, which workerd requires since it forbids compiling WASM
+from raw bytes at runtime; the patch does not change the upstream license.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2018 Max Brunsfeld
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## tree-sitter-bash
+
+The Bash grammar `tree-sitter-bash.wasm` is bundled into the Worker artifact
+alongside `web-tree-sitter` for the same shell rules.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2017 Max Brunsfeld
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

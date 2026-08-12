@@ -2,16 +2,26 @@
   "name": "karinto",
   "version": "0.9.5",
   "private": true,
+  "type": "module",
   "description": "Tooling host for karinto release automation (changesets). The runtime lives under cf/ and the MoonBit library at the repo root.",
   "repository": {
     "type": "git",
     "url": "https://github.com/toiroakr/karinto.git"
   },
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.6.0"
+  },
   "scripts": {
     "changeset": "changeset",
     "sync-version": "node scripts/sync-moon-version.mjs",
-    "version-packages": "changeset version && npm run sync-version && moon info"
+    "version-packages": "changeset version && npm run sync-version && moon info",
+    "postinstall": "patch-package",
+    "test:shell-rules": "moon build --target js --release && node scripts/test-shell-rules.mjs"
+  },
+  "dependencies": {
+    "@karinto/shell-ts-adapter": "file:./shell-ts-adapter",
+    "patch-package": "^8.0.0"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
