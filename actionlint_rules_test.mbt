@@ -114,6 +114,58 @@ test "unexpected-keys: `parallel:` steps are not flagged as an unknown step key"
 }
 
 ///|
+test "unexpected-keys: `snapshot` job key and async step keys are known (GitHub spec freshness)" {
+  // `snapshot` (custom-image jobs) and `background`/`wait`/`wait-all`/`cancel`
+  // (async step execution, shipped alongside `parallel:`) are current
+  // GitHub Actions workflow-syntax keys actionlint v1.7.12 (frozen
+  // 2026-04-19) never learned.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    snapshot: my-custom-image
+    #|    steps:
+    #|      - id: long
+    #|        run: sleep 60
+    #|        background: true
+    #|      - run: echo hi
+    #|        wait: long
+    #|        cancel: on-failure
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 2, "lines": 15 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "missing-required-keys: workflow missing `on`" {
   let yaml =
     #|jobs:
@@ -389,6 +441,69 @@ test "unknown-context-or-function: unknown context name" {
         "message": "job `build` has no `name:`",
         "pos": { "line": 3, "col": 3 },
         "job": "build",
+      },
+    ],
+  })
+}
+
+///|
+test "unknown-context-or-function: `job.workflow_*` properties are not flagged (GitHub spec freshness)" {
+  // rhysd/actionlint#705/#647 report false positives on the four
+  // `job.workflow_*` context properties GitHub added for reusable-workflow
+  // callers (`workflow_ref`, `workflow_sha`, `workflow_repository`,
+  // `workflow_file_path`). `check_unknown_context` only validates the
+  // top-level context name (`job` is already known) — it does not check
+  // dotted property names for any context — so karinto does not share this
+  // specific false positive today. This is a regression guard, not a table
+  // fix: property-level validation for `github`/`job`/etc. is a coverage
+  // gap (new feature), not stale data, and is out of scope for issue #111.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: |
+    #|          echo "${{ job.workflow_ref }}"
+    #|          echo "${{ job.workflow_sha }}"
+    #|          echo "${{ job.workflow_repository }}"
+    #|          echo "${{ job.workflow_file_path }}"
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 13 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "template-injection",
+        "severity": "info",
+        "message": "code injection via template expansion in `run:` script",
+        "pos": { "line": 9, "col": 9 },
+        "job": "build",
+        "step": { "index": 0 },
       },
     ],
   })
@@ -1398,6 +1513,56 @@ test "webhook-events: unknown event filter" {
 }
 
 ///|
+test "webhook-events: `image_version` is a known event, `project` is not (GitHub spec freshness)" {
+  // `image_version` fires when a new GitHub-hosted runner image version is
+  // published; `project`/`project_card`/`project_column` were Projects
+  // (classic) events, sunset 2024-08-23 and no longer in GitHub's docs.
+  let yaml =
+    #|on: [image_version, project]
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "webhook-events",
+        "severity": "error",
+        "message": "unknown webhook event `project`",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "workflow-dispatch-inputs: input type must be one of the allowed set" {
   let yaml =
     #|on:
@@ -1597,6 +1762,161 @@ test "unknown-runner-label: unknown runner label" {
 }
 
 ///|
+test "unknown-runner-label: current-generation labels are known (GitHub spec freshness)" {
+  // `ubuntu-26.04`/`windows-2025-vs2026`/`windows-11-vs2026-arm`/`macos-26`
+  // are current GitHub-hosted runner labels actionlint v1.7.12 (frozen
+  // 2026-04-19) never learned. `xcode-27` is a preview label documented only
+  // in the actions/runner-images README (not yet in github/docs), the
+  // secondary source issue #111 asks the standing refresh check to watch.
+  // None of these should raise `unknown-runner-label`.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  a:
+    #|    runs-on: ubuntu-26.04
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  b:
+    #|    runs-on: windows-2025-vs2026
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  c:
+    #|    runs-on: windows-11-vs2026-arm
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  d:
+    #|    runs-on: macos-26
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+    #|  e:
+    #|    runs-on: xcode-27
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 5, "steps": 5, "lines": 37 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `a` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "a",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `b` has no `name:`",
+        "pos": { "line": 10, "col": 3 },
+        "job": "b",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `c` has no `name:`",
+        "pos": { "line": 17, "col": 3 },
+        "job": "c",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `d` has no `name:`",
+        "pos": { "line": 24, "col": 3 },
+        "job": "d",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `e` has no `name:`",
+        "pos": { "line": 31, "col": 3 },
+        "job": "e",
+      },
+    ],
+  })
+}
+
+///|
+test "unknown-runner-label: retired labels are flagged (GitHub spec freshness)" {
+  // `ubuntu-20.04`/`windows-2019`/`macos-12`/`macos-13` were removed from
+  // GitHub's docs and no longer resolve to a real hosted-runner image.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-20.04
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "unknown-runner-label",
+        "severity": "warning",
+        "message": "unknown runner label `ubuntu-20.04` (did you mean `ubuntu-26.04`?)",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "uses-syntax: missing @ref in uses" {
   let yaml =
     #|on: push
@@ -1641,6 +1961,51 @@ test "uses-syntax: missing @ref in uses" {
         "pos": { "line": 9, "col": 9 },
         "job": "build",
         "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "uses-syntax: `$/` same-repository reference is not flagged (GitHub spec freshness)" {
+  // `$/path/to/action` (no `@ref`) references an action in the same
+  // repository at the currently-executing commit — added 2026-07-30, after
+  // actionlint's last release. See rhysd/actionlint#711.
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: $/.github/actions/local
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
       },
     ],
   })
@@ -1847,6 +2212,172 @@ test "permissions-syntax: unknown permission scope" {
         "rule": "permissions-syntax",
         "severity": "error",
         "message": "workflow: unknown permission scope `conents` — did you mean `contents`?",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 5, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 2, "col": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "permissions-syntax: current permission scopes are known (GitHub spec freshness)" {
+  // `artifact-metadata`/`code-quality`/`copilot-requests`/`vulnerability-alerts`
+  // are current GITHUB_TOKEN permission scopes actionlint v1.7.12 (frozen
+  // 2026-04-19) never learned (rhysd/actionlint#720, #713, #686, #672).
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  artifact-metadata: read
+    #|  code-quality: write
+    #|  copilot-requests: write
+    #|  vulnerability-alerts: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 14 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "code-quality: write is overly broad at the workflow level",
+      },
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "copilot-requests: write is overly broad at the workflow level",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 8, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 4 entry/entries without explanatory comments",
+        "pos": { "line": 2, "col": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "permissions-syntax: `repository-projects` is no longer a valid scope (GitHub spec freshness)" {
+  // Projects (classic) sunset 2024-08-23; `repository-projects` no longer
+  // appears in GitHub's GITHUB_TOKEN permissions docs.
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  repository-projects: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "permissions-syntax",
+        "severity": "error",
+        "message": "workflow: unknown permission scope `repository-projects`",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 5, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "undocumented-permissions",
+        "severity": "info",
+        "message": "permissions block has 1 entry/entries without explanatory comments",
+        "pos": { "line": 2, "col": 1 },
+      },
+    ],
+  })
+}
+
+///|
+test "permissions-syntax: `models` is no longer a valid scope (GitHub spec freshness)" {
+  // GitHub Models was fully retired 2026-07-30; `models` no longer appears
+  // in GitHub's GITHUB_TOKEN permissions docs (github/docs
+  // github-token-available-permissions.md, checked 2026-08-10).
+  let yaml =
+    #|on: push
+    #|permissions:
+    #|  models: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "permissions-syntax",
+        "severity": "error",
+        "message": "workflow: unknown permission scope `models`",
       },
       {
         "rule": "concurrency-limits",
@@ -2245,4 +2776,32 @@ test "attribution: job-needs-graph names the job and its `needs:` value" {
   inspect(hits.length(), content="1")
   assert_true(hits[0].job is Some("second"))
   assert_true(hits[0].pos is Some({ line: 10, .. }))
+}
+
+///|
+test "concurrency `queue:` key is not flagged (GitHub spec freshness)" {
+  // rhysd/actionlint#657/#680/#687: actionlint rejects the `queue:` key
+  // (values `single`/`max`) GitHub added under `concurrency:` as an
+  // "unexpected key". karinto's `expect_mapping_or_string` only checks that
+  // `concurrency:` itself is a string or mapping — it never validates the
+  // mapping's inner keys — so there is no allowlist here to go stale and no
+  // false positive to reproduce.
+  let yaml =
+    #|on: push
+    #|concurrency:
+    #|  group: ${{ github.ref }}-prod
+    #|  queue: max
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    d.rule == "unexpected-keys" || d.rule == "invalid-mapping-values"
+  })
+  inspect(hits.length(), content="0")
 }
