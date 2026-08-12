@@ -34,10 +34,19 @@ function isNewlyRecognizedPermScope(finding) {
 }
 
 export function matches(_capture, _replayed, diff) {
+  // A diff with no `onlyInCaptured` side at all is plain shell-rules-launch
+  // drift, not an overlap — 2026-08-shell-rules-launch.mjs already covers
+  // that on its own. Requiring at least one captured-side entry keeps this
+  // rule's matches limited to genuine overlaps, so rebaseline-captures.mjs's
+  // per-diff rule attribution stays accurate instead of crediting two rules
+  // for one diff.
+  let sawCapturedSide = false;
   for (const d of diff) {
     if (d.kind !== "diagnostics") return false;
-    if (!(d.onlyInCaptured ?? []).every(isNewlyRecognizedPermScope)) return false;
+    const captured = d.onlyInCaptured ?? [];
+    if (captured.length > 0) sawCapturedSide = true;
+    if (!captured.every(isNewlyRecognizedPermScope)) return false;
     if (!(d.onlyInReplayed ?? []).every((f) => NEW_SHELL_RULES.has(f?.rule))) return false;
   }
-  return true;
+  return sawCapturedSide;
 }
