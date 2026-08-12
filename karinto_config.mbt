@@ -5,14 +5,17 @@
 /// Two top-level keys intentionally reuse actionlint.yaml's own key names and
 /// shapes — `self-hosted-runner.labels` and `config-variables` — so an
 /// existing `.github/actionlint.yaml` is already a valid (partial) karinto
-/// config for those two settings; no separate actionlint-config parser is
-/// needed. `rules` (per-rule severity override) and `ignore-paths` (per-path
-/// rule ignores) are karinto-native, with no actionlint equivalent.
+/// config for those two settings; no separate parser is needed for *them*.
+/// `rules` (per-rule severity override) and `ignore-paths` (per-path rule
+/// ignores) are karinto-native, with no actionlint equivalent.
 /// `ignore-paths` is deliberately not named `paths`, to avoid colliding with
 /// actionlint's own `paths.*.ignore` (message-regex ignores against
-/// actionlint's own messages — out of scope, see #50): reusing that name
-/// would invite a `.github/actionlint.yaml`'s regex strings to be silently
-/// (mis)matched against karinto rule IDs instead.
+/// actionlint's own messages): reusing that name here would invite a
+/// `.github/actionlint.yaml`'s regex strings to be silently (mis)matched
+/// against karinto rule IDs, instead of going through the dedicated,
+/// best-effort `actionlint_config` parameter that actually handles them (see
+/// `actionlint_config.mbt`, #50) — `karinto_config` itself still does not
+/// read `paths:`.
 
 ///|
 priv struct KarintoConfig {

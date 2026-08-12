@@ -71,11 +71,12 @@ below.
 | `archived` | string | Caller-supplied `owner/repo` for `archived-uses`, merged with the daily KV-cached baseline. |
 | `no_capture` | `1` / `true` | Skip persisting this request to the dark-launch capture store (see *Privacy*) |
 | `format` | `json` \| `sarif` | Output format; defaults to the JSON envelope. `sarif` returns a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) document — see [*SARIF output*](#sarif-output). |
-| `path` | string | Repo-relative path of the `content` (e.g. `.github/workflows/ci.yml`). In `format=sarif` it becomes the SARIF `artifactLocation.uri`; in either format it also resolves a `ghalint` exclude's `workflow_file_path` scope. Same shape rules as `targets` paths. Unnecessary in `repo` mode, where targets already carry paths. |
+| `path` | string | Repo-relative path of the `content` (e.g. `.github/workflows/ci.yml`). In `format=sarif` it becomes the SARIF `artifactLocation.uri`; in either format it also resolves a `ghalint` exclude's `workflow_file_path` scope and an `actionlint` `paths.<glob>` scope. Same shape rules as `targets` paths. Unnecessary in `repo` mode, where targets already carry paths. |
 | `persona` | `regular` \| `pedantic` \| `auditor` | Analysis profile (see [*Personas*](#personas)). Defaults to `auditor` (every finding). An unrecognized value is a `400`. |
 | `ghalint` | string | Verbatim ghalint config (`ghalint.yaml`) text; its `excludes:` list suppresses matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 | `zizmor` | string | Verbatim zizmor config (`zizmor.yml`) text; its `rules.<id>.disable` / `rules.<id>.ignore` suppress matching findings (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 | `config` | string | Verbatim karinto config (`karinto.yaml`) text, or a compatible `.github/actionlint.yaml`; see [*Ignoring findings*](#ignoring-findings). At most 64 KiB. |
+| `actionlint` | string | Verbatim actionlint config (`.github/actionlint.yaml`) text; its `paths.<glob>.ignore` patterns suppress the karinto rule(s) they fingerprint to (see [*Ignoring findings*](#ignoring-findings)). At most 64 KiB. |
 
 `forbidden` / `archived` accept at most 200 comma-separated entries of 256
 characters each. The response also carries `online_audit_candidates` — the
@@ -201,6 +202,26 @@ the opt-outs authors already wrote for the upstream tools:
   parameter (the config's verbatim text); the `workflow_file_path` scope then
   resolves against `path` in content mode or each file's repo-relative path in
   repo mode.
+- **actionlint config** — a `.github/actionlint.yaml` `paths.<glob>.ignore`
+  list is partially honoured (#50). actionlint suppresses findings by running
+  each `ignore` regex against *its own* diagnostic message text — a
+  mechanism karinto can't replay verbatim, since karinto's messages don't
+  share actionlint's wording. Instead, each pattern is compiled and executed
+  (via [`moonbitlang/regexp`](https://github.com/moonbitlang/regexp.mbt))
+  against a curated table of actionlint's own canonical message text (quoted
+  from its own test fixtures) to identify which actionlint check it targets;
+  that check's karinto rule(s) — resolved via the catalogue's `origins`, the
+  same way ghalint's `policy_name` is — are then suppressed under the
+  matching `<glob>`. This is **rule-grained, not message-grained**: unlike
+  real actionlint, a pattern that in principle only ignores one specific
+  dynamic value (e.g. one runner label) ends up suppressing every finding of
+  the matching rule under that glob instead. A pattern that fails to compile,
+  or doesn't match any curated check, is a silent no-op. Pass it through the
+  [local CLI](#local-cli)'s `--actionlint-config`, or over HTTP via the
+  `actionlint` parameter; the `<glob>` scope resolves against `path` in
+  content mode or each file's repo-relative path in repo mode, the same way
+  as `ghalint`'s `workflow_file_path`. For exact, guaranteed control instead
+  of this best-effort fingerprinting, use karinto's own `ignore-paths` below.
 - **zizmor config** — a `zizmor.yml` `rules:` section is honoured. Each rule's
   `disable: true` skips that rule everywhere (rule ids match zizmor's audit
   names verbatim), and an `ignore:` list of `filename[:line[:col]]` entries
@@ -232,11 +253,12 @@ the opt-outs authors already wrote for the upstream tools:
   `self-hosted-runner.labels` and `config-variables` use the **same key
   names and shapes as actionlint.yaml**, so an existing
   `.github/actionlint.yaml` is already a valid (partial) karinto config for
-  those two settings — pass it in as-is. actionlint's own `paths.*.ignore`
-  (which suppresses findings by matching a regex against *actionlint's own*
-  error message text) is a different mechanism with no karinto rule-ID
-  equivalent and is **not** read; use karinto's `ignore-paths` instead (see
-  the [migration guide](docs/actionlint-migration.md) for the general
+  those two settings — pass it in as-is. `karinto_config` itself still does
+  not read actionlint's own `paths.*.ignore` key (that's a separate,
+  best-effort mechanism — see **actionlint config** above and `--actionlint-
+  config` / the `actionlint` parameter); use karinto's `ignore-paths` for
+  exact, rule-ID-based control instead (see the
+  [migration guide](docs/actionlint-migration.md) for the general
   actionlint → karinto mapping). Pass a config through the
   [local CLI](#local-cli)'s `--config`, or over HTTP via the `config`
   parameter.
@@ -545,6 +567,10 @@ moon run --target js cmd/main -- --ghalint-config ghalint.yaml .github/workflows
 
 # honour a zizmor config's `rules.<id>.disable` / `ignore` (see *Ignoring findings*)
 moon run --target js cmd/main -- --zizmor-config zizmor.yml .github/workflows/ci.yml
+
+# honour an actionlint config's `paths.<glob>.ignore` (best-effort — see
+# *Ignoring findings*); the file path resolves the `<glob>` scope
+moon run --target js cmd/main -- --actionlint-config .github/actionlint.yaml .github/workflows/ci.yml
 
 # honour a karinto config (self-hosted-runner labels, config-variables,
 # per-rule severity, ignore-paths — see *Ignoring findings*); a compatible

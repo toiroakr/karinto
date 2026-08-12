@@ -56,9 +56,11 @@ each (`Implemented` / `Planned` / `Not planned`) and the
 
 actionlint's `-ignore <regex>` flag (and the config file's message-regex
 `paths.*.ignore`, see below) suppresses findings by matching a regex against
-actionlint's own error message text. karinto has no message-based ignore —
-messages are free text and not a stable interface — so there is no direct
-translation. Instead:
+actionlint's own error message text. karinto has no message-based ignore of
+its own — messages are free text and not a stable interface — so most of
+this section is still a manual rewrite. The one exception is
+`paths.<glob>.ignore` itself, which karinto now honours directly,
+best-effort (#50) — see the last bullet.
 
 - **Silencing a rule everywhere**: use `disable` (CLI `--disable`, or the
   Worker's `disable` parameter) with a comma-separated list of rule-ID globs.
@@ -72,18 +74,29 @@ translation. Instead:
   [*Ignoring findings*](../README.md#ignoring-findings) for the exact
   placement rules (same-line, "disable next line" on a standalone comment,
   or above a step's own `-` line).
-- **Silencing a rule under a path**: `.github/actionlint.yaml`'s
-  `paths.<glob>.ignore` combines a path scope with a message regex. karinto's
-  equivalent is `ignore-paths` in a native `karinto.yaml`, keyed by rule ID
-  instead of message text:
+- **Silencing a rule under a path**: pass your `.github/actionlint.yaml`
+  straight through as karinto's `--actionlint-config` / the Worker's
+  `actionlint` parameter, and its `paths.<glob>.ignore` is honoured
+  automatically — each pattern is matched against a curated table of
+  actionlint's own canonical messages to identify which check (and karinto
+  rule) it targets, then suppressed under the matching `<glob>`:
 
   ```yaml
-  # actionlint.yaml
+  # actionlint.yaml — pass this file directly, no rewrite needed
   paths:
     fixtures/**:
       ignore:
         - 'label ".+" is unknown'
   ```
+
+  This is **best-effort and rule-grained, not message-grained**: it can tell
+  "this pattern targets `unknown-runner-label`" but not "only for the label
+  `foo`" — every finding of that rule under the glob is suppressed, not just
+  the one dynamic value the original regex happened to describe. A pattern
+  that doesn't match any curated check is silently ignored (no error, no
+  effect). For exact, guaranteed control — or if a pattern doesn't get
+  picked up — use `ignore-paths` in a native `karinto.yaml` instead, keyed by
+  rule ID rather than message text:
 
   ```yaml
   # karinto.yaml
@@ -92,11 +105,13 @@ translation. Instead:
       - unknown-runner-label
   ```
 
-  This is a rewrite, not an automatic import: karinto does not parse
-  `paths.*.ignore` from an `actionlint.yaml` (tracked in
-  [#50](https://github.com/toiroakr/karinto/issues/50) — a message regex has
-  no stable mapping onto karinto's rule IDs). Everything else in this
-  document is a manual rewrite for the same reason.
+  See [*Ignoring findings*](../README.md#ignoring-findings) for the full
+  detail on both mechanisms, including where the automatic one is known to
+  fall short (a handful of actionlint checks share one message template, so
+  a broad pattern can suppress more than one rule at once — see the doc
+  comment on `actionlint_config.mbt`). Everything else in this document
+  (the check-category table, and any wording not covered by an inline
+  ignore, `disable`, or `paths.<glob>.ignore`) is still a manual rewrite.
 
 ## Settings that carry over automatically
 

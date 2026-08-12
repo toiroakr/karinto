@@ -37,6 +37,12 @@
 //               `rules.<id>.disable` / `rules.<id>.ignore` suppress findings.
 //               `ignore` location scopes resolve against `path` / each file's
 //               repo-relative path the same way.
+//   - actionlint verbatim actionlint config (`.github/actionlint.yaml`) text;
+//               its `paths.<glob>.ignore` patterns are matched against a
+//               curated table of actionlint's own canonical messages to
+//               suppress the corresponding karinto rule(s) (#50). `path` /
+//               each file's repo-relative path resolves the `<glob>` scope
+//               the same way as `ghalint`'s `workflow_file_path`.
 //
 // The response also carries `online_audit_candidates`: the external `uses:`
 // refs that need a live GitHub API lookup (`impostor-commit`,
@@ -129,6 +135,9 @@ const MAX_GHALINT_CONFIG_BYTES = 64 * 1024;
 // A zizmor config (`zizmor.yml`) passed via the `zizmor` param. Same rationale
 // and ceiling as ghalint: real configs are tiny `rules:` maps.
 const MAX_ZIZMOR_CONFIG_BYTES = 64 * 1024;
+// An actionlint config (`.github/actionlint.yaml`) passed via the
+// `actionlint` param. Same rationale and ceiling as ghalint/zizmor.
+const MAX_ACTIONLINT_CONFIG_BYTES = 64 * 1024;
 // A karinto config (`karinto.yaml`, or a compatible `.github/actionlint.yaml`)
 // passed via the `config` param. Same rationale and ceiling as ghalint/zizmor.
 const MAX_KARINTO_CONFIG_BYTES = 64 * 1024;
@@ -612,6 +621,7 @@ const KNOWN_KEYS = new Set([
   "ghalint",
   "zizmor",
   "config",
+  "actionlint",
 ]);
 
 function mergeBody(params, raw, ct) {
@@ -647,7 +657,7 @@ function mergeBody(params, raw, ct) {
   }
 }
 
-const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path|persona|ghalint|zizmor|config)=/;
+const KNOWN_KEYS_RE = /(^|&)(content|type|disable|repo|commit|ref|targets|osv|no_capture|forbidden|archived|format|path|persona|ghalint|zizmor|config|actionlint)=/;
 
 async function handle(params, env, pathTarget) {
   const disable = sanitizeDisable(params.disable ?? "");
@@ -659,6 +669,7 @@ async function handle(params, env, pathTarget) {
   const ghalint = sanitizeGhalintConfig(params.ghalint);
   const zizmor = sanitizeZizmorConfig(params.zizmor);
   const karintoConfig = sanitizeKarintoConfig(params.config);
+  const actionlint = sanitizeActionlintConfig(params.actionlint);
   const useOsv = isTrue(params.osv);
   // Independent async setups — resolve together rather than serially.
   const [worker] = await Promise.all([getWorker(), getShellTs()]);
@@ -685,7 +696,7 @@ async function handle(params, env, pathTarget) {
       );
     }
     return await handleRepo(
-      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint, zizmor, karintoConfig,
+      params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint, zizmor, karintoConfig, actionlint,
     );
   }
   if (!params.content) {
@@ -700,14 +711,14 @@ async function handle(params, env, pathTarget) {
     return {
       sarif: worker.lint_string_sarif(
         params.content, type, disable, vuln, forbidden, archived,
-        pathLabel, persona, ghalint, zizmor, karintoConfig,
+        pathLabel, persona, ghalint, zizmor, karintoConfig, actionlint,
       ),
     };
   }
   return {
     ...JSON.parse(
       worker.lint_string(
-        params.content, type, disable, vuln, forbidden, archived, persona, ghalint, pathLabel, zizmor, karintoConfig,
+        params.content, type, disable, vuln, forbidden, archived, persona, ghalint, pathLabel, zizmor, karintoConfig, actionlint,
       ),
     ),
     online_audit_candidates: collectOnlineAuditCandidates(params.content),
@@ -788,6 +799,27 @@ function sanitizeZizmorConfig(raw) {
   if (byteLen > MAX_ZIZMOR_CONFIG_BYTES) {
     throw httpError(
       `zizmor config too large (max ${MAX_ZIZMOR_CONFIG_BYTES} bytes, got ${byteLen})`,
+      413,
+    );
+  }
+  return raw;
+}
+
+// Verbatim actionlint config text (`.github/actionlint.yaml`). The MoonBit
+// engine matches its `paths.<glob>.ignore` patterns against a curated table
+// of actionlint's own canonical messages to suppress the corresponding
+// karinto rule(s) (#50); a malformed config or an unmatched pattern yields
+// no suppression rather than erroring, so we only enforce type and a size
+// ceiling here.
+function sanitizeActionlintConfig(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw !== "string") {
+    throw httpError("`actionlint` must be a string", 400);
+  }
+  const byteLen = new TextEncoder().encode(raw).byteLength;
+  if (byteLen > MAX_ACTIONLINT_CONFIG_BYTES) {
+    throw httpError(
+      `actionlint config too large (max ${MAX_ACTIONLINT_CONFIG_BYTES} bytes, got ${byteLen})`,
       413,
     );
   }
@@ -942,7 +974,7 @@ function validateTargetPath(path) {
 }
 
 async function handleRepo(
-  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint, zizmor, karintoConfig,
+  params, pathTarget, disable, type, useOsv, worker, forbidden, archived, format, env, persona, ghalint, zizmor, karintoConfig, actionlint,
 ) {
   const repo = params.repo;
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/.test(repo)) {
@@ -1049,7 +1081,7 @@ async function handleRepo(
     files.push({
       path,
       ...JSON.parse(
-        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived, persona, ghalint, path, zizmor, karintoConfig),
+        worker.lint_string(raw, guessKind, disable, vuln, forbidden, archived, persona, ghalint, path, zizmor, karintoConfig, actionlint),
       ),
       online_audit_candidates: collectOnlineAuditCandidates(raw),
     });
@@ -1057,7 +1089,7 @@ async function handleRepo(
   if (sarif) {
     return {
       sarif: worker.lint_files_sarif(
-        JSON.stringify(sarifFiles), disable, forbidden, archived, persona, ghalint, zizmor, karintoConfig,
+        JSON.stringify(sarifFiles), disable, forbidden, archived, persona, ghalint, zizmor, karintoConfig, actionlint,
       ),
     };
   }
@@ -1549,6 +1581,7 @@ function normalizeRequest(params) {
   if (params.ghalint) out.ghalint = params.ghalint;
   if (params.zizmor) out.zizmor = params.zizmor;
   if (params.config) out.config = params.config;
+  if (params.actionlint) out.actionlint = params.actionlint;
   if (params.path) out.path = params.path;
   // `persona` gates which findings survive, so it too is part of the verdict
   // and must be captured (single token, verbatim).
