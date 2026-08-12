@@ -291,8 +291,12 @@ pub fn lint(
   // post-pass below alongside the ghalint/zizmor/karinto-config filters.
   // Unlike `ghalint_config` / `zizmor_config`, this is not also read out of
   // `karinto_config` — actionlint's `paths:` key is deliberately not one
-  // `karinto_config` doubles as (see `karinto_config.mbt`).
-  let actionlint_path_ignores = if actionlint_config == "" {
+  // `karinto_config` doubles as (see `karinto_config.mbt`). `paths.<glob>` is
+  // always path-scoped, so an empty `file_path` (stdin / content mode with no
+  // path) can never match one of its excludes — skip the YAML parse and the
+  // per-pattern regex compiles entirely in that case rather than doing the
+  // work only to have `actionlint_excluded` discard it.
+  let actionlint_path_ignores = if actionlint_config == "" || file_path == "" {
     []
   } else {
     parse_actionlint_paths(actionlint_config)
