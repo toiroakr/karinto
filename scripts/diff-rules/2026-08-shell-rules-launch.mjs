@@ -2,8 +2,8 @@
 // including two brand-new karinto-original rules: `shell-quote-safety`
 // (unquoted expansion of a `${{ }}`-derived env var) and
 // `shell-undefined-var` (a shell variable reference with no declared `env:`
-// source). Neither rule existed before this PR, so every capture taken
-// before it shipped is missing whatever these rules now find on replay —
+// source). Neither rule existed before PR #116 shipped, so every capture
+// taken before then is missing whatever these rules now find on replay —
 // this masks that one-directional "newly appears" drift until the affected
 // captures age out.
 export const id = "shell-rules-launch";
