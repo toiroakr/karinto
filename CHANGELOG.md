@@ -1,5 +1,34 @@
 # karinto
 
+## 0.9.6
+
+### Patch Changes
+
+- [#114](https://github.com/toiroakr/karinto/pull/114) [`2b30764`](https://github.com/toiroakr/karinto/commit/2b30764f8c059f3803eae4fbe4aa14569d5a9bc2) Thanks [@toiroakr](https://github.com/toiroakr)! - Adds a native `karinto.yaml` config file, wired through the CLI's `--config` and the Worker's `config` parameter (64 KiB cap, same as `ghalint`/`zizmor`), covering four settings that had no home before:
+
+  - `self-hosted-runner.labels` — glob patterns of your self-hosted runners' extra labels. Without it, `runs-on:` containing `self-hosted` still skips label validation entirely (unchanged default behaviour); with it, `unknown-runner-label` validates the remaining labels against the known set plus your globs instead of skipping, so a typo (`gpu-a1oo` vs `gpu-a100`) is caught.
+  - `config-variables` — an allowlist of `vars.*` names, backing a new `config-variables` rule. Omitted (the default) leaves the check off; `[]` forbids every `vars.*` reference; a non-empty list flags any `vars.<name>` outside it.
+  - `rules` — per-rule severity override (`rule-id: error|warning|info`).
+  - `ignore-paths` — per-path rule suppression, keyed by a glob against the linted file's path (`"*"` suppresses every rule under that glob).
+
+  `self-hosted-runner.labels` and `config-variables` reuse `.github/actionlint.yaml`'s own key names and shapes, so an existing actionlint.yaml is already a valid (partial) karinto config for those two settings — pass it straight through. actionlint's own `paths.*.ignore` (a message-regex mechanism against actionlint's own error text) has no karinto equivalent and is not read; use `ignore-paths` instead.
+
+  `karinto.yaml` also doubles as a ghalint config and a zizmor config: its top-level `excludes:` (ghalint's own shape) and `rules.<id>.disable`/`.ignore` (zizmor's own shape, nested alongside karinto's `severity`) are read directly, so a `ghalint.yaml` or `zizmor.yml` can be pasted straight into one shared `karinto.yaml` instead of kept in separate files. Every source is additive with any `--ghalint-config`/`--zizmor-config` also passed.
+
+  Adds `docs/actionlint-migration.md`, mapping actionlint's check categories and `-ignore` habits onto karinto rule IDs, `disable` globs, inline ignores, and `ignore-paths`.
+
+- [#116](https://github.com/toiroakr/karinto/pull/116) [`9a4f081`](https://github.com/toiroakr/karinto/commit/9a4f081f92ea4738d869a17824216fe5208cf515) Thanks [@toiroakr](https://github.com/toiroakr)! - Add tree-sitter-bash shell script analysis ([#113](https://github.com/toiroakr/karinto/issues/113)). `github-env`, `unpinned-tools`, `unredacted-secrets`, and `use-trusted-publishing` now parse `run:` scripts with a real bash AST instead of regex/manual-tokenizer heuristics — `github-env` in particular now catches heredoc-based `$GITHUB_ENV` writes (`cat <<EOF >> "$GITHUB_ENV"`) that the old per-line scanner silently missed. Two new karinto-original rules ship on the same integration: `shell-quote-safety` (unquoted expansion of an env var whose value derives from a `${{ }}` expression) and `shell-undefined-var` (a shell variable reference with no declared `env:` source, SC2154-style).
+
+- [#115](https://github.com/toiroakr/karinto/pull/115) [`e911750`](https://github.com/toiroakr/karinto/commit/e91175039ca17e45f5bafc0968a944e1d2dd6fc0) Thanks [@toiroakr](https://github.com/toiroakr)! - Refreshed several hardcoded GitHub Actions spec tables that had drifted, both from GitHub's docs and from actionlint's own stalled backlog (actionlint's main branch hasn't shipped a release since 2026-03-30). This closes false positives/negatives across five rules:
+
+  - `permissions-syntax` — added the `artifact-metadata`, `code-quality`, `copilot-requests`, and `vulnerability-alerts` scopes; removed `repository-projects` (Projects classic, sunset 2024-08-23) and `models` (GitHub Models, retired 2026-07-30).
+  - `unknown-runner-label` — added `ubuntu-26.04`/`ubuntu-26.04-arm` (public preview), `windows-2025-vs2026`/`windows-11-vs2026-arm` (preview), the `macos-26`/`macos-15-intel`/`macos-26-intel`/`macos-26-large`/`macos-26-xlarge` labels, and the preview `xcode-27`/`xcode-27-xlarge` labels (documented only in the `actions/runner-images` README so far, not yet in github/docs); removed `ubuntu-20.04`, `windows-2019`, `macos-12`, and `macos-13`, none of which resolve to a real hosted-runner image anymore.
+  - `webhook-events` — added the `image_version` trigger; removed the Projects-classic `project`/`project_card`/`project_column` events.
+  - `unexpected-keys` — added the `snapshot` job key and the `background`/`wait`/`wait-all`/`cancel`/`parallel` step keys (async step execution, shipped alongside experimental parallel steps).
+  - `uses-syntax` — `uses: $/path/to/action` (the same-repository reference syntax GitHub added 2026-07-30, no `@ref` suffix) is no longer misreported as missing an `@ref`.
+
+  Also added a weekly `spec-freshness` CI job (see issue [#111](https://github.com/toiroakr/karinto/issues/111)) that diffs these tables against github/docs and `actions/runner-images` and files a tracking issue on drift, so future gaps like these get caught automatically instead of accumulating silently the way they did upstream.
+
 ## 0.9.5
 
 ### Patch Changes
