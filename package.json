@@ -10,7 +10,7 @@
   },
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=20.20.2"
   },
   "scripts": {
     "changeset": "changeset",
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@karinto/shell-ts-adapter": "file:./shell-ts-adapter",
-    "patch-package": "^8.0.0"
+    "patch-package": "^8.0.1"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
