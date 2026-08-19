@@ -40,15 +40,15 @@ jobs:
 
       - name: Create Release PR or publish
         id: changesets
-        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
-          version: npm run version-packages
-          publish: bash scripts/release-publish.sh
-          commit: "chore: release"
-          title: "chore: release"
-          createGithubReleases: true
+          version-script: npm run version-packages
+          publish-script: bash scripts/release-publish.sh
+          commit-message: "chore: release"
+          pr-title: "chore: release"
+          create-github-releases: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Optional public-read PAT, mirrored into each deployed Worker as a
