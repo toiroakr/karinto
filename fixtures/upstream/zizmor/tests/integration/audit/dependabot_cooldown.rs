@@ -1,6 +1,6 @@
 use anyhow::Ok;
 
-use crate::common::{OutputMode, input_under_test, zizmor};
+use crate::common::{OutputMode, WorkspaceBuilder, input_under_test, zizmor};
 
 #[test]
 fn test_missing_cooldown() -> anyhow::Result<()> {
@@ -206,5 +206,154 @@ fn test_opentofu_cooldown() -> anyhow::Result<()> {
     "
     );
 
+    Ok(())
+}
+
+#[test]
+fn test_fix_missing_cooldown() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: daily
+    insecure-external-code-execution: deny
+"#;
+
+    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            zizmor()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -9 +9,3 @@
+         insecure-external-code-execution: deny
+    +    cooldown:
+    +      default-days: 7
+    "
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fix_missing_default_days() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    cooldown: {}
+    schedule:
+      interval: daily
+    insecure-external-code-execution: deny
+"#;
+
+    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            zizmor()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -6,3 +6,3 @@
+         directory: /
+    -    cooldown: {}
+    +    cooldown: { default-days: 7 }
+         schedule:
+    "
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fix_insufficient_default_days() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    cooldown:
+      default-days: 2
+    schedule:
+      interval: daily
+    insecure-external-code-execution: deny
+"#;
+
+    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            zizmor()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -7,3 +7,3 @@
+         cooldown:
+    -      default-days: 2
+    +      default-days: 7
+         schedule:
+    "
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fix_multiple_updates() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /
+    cooldown:
+      default-days: 1
+    schedule:
+      interval: weekly
+"#;
+
+    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            zizmor()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -8,2 +8,4 @@
+           interval: daily
+    +    cooldown:
+    +      default-days: 7
+     
+    @@ -12,3 +14,3 @@
+         cooldown:
+    -      default-days: 1
+    +      default-days: 7
+         schedule:
+    "
+    );
     Ok(())
 }
