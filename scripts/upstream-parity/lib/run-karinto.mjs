@@ -4,12 +4,21 @@
 // otherwise the dynamic import fails with a clear error.
 
 import { readFileSync } from "node:fs";
+import { ensureInitNode } from "../../../shell-ts-adapter/index.mjs";
 
 let lintString = null;
 
 async function loadLint(bundlePath) {
   if (lintString) return lintString;
   try {
+    // The compiled bundle's `lint_string` runs tree-sitter-bash-backed shell
+    // rules (github-env, unpinned-tools, use-trusted-publishing, shell-quote-
+    // safety, shell-undefined-var, …) through `ts_parse_json`, which returns
+    // `None` — silently, no error — until the Node tree-sitter runtime has
+    // been initialized. Every other caller (the CLI, scripts/test-shell-
+    // rules.mjs) awaits this first; missing it here made every shell-AST rule
+    // a silent no-op in this parity check without ever failing loudly.
+    await ensureInitNode();
     const mod = await import(bundlePath);
     lintString = mod.lint_string;
     if (typeof lintString !== "function") {

@@ -25,20 +25,20 @@ fn tested_rule_ids() -> Array[String] {
     "job-step-id-naming", "deprecated-workflow-commands", "constant-if-condition",
     "action-yml-metadata", "deprecated-action-inputs", "yaml-anchor-issues",
     // zizmor family — fixtures live in zizmor_rules_test.mbt
-     "anonymous-definition", "archived-uses", "artipacked", "bot-conditions", "cache-poisoning",
-    "concurrency-limits", "dangerous-triggers", "dependabot-cooldown", "dependabot-execution",
-    "excessive-permissions", "forbidden-uses", "github-app", "github-env", "hardcoded-container-credentials",
-    "insecure-commands", "known-vulnerable-actions", "misfeature", "obfuscation",
-    "overprovisioned-secrets",
+     "adhoc-packages", "anonymous-definition", "archived-uses", "artipacked", "bot-conditions",
+    "cache-poisoning", "concurrency-limits", "dangerous-triggers", "dependabot-cooldown",
+    "dependabot-execution", "excessive-permissions", "forbidden-uses", "github-app",
+    "github-env", "hardcoded-container-credentials", "insecure-commands", "known-vulnerable-actions",
+    "misfeature", "obfuscation", "overprovisioned-secrets",
     // impostor-commit & ref-confusion & ref-version-mismatch: NotPlanned.
     // impostor-commit / ref-version-mismatch are delegated to the companion
     // action (online GitHub API resolution); ref-confusion is mooted by the
     // SHA pins already mandated by `unpinned-uses`.
-     "secrets-inherit", "secrets-outside-env", "self-hosted-runner",
+     "secrets-inherit", "secrets-outside-env", "self-hosted-runner", "self-repository",
     // stale-action-refs: NotPlanned (GitHub API cost not worth informational signal).
-     "superfluous-actions", "template-injection", "undocumented-permissions", "unpinned-images",
-    "unpinned-tools", "unpinned-uses", "unredacted-secrets", "unsound-condition",
-    "unsound-contains", "use-trusted-publishing",
+     "superfluous-actions", "template-injection", "typosquat-uses", "undocumented-permissions",
+    "unpinned-images", "unpinned-tools", "unpinned-uses", "unredacted-secrets", "unsound-condition",
+    "unsound-contains", "unsound-ternary", "use-trusted-publishing",
     // ghalint family — fixtures live in ghalint_rules_test.mbt
      "job-permissions-required", "permissions-read-all-forbidden", "permissions-write-all-forbidden",
     "workflow-env-no-secrets", "job-env-no-secrets", "github-app-limit-repositories",

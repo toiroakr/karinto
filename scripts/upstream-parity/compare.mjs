@@ -202,7 +202,15 @@ function classify(source, file, karinto, upstream) {
     const filteredMissing = allow ? missing.filter((id) => !allow.has(`missing:${id}`)) : missing;
     const filteredExtra = allow ? extra.filter((id) => !allow.has(`extra:${id}`)) : extra;
 
-    const hard = filteredMissing.length > 0 || filteredExtra.length > 0;
+    // An `unmapped` id means upstream fired a rule with no entry in
+    // rules_catalog.mbt at all — not even `Planned`/`NotPlanned`. That's a
+    // triage gap, not an accepted divergence, so it can't be waved off via
+    // the allowlist the way `missing`/`extra` can: the only fix is to
+    // register the rule (see DEVELOPMENT.md "Incorporating a new upstream
+    // check"). Counting it as hard is what makes the scheduled safety-net
+    // run (see upstream-parity.yml) actually catch "an upstream refresh
+    // adding a check karinto misses" instead of staying green forever.
+    const hard = filteredMissing.length > 0 || filteredExtra.length > 0 || unmapped.size > 0;
     return {
       hard,
       missing: filteredMissing,

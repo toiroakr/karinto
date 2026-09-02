@@ -24,6 +24,13 @@
   ],
   "entries": [
     {
+      "file": "fixtures/upstream/zizmor/tests/integration/test-data/archived-uses/pre-commit/.pre-commit-config.yaml",
+      "expect": [
+        "missing:archived-uses"
+      ],
+      "reason": "This fixture is a .pre-commit-config.yaml (repos[].repo/rev/hooks schema), not GitHub Actions workflow/action YAML. karinto has no pre-commit-config parser at all — adding one for a single audit is a new document-kind feature, not an archived-uses logic fix."
+    },
+    {
       "file": "fixtures/upstream/actionlint/testdata/action_metadata/action-yaml/action.yaml",
       "expect": [
         "upstream-only"

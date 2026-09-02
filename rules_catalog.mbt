@@ -521,6 +521,17 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
     // when that happens, every upstream is listed in `origins`.
     // -----------------------------------------------------------------------
     spec(
+      "adhoc-packages",
+      "`gem install`/`npm install` bypasses the lockfile",
+      Zizmor,
+      ["zizmor:adhoc-packages"],
+      SupplyChain,
+      Info,
+      Implemented,
+      true,
+      true,
+    ),
+    spec(
       "anonymous-definition",
       "Missing name on workflow/action",
       Zizmor,
@@ -729,6 +740,22 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       true,
     ),
+    // insecure-url-scheme: out of scope — this audit targets `.pre-commit-
+    // config.yaml`'s `repos[].repo` URLs, a document schema entirely distinct
+    // from GitHub Actions workflow/action YAML. karinto has no pre-commit-
+    // config parser at all (no `FileKind` variant, no prewalk); adding one
+    // for a single audit is a new document-kind feature, not a rule tweak.
+    spec(
+      "insecure-url-scheme",
+      "http:// / git:// repo URL in .pre-commit-config.yaml",
+      Zizmor,
+      ["zizmor:insecure-url-scheme"],
+      SupplyChain,
+      Error,
+      NotPlanned,
+      true,
+      true,
+    ),
     spec(
       "known-vulnerable-actions",
       "CVE-listed actions",
@@ -836,6 +863,17 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       true,
       false,
     ),
+    spec(
+      "self-repository",
+      "Local `uses:` should use `$/...` self-repository syntax",
+      Zizmor,
+      ["zizmor:self-repository"],
+      BestPractice,
+      Info,
+      Implemented,
+      true,
+      true,
+    ),
     // stale-action-refs: out of scope — would require GitHub API to
     // enumerate tags reachable from a SHA, and the upstream signal is only
     // informational; the cost (API call, latency, rate-limit) is not worth it.
@@ -867,6 +905,17 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Zizmor,
       ["zizmor:template-injection"],
       Security,
+      Error,
+      Implemented,
+      true,
+      true,
+    ),
+    spec(
+      "typosquat-uses",
+      "`uses:` owner resembles a popular action's owner",
+      Zizmor,
+      ["zizmor:typosquat-uses"],
+      SupplyChain,
       Error,
       Implemented,
       true,
@@ -950,6 +999,17 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Zizmor,
       ["zizmor:unsound-contains"],
       Security,
+      Warning,
+      Implemented,
+      true,
+      true,
+    ),
+    spec(
+      "unsound-ternary",
+      "Pseudo-ternary has a falsy true-value",
+      Zizmor,
+      ["zizmor:unsound-ternary"],
+      BestPractice,
       Warning,
       Implemented,
       true,

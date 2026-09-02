@@ -192,6 +192,29 @@ test "artipacked: actions/checkout leaves credentials persisted" {
 }
 
 ///|
+/// Regression test: a computed `with:` block (`with: ${{ fromJson(...) }}`)
+/// on an `actions/checkout` step used to fire an Info-level "may not set
+/// persist-credentials: false" — confirmed against zizmor v1.30.0 directly
+/// that upstream no longer flags this case at all (it fires `obfuscation`
+/// only, for the computed `with:` itself).
+test "artipacked: a computed `with:` block is silent (matches zizmor v1.30.0)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    #|        with: ${{ fromJson(steps.setup.outputs.options) }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "artipacked" })
+  inspect(hits.length(), content="0")
+}
+
+///|
 test "bot-conditions: spoofable github.actor bot check" {
   let yaml =
     #|on: pull_request
@@ -727,6 +750,51 @@ test "github-app: scoped properly is silent" {
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
   inspect(hits.length(), content="0")
+}
+
+///|
+/// Regression test for zizmor GitHub issue #2219: `owner` without
+/// `repositories` is fine when every requested `permission-*` is an
+/// org-scoped permission that has no repository-level meaning in the first
+/// place (`repositories:` wouldn't apply to any of them).
+test "github-app: owner without repositories is silent when every permission is org-only" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          owner: ${{ github.repository_owner }}
+    #|          permission-members: read
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+/// A *mix* of org-only and repo-scoped permissions still needs
+/// `repositories:` — only an all-org-only set is exempt.
+test "github-app: owner without repositories still fires when a permission is not org-only" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+    #|        with:
+    #|          owner: ${{ github.repository_owner }}
+    #|          permission-members: read
+    #|          permission-issues: write
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "github-app" })
+  inspect(hits.length(), content="1")
 }
 
 ///|
@@ -1303,6 +1371,84 @@ test "self-hosted-runner: job runs on self-hosted runner" {
   })
 }
 
+///|
+test "self-repository: step-level local action uses './...'" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - uses: ./some-action
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 9 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "self-repository",
+        "severity": "info",
+        "message": "uses `./some-action` should use GitHub's `$/...` self-repository syntax instead of `./...`",
+        "pos": { "line": 9, "col": 15 },
+        "job": "build",
+        "step": { "index": 0 },
+      },
+    ],
+  })
+}
+
+///|
+test "self-repository: job-level reusable workflow uses './...'" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  reusable:
+    #|    uses: ./.github/workflows/reuse.yml
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 0, "lines": 5 },
+    "diagnostics": [
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "self-repository",
+        "severity": "info",
+        "message": "uses `./.github/workflows/reuse.yml` should use GitHub's `$/...` self-repository syntax instead of `./...`",
+        "pos": { "line": 5, "col": 11 },
+        "job": "reusable",
+      },
+    ],
+  })
+}
+
 // `stale-action-refs` is catalogued as NotPlanned — would require a
 // GitHub API call to enumerate tags reachable from a SHA, and the upstream
 // signal is only informational. See rules_catalog.mbt.
@@ -1583,6 +1729,58 @@ test "unpinned-tools: pipe-to-shell installer in run" {
       },
     ],
   })
+}
+
+///|
+/// Action-based detection (`tool_installer_action`) doesn't need the shell
+/// AST, so — unlike the pipe-to-shell test above — this runs for real under
+/// plain `moon test`.
+test "unpinned-tools: extractions/setup-just with a wildcard version" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
+    #|        with:
+    #|          just-version: "*"
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unpinned-tools" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "unpinned-tools: extractions/setup-just with no with: block at all" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unpinned-tools" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "unpinned-tools: extractions/setup-just pinned to a literal version is silent" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
+    #|        with:
+    #|          just-version: 1.40.0
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unpinned-tools" })
+  inspect(hits.length(), content="0")
 }
 
 ///|
@@ -2214,4 +2412,107 @@ test "attribution: unsound-condition names the step whose `if:` is unsound" {
   assert_true(hits[0].job is Some("build"))
   assert_true(hits[0].step is Some({ index: 0, .. }))
   assert_true(hits[0].pos is Some({ line: 9, .. }))
+}
+
+///|
+test "typosquat-uses: owner omits a character from a popular action's owner" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: action/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+  inspect(hits.length(), content="1")
+  assert_true(
+    hits[0].message.contains("action/checkout") &&
+    hits[0].message.contains("actions/checkout"),
+  )
+}
+
+///|
+test "typosquat-uses: owner swaps characters in a popular action's owner" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: dokcer/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "typosquat-uses: same owner as the popular action is never flagged" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: actions/chckout@11bd71901bbe5b1630ceea73d27597364c9af683
+    #|      - uses: example/totally-different-thing@11bd71901bbe5b1630ceea73d27597364c9af683
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "unsound-ternary: pseudo-ternary with a falsy true-value" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ github.event.foo && '' || 'bar' }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unsound-ternary" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+test "unsound-ternary: sound ternary with a truthy true-value is not flagged" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ github.event.foo && 'baz' || 'bar' }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "unsound-ternary" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+/// `adhoc-packages` is tree-sitter-bash-based (#113) and only runs under
+/// `--target js` with `shell-ts-adapter` initialized, which `moon test`
+/// can't do (see `use-trusted-publishing: run-based detection fires on a
+/// real npm publish` above, and the architecture note in `shell_ts_ffi.mbt`)
+/// — this asserts `0` hits for that reason, not because detection stopped
+/// working. `analyze_adhoc_packages`/`words_are_adhoc_install`
+/// (`shell_rules.mbt`) are unit-tested against captured AST fixtures in
+/// `shell_rules_wbtest.mbt`.
+test "adhoc-packages: run-based detection fires on a real gem install" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: gem install rake
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "adhoc-packages" })
+  inspect(hits.length(), content="0")
 }
