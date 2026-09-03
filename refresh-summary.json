@@ -4,12 +4,12 @@
     {
       "name": "zizmor",
       "repo": "zizmorcore/zizmor",
-      "from": "1.28.0",
-      "to": "1.29.0",
-      "tag": "v1.29.0",
-      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.29.0",
-      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.28.0...v1.29.0",
-      "notes": "## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-features)\r\n\r\n- zizmor now has **experimental** support for auditing pre-commit inputs, meaning both pre-commit configuration and hook definitions ([#2209](https://github.com/zizmorcore/zizmor/issues/2209))\r\n\r\n- New audit: [insecure-url-scheme](https://docs.zizmor.sh/audits/#insecure-url-scheme) detects usages of insecure (i.e. plaintext) protocols when making network requests. The initial version of this audit is limited to pre-commit inputs only ([#2228](https://github.com/zizmorcore/zizmor/issues/2228))\r\n\r\n- zizmor now supports GitHub's \"self-repository\" reference syntax for local actions, e.g. `uses: $/foo/bar` instead of a manual checkout and `uses: ./foo/bar` ([#2248](https://github.com/zizmorcore/zizmor/issues/2248))\r\n\r\n## Changes ⚠️[🔗](https://docs.zizmor.sh/release-notes/#changes)\r\n\r\n- The [unpinned-uses](https://docs.zizmor.sh/audits/#unpinned-uses) and [unpinned-images](https://docs.zizmor.sh/audits/#unpinned-images) audits have been separated more cleanly: [unpinned-uses](https://docs.zizmor.sh/audits/#unpinned-uses) is now principally responsible for Git-style `uses:` clauses, whereas [unpinned-images](https://docs.zizmor.sh/audits/#unpinned-images) is now responsible for `docker://`-style `uses:` clauses (in addition to already checking other image references) ([#2222](https://github.com/zizmorcore/zizmor/issues/2222))\r\n\r\n## Removals 🌅[🔗](https://docs.zizmor.sh/release-notes/#removals)\r\n\r\n- `--co\n\n…(truncated — see release link)"
+      "from": "1.29.0",
+      "to": "1.30.0",
+      "tag": "v1.30.0",
+      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.30.0",
+      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.29.0...v1.30.0",
+      "notes": "[Sponsorship is appreciated!](https://github.com/sponsors/woodruffw/)\r\n\r\n## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-features)\r\n\r\n- New audit: [self-repository](https://docs.zizmor.sh/audits/#self-repository) detects usages of the old \"workspace-relative\" form for local reusable workflows and actions and recommends the new \"self-repository\" form instead ([#2271](https://github.com/zizmorcore/zizmor/issues/2271))\r\nEnhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)\r\n\r\n- The [impostor-commit](https://docs.zizmor.sh/audits/#impostor-commit) audit now supports pre-commit config inputs ([#2256](https://github.com/zizmorcore/zizmor/issues/2256))\r\n\r\n- The [forbidden-uses](https://docs.zizmor.sh/audits/#forbidden-uses) audit now supports pre-commit config inputs ([#2263](https://github.com/zizmorcore/zizmor/issues/2263))\r\n\r\n- The [adhoc-packages](https://docs.zizmor.sh/audits/#adhoc-packages) audit now detects more ad-hoc package management patterns, including bundle add and yarn add\r\n\r\n    Many thanks to [@connorshea](https://github.com/connorshea) for proposing and implementing this enhancement!\r\n\r\n- The [archived-uses](https://docs.zizmor.sh/audits/#archived-uses) audit now supports pre-commit config inputs ([#2272](https://github.com/zizmorcore/zizmor/issues/2272))\r\n\r\n- The [ref-confusion](https://docs.zizmor.sh/audits/#ref-confusion) audit now supports pre-commit config inputs ([#2274](https://github.com/zizmorcore/zizmor/issues/2274))\n\n…(truncated — see release link)"
     }
   ]
 }

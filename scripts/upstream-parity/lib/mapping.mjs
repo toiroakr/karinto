@@ -103,8 +103,14 @@ function readBalanced(src, start) {
 
 function parseSpec(body) {
   // Split top-level commas (not inside [] or "").
+  // Positional args of `spec(...)` in rules_catalog.mbt: id, title, source,
+  // origins, category, default_severity, status, applies_to_workflow,
+  // applies_to_action — 9 total. Keep this comment in sync with the `fn
+  // spec(...)` signature; a drift here silently zeroes out the entire
+  // catalog mapping (every upstream-fired rule reads back as "unmapped"),
+  // which used to be invisible because `unmapped` didn't fail the check.
   const parts = splitTopLevel(body);
-  if (parts.length < 8) return null;
+  if (parts.length < 9) return null;
 
   const idMatch = parts[0].match(/^\s*"([^"]+)"\s*$/);
   if (!idMatch) return null;
@@ -120,7 +126,7 @@ function parseSpec(body) {
     (m) => m[1],
   );
 
-  const statusTok = parts[7].trim();
+  const statusTok = parts[6].trim();
   if (!STATUSES.has(statusTok)) return null;
 
   return { id, source, origins, status: statusTok };

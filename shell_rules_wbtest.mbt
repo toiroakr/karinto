@@ -553,3 +553,75 @@ test "shell-undefined-var: a well-known GITHUB_* context var is not flagged" {
   let root = parse_shell_ast(undef_well_known).unwrap()
   assert_eq(analyze_undefined_vars(root, []), [])
 }
+
+///|
+let adhoc_gem_install_rake : String = "{\"t\":\"program\",\"s\":0,\"e\":16,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":16,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"gem\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"gem\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"},{\"t\":\"word\",\"s\":12,\"e\":16,\"x\":\"rake\"}]}]}"
+
+///|
+let adhoc_npm_install_lodash : String = "{\"t\":\"program\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"},{\"t\":\"word\",\"s\":12,\"e\":18,\"x\":\"lodash\"}]}]}"
+
+///|
+let adhoc_npm_install_versioned : String = "{\"t\":\"program\",\"s\":0,\"e\":25,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":25,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"},{\"t\":\"word\",\"s\":12,\"e\":25,\"x\":\"oxlint@1.81.0\"}]}]}"
+
+///|
+let adhoc_npm_i_lodash : String = "{\"t\":\"program\",\"s\":0,\"e\":12,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":12,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":5,\"x\":\"i\"},{\"t\":\"word\",\"s\":6,\"e\":12,\"x\":\"lodash\"}]}]}"
+
+///|
+let adhoc_npm_add_lodash : String = "{\"t\":\"program\",\"s\":0,\"e\":14,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":14,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":7,\"x\":\"add\"},{\"t\":\"word\",\"s\":8,\"e\":14,\"x\":\"lodash\"}]}]}"
+
+///|
+let adhoc_npm_ci : String = "{\"t\":\"program\",\"s\":0,\"e\":6,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":6,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":6,\"x\":\"ci\"}]}]}"
+
+///|
+let adhoc_npm_install_no_pkg : String = "{\"t\":\"program\",\"s\":0,\"e\":11,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":11,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"npm\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"npm\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"}]}]}"
+
+///|
+let adhoc_gem_install_help : String = "{\"t\":\"program\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"gem\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"gem\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"},{\"t\":\"word\",\"s\":12,\"e\":18,\"x\":\"--help\"}]}]}"
+
+///|
+test "adhoc-packages: gem install with a package name" {
+  let root = parse_shell_ast(adhoc_gem_install_rake).unwrap()
+  assert_true(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm install with a package name" {
+  let root = parse_shell_ast(adhoc_npm_install_lodash).unwrap()
+  assert_true(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm install with a version-pinned package" {
+  let root = parse_shell_ast(adhoc_npm_install_versioned).unwrap()
+  assert_true(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm i is an alias for npm install" {
+  let root = parse_shell_ast(adhoc_npm_i_lodash).unwrap()
+  assert_true(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm add is also an alias for npm install" {
+  let root = parse_shell_ast(adhoc_npm_add_lodash).unwrap()
+  assert_true(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm ci is lockfile-aware, not flagged" {
+  let root = parse_shell_ast(adhoc_npm_ci).unwrap()
+  assert_false(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: npm install without a package name is not flagged" {
+  let root = parse_shell_ast(adhoc_npm_install_no_pkg).unwrap()
+  assert_false(analyze_adhoc_packages(root))
+}
+
+///|
+test "adhoc-packages: gem install without a package name is not flagged" {
+  let root = parse_shell_ast(adhoc_gem_install_help).unwrap()
+  assert_false(analyze_adhoc_packages(root))
+}

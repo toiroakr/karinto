@@ -432,6 +432,14 @@ pub fn all_rules() -> Array[Rule] {
       on_step: no_step(),
     },
     Rule::{
+      id: "self-repository",
+      title: "Local `uses:` should use `$/...` self-repository syntax",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: Some(check_self_repository_job),
+      on_step: Some(check_self_repository_step),
+    },
+    Rule::{
       id: "insecure-commands",
       title: "`ACTIONS_ALLOW_UNSECURE_COMMANDS` re-enables legacy commands",
       applies: workflow_or_action,
@@ -646,6 +654,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: no_doc(),
       on_job: no_job(),
       on_step: Some(check_unpinned_tools),
+    },
+    Rule::{
+      id: "adhoc-packages",
+      title: "`gem install`/`npm install` bypasses the lockfile",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_adhoc_packages),
     },
     Rule::{
       id: "outdated-action-version",
@@ -920,6 +936,14 @@ pub fn all_rules() -> Array[Rule] {
       on_step: no_step(),
     },
     Rule::{
+      id: "unsound-ternary",
+      title: "Pseudo-ternary has a falsy true-value",
+      applies: workflow_or_action,
+      on_doc: Some(check_unsound_ternary),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
       id: "anonymous-definition",
       title: "Workflow/action or job has no `name:`",
       applies: workflow_or_action,
@@ -958,6 +982,14 @@ pub fn all_rules() -> Array[Rule] {
       on_doc: no_doc(),
       on_job: Some(check_archived_uses_job),
       on_step: Some(check_archived_uses_step),
+    },
+    Rule::{
+      id: "typosquat-uses",
+      title: "`uses:` owner resembles a popular action's owner",
+      applies: workflow_or_action,
+      on_doc: no_doc(),
+      on_job: no_job(),
+      on_step: Some(check_typosquat_uses),
     },
     Rule::{
       id: "matrix-values",
@@ -1414,8 +1446,12 @@ fn check_unpinned_uses(
 /// - Missing `persist-credentials` (or `with:` itself absent) → Warning
 ///   with "does not set persist-credentials: false".
 /// - Templated `persist-credentials: ${{ ... }}` → same Warning.
-/// - `with:` itself is an expression (`with: ${{ fromJson(...) }}`) → Info
-///   with "may not set persist-credentials: false" (lower confidence).
+/// - `with:` itself is an expression (`with: ${{ fromJson(...) }}`) → silent.
+///   Upstream no longer flags this case (confirmed against zizmor v1.30.0
+///   directly — the vendored `obfuscation/issue-1769-repro.yml` fixture,
+///   whose `with:` is a bare `fromJson(...)` expression, fires only
+///   `obfuscation`, never `artipacked`); a prior version's Info-level "may
+///   not set" finding for this shape has since been dropped.
 fn artipacked_emit_for_step(
   ctx : WalkCtx,
   step : StepInfo,
@@ -1425,7 +1461,6 @@ fn artipacked_emit_for_step(
     return
   }
   let unsafe_msg = "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false"
-  let maybe_msg = "credential persistence through GitHub Actions artifacts: may not set persist-credentials: false"
   let warn = fn() {
     add_diag_step_field(
       out,
@@ -1450,8 +1485,7 @@ fn artipacked_emit_for_step(
           }
         _ => warn()
       }
-    Some(String(_)) =>
-      add_diag_step_field(out, ctx, "artipacked", Info, maybe_msg, step, "uses")
+    Some(String(_)) => () // `with:` itself is a computed expression — silent, matching upstream
     _ => warn()
   }
 }
@@ -1856,6 +1890,50 @@ fn run_has_publish_cmd(run : String, is_bash : Bool) -> Bool {
         None => false
         Some(root) => analyze_trusted_publishing(root)
       }
+  }
+}
+
+///|
+/// Same dual-path (AST / non-bash fallback) shape as `run_has_publish_cmd`,
+/// for `adhoc-packages` — see `analyze_adhoc_packages` / `text_has_adhoc_install`
+/// in `shell_rules.mbt`.
+fn run_has_adhoc_install(run : String, is_bash : Bool) -> Bool {
+  if !is_bash {
+    return text_has_adhoc_install(run)
+  }
+  match ts_parse_json(sanitize_expr_placeholders(run)) {
+    None => false
+    Some(json) =>
+      match parse_shell_ast(json) {
+        None => false
+        Some(root) => analyze_adhoc_packages(root)
+      }
+  }
+}
+
+///|
+fn check_adhoc_packages(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.run {
+    Some(r) =>
+      if run_has_adhoc_install(
+          r,
+          is_bash_like_shell(effective_shell(ctx, step)),
+        ) {
+        add_diag_step_field(
+          out,
+          ctx,
+          "adhoc-packages",
+          Info,
+          "ad-hoc installation of packages: installs a package outside of a lockfile",
+          step,
+          "run",
+        )
+      }
+    None => ()
   }
 }
 
@@ -2291,6 +2369,56 @@ fn check_self_hosted_runner(
           Warning,
           "job `\{job.name}` runs on a self-hosted runner",
           persona=Pedantic,
+        )
+      }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: self-repository (zizmor) — `uses: ./...` should be `uses: $/...`
+// ---------------------------------------------------------------------------
+
+///|
+fn check_self_repository_step(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) =>
+      if u.has_prefix("./") {
+        add_diag_step_field(
+          out,
+          ctx,
+          "self-repository",
+          Info,
+          "uses `\{u}` should use GitHub's `$/...` self-repository syntax instead of `./...`",
+          step,
+          "uses",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+fn check_self_repository_job(
+  ctx : WalkCtx,
+  job : JobInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match job.uses {
+    Some(u) =>
+      if u.has_prefix("./") {
+        add_diag_job_field(
+          out,
+          ctx,
+          "self-repository",
+          Info,
+          "uses `\{u}` should use GitHub's `$/...` self-repository syntax instead of `./...`",
+          job.name,
+          "uses",
         )
       }
     None => ()
@@ -4524,15 +4652,22 @@ fn run_has_pipe_to_shell(r : String) -> Bool {
 
 ///|
 /// Returns the canonical owner/name (lower-cased, no `@ref`, no path
-/// segments) of a tool-installer action that downloads a versioned tool
-/// at runtime. The list below matches zizmor's curated catalogue.
-fn tool_installer_action(uses : String) -> String? {
+/// segments) of a tool-installer action that downloads a versioned tool at
+/// runtime, plus the `with:` input key that carries its version — actions
+/// don't agree on a single field name (`version` vs. `just-version`, …).
+/// The list below matches zizmor's curated catalogue.
+fn tool_installer_action(uses : String) -> (String, String)? {
   let lo = uses.to_lower()
   let bare = bare_repo_of(lo)
-  let known = ["aquasecurity/setup-trivy", "1password/load-secrets-action"]
+  let known : Array[(String, String)] = [
+    ("aquasecurity/setup-trivy", "version"),
+    ("1password/load-secrets-action", "version"),
+    ("extractions/setup-just", "just-version"),
+  ]
   for k in known {
-    if bare == k {
-      return Some(k)
+    let (name, version_key) = k
+    if bare == name {
+      return Some((name, version_key))
     }
   }
   None
@@ -4570,13 +4705,13 @@ fn check_unpinned_tools(
   match step.uses {
     Some(u) =>
       match tool_installer_action(u) {
-        Some(name) => {
+        Some((name, version_key)) => {
           let kind = match step.raw.get("with") {
             Some(Map(w)) =>
-              match w.get("version") {
+              match w.get(version_key) {
                 Some(String(v)) => {
                   let lo = v.to_lower()
-                  if lo == "latest" {
+                  if lo == "latest" || v == "*" {
                     "explicit-latest"
                   } else if v.contains("${{") {
                     "dynamic"
@@ -4591,11 +4726,11 @@ fn check_unpinned_tools(
           }
           let msg = match kind {
             "implicit-latest" =>
-              "`\{name}` defaults to the latest tool version; pin via `with.version`"
+              "`\{name}` defaults to the latest tool version; pin via `with.\{version_key}`"
             "explicit-latest" =>
-              "`\{name}` is invoked with `version: latest`; pin to a specific version"
+              "`\{name}` is invoked with an unpinned `\{version_key}` (`latest`/`*`); pin to a specific version"
             "dynamic" =>
-              "`\{name}` resolves `version` from an expression; pin to a literal version"
+              "`\{name}` resolves `\{version_key}` from an expression; pin to a literal version"
             _ => ""
           }
           if msg.length() > 0 {
@@ -6157,6 +6292,21 @@ fn validate_keys(
 }
 
 ///|
+/// The `on.image_version:` sub-mapping (`{ names: [...], versions: [...] }`),
+/// when `on:` is keyed by a mapping and declares that event. `image_version`
+/// is already a recognized event name (`known_events()`), so
+/// `webhook-events` stays silent on it — its *nested* schema needs its own
+/// validation, since `check_unexpected_keys_doc` /
+/// `check_invalid_mapping_values_doc` otherwise only look at the top-level
+/// workflow map, never descending per-event.
+fn image_version_event_map(ctx : WalkCtx) -> Map[String, @yaml.Yaml]? {
+  guard ctx.workflow_map is Some(m) else { return None }
+  guard m.get("on") is Some(Map(om)) else { return None }
+  guard om.get("image_version") is Some(Map(iv)) else { return None }
+  Some(iv)
+}
+
+///|
 fn check_unexpected_keys_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   match ctx.workflow_map {
     Some(m) => {
@@ -6174,6 +6324,11 @@ fn check_unexpected_keys_doc(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       let location = if is_action { "action" } else { "workflow" }
       validate_keys(m, allowed, location, out)
     }
+    None => ()
+  }
+  match image_version_event_map(ctx) {
+    Some(iv) =>
+      validate_keys(iv, ["names", "versions"], "`on.image_version`", out)
     None => ()
   }
 }
@@ -6611,6 +6766,54 @@ fn check_invalid_mapping_values_doc(
       expect_mapping(m, "jobs", "workflow", out)
     }
     None => ()
+  }
+  match image_version_event_map(ctx) {
+    Some(iv) => check_image_version_arrays(iv, out)
+    None => ()
+  }
+}
+
+///|
+/// `on.image_version.names`/`.versions` must each be a non-empty array of
+/// non-empty strings.
+fn check_image_version_arrays(
+  iv : Map[String, @yaml.Yaml],
+  out : Array[Diagnostic],
+) -> Unit {
+  let keys = ["names", "versions"]
+  for key in keys {
+    match iv.get(key) {
+      Some(Array(arr)) => {
+        if arr.length() == 0 {
+          add_diag(
+            out,
+            "invalid-mapping-values",
+            Error,
+            "`on.image_version.\{key}` must not be empty",
+          )
+        }
+        for item in arr {
+          match item {
+            String("") =>
+              add_diag(
+                out,
+                "invalid-mapping-values",
+                Error,
+                "`on.image_version.\{key}` must not contain an empty string",
+              )
+            _ => ()
+          }
+        }
+      }
+      Some(other) =>
+        add_diag(
+          out,
+          "invalid-mapping-values",
+          Error,
+          "`on.image_version.\{key}` must be an array (got \{type_name(other)})",
+        )
+      None => ()
+    }
   }
 }
 
@@ -7230,6 +7433,39 @@ fn check_forbidden_uses(
 ///   3. omits all `permission-*` inputs (token inherits blanket
 ///      installation permissions).
 /// Each independent issue fires a separate diagnostic on the same step.
+///
+/// `owner` without `repositories` is fine when every requested
+/// `permission-*` input is an org-scoped permission that has no
+/// repository-level meaning in the first place — `repositories:` wouldn't
+/// apply to any of them. Mirrors zizmor's `permissions_are_org_only` /
+/// `ORG_ONLY_PERMISSIONS` (fixed for GitHub issue #2219). An *empty*
+/// permission set does not count as org-only (broader access is assumed),
+/// so the separate "no `permission-*` inputs" finding below still fires.
+fn github_app_permissions_are_org_only(w : Map[String, @yaml.Yaml]) -> Bool {
+  let org_only : Array[String] = [
+    "custom-properties-for-organizations", "enterprise-custom-properties-for-organizations",
+    "members", "organization-administration", "organization-announcement-banners",
+    "organization-copilot-seat-management", "organization-custom-org-roles", "organization-custom-properties",
+    "organization-custom-roles", "organization-events", "organization-hooks", "organization-packages",
+    "organization-personal-access-token-requests", "organization-personal-access-tokens",
+    "organization-plan", "organization-projects", "organization-secrets", "organization-self-hosted-runners",
+    "organization-user-blocking",
+  ]
+  let mut saw_permission = false
+  let mut all_org_only = true
+  w.each(fn(k, _v) {
+    if k.has_prefix("permission-") {
+      saw_permission = true
+      let name = k["permission-".length():].to_owned()
+      if !org_only.contains(name) {
+        all_org_only = false
+      }
+    }
+  })
+  saw_permission && all_org_only
+}
+
+///|
 fn check_github_app(
   ctx : WalkCtx,
   step : StepInfo,
@@ -7267,7 +7503,7 @@ fn check_github_app(
         Some(v) => trim_ws(yaml_scalar_text(v)) != ""
         None => false
       }
-      if has_owner && !has_repos {
+      if has_owner && !has_repos && !github_app_permissions_are_org_only(w) {
         add_diag(
           out,
           "github-app",
@@ -7428,6 +7664,190 @@ fn check_archived_uses_job(
           Warning,
           "uses `\{repo}`: repository is archived",
         )
+      }
+    }
+    None => ()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: typosquat-uses (zizmor) — `uses:` owner resembles a popular action
+// ---------------------------------------------------------------------------
+
+///|
+/// A small, hand-picked corpus of popular `owner/repo` action slugs to check
+/// `uses:` owners against. zizmor bundles a much larger list (via the
+/// `typomania` crate); this is intentionally narrow — just the ecosystem's
+/// most commonly impersonated actions — since a large corpus is a different
+/// maintenance tradeoff than this rule's siblings.
+let popular_actions : Array[(String, String)] = [
+  ("actions", "checkout"),
+  ("actions", "setup-node"),
+  ("actions", "setup-python"),
+  ("actions", "setup-go"),
+  ("actions", "upload-artifact"),
+  ("actions", "download-artifact"),
+  ("actions", "cache"),
+  ("actions", "github-script"),
+  ("docker", "login-action"),
+  ("docker", "build-push-action"),
+  ("docker", "setup-buildx-action"),
+  ("docker", "setup-qemu-action"),
+]
+
+///|
+/// True if swapping exactly one adjacent pair of characters in `a` yields
+/// `b` (same length, every other position identical).
+fn is_adjacent_transposition(a : String, b : String) -> Bool {
+  if a.length() != b.length() {
+    return false
+  }
+  let aa = a.to_array()
+  let bb = b.to_array()
+  let n = aa.length()
+  let mut i = 0
+  let mut first_diff = -1
+  while i < n {
+    if aa[i] != bb[i] {
+      first_diff = i
+      break
+    }
+    i = i + 1
+  }
+  if first_diff < 0 || first_diff + 1 >= n {
+    return false
+  }
+  if aa[first_diff] != bb[first_diff + 1] ||
+    aa[first_diff + 1] != bb[first_diff] {
+    return false
+  }
+  let mut j = first_diff + 2
+  while j < n {
+    if aa[j] != bb[j] {
+      return false
+    }
+    j = j + 1
+  }
+  true
+}
+
+///|
+/// True if `longer` is `shorter` with exactly one extra character inserted
+/// somewhere (i.e. deleting one character from `longer` yields `shorter`).
+fn is_one_char_insertion(shorter : String, longer : String) -> Bool {
+  if longer.length() != shorter.length() + 1 {
+    return false
+  }
+  let sc = shorter.to_array()
+  let lc = longer.to_array()
+  let mut i = 0
+  let mut j = 0
+  let mut skipped = false
+  while i < sc.length() {
+    if sc[i] == lc[j] {
+      i = i + 1
+      j = j + 1
+    } else if !skipped {
+      skipped = true
+      j = j + 1
+    } else {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Split `bare` (an `owner/repo` string with no subpath/`@ref`) into its
+/// owner and repo components at the first `/`.
+fn split_owner_repo(bare : String) -> (String, String)? {
+  let n = bare.length()
+  let mut i = 0
+  let mut slash = -1
+  while i < n {
+    if bare.get_char(i) == Some('/') {
+      slash = i
+      break
+    }
+    i = i + 1
+  }
+  if slash < 0 {
+    None
+  } else {
+    Some((bare[0:slash].to_owned(), bare[slash + 1:].to_owned()))
+  }
+}
+
+///|
+/// How `owner` resembles `popular_owner` (already known to differ), for the
+/// diagnostic message. `None` when the two aren't a near-miss by any of
+/// zizmor's four typosquat patterns (omission / adjacent transposition /
+/// single-character substitution / single repeated character).
+fn typosquat_kind(owner : String, popular_owner : String) -> String? {
+  if owner == popular_owner {
+    return None
+  }
+  if is_adjacent_transposition(owner, popular_owner) {
+    return Some("swaps characters in")
+  }
+  let lo = owner.length()
+  let lp = popular_owner.length()
+  if lo + 1 == lp && is_one_char_insertion(owner, popular_owner) {
+    return Some("omits characters in")
+  }
+  if lo == lp + 1 && is_one_char_insertion(popular_owner, owner) {
+    return Some("repeats characters in")
+  }
+  if lo == lp && edit_distance(owner, popular_owner) == 1 {
+    return Some("uses a common typo for")
+  }
+  None
+}
+
+///|
+fn check_typosquat_uses(
+  ctx : WalkCtx,
+  step : StepInfo,
+  out : Array[Diagnostic],
+) -> Unit {
+  match step.uses {
+    Some(u) => {
+      let bare = bare_repo_of(u)
+      if bare == "" {
+        return
+      }
+      match split_owner_repo(bare) {
+        Some((owner, repo)) => {
+          // GitHub resolves `owner/repo` case-insensitively, so the
+          // comparison must be too — a differently-cased reference to the
+          // real action (`Actions/checkout`) is not a typosquat, and a
+          // differently-cased typosquat (`ACTIONS/CHKOUT`) must still be
+          // caught. The *displayed* message keeps the user's original
+          // casing (`owner`/`repo`, not the lowercased copies).
+          let owner_lo = owner.to_lower()
+          let repo_lo = repo.to_lower()
+          for entry in popular_actions {
+            let (popular_owner, popular_repo) = entry
+            if repo_lo == popular_repo && owner_lo != popular_owner {
+              match typosquat_kind(owner_lo, popular_owner) {
+                Some(kind) => {
+                  add_diag_step_field(
+                    out,
+                    ctx,
+                    "typosquat-uses",
+                    Error,
+                    "\{owner}/\{repo} \{kind} \{popular_owner}/\{popular_repo}",
+                    step,
+                    "uses",
+                  )
+                  break
+                }
+                None => ()
+              }
+            }
+          }
+        }
+        None => ()
       }
     }
     None => ()
@@ -8780,4 +9200,89 @@ fn looks_like_literal(s : String) -> Bool {
     Some(c) if c >= '0' && c <= '9' => true
     _ => false
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rule: unsound-ternary (zizmor)
+// ---------------------------------------------------------------------------
+
+///|
+/// Index of the last occurrence of the 2-character operator `op` (`&&` or
+/// `||`) outside a single-quoted string literal, or -1 if absent.
+fn last_top_level_op_index(s : String, op : String) -> Int {
+  let chars = s.to_array()
+  let opc = op.to_array()
+  let n = chars.length()
+  let mut i = 0
+  let mut in_str = false
+  let mut found = -1
+  while i < n {
+    let c = chars[i]
+    if in_str {
+      if c == '\'' {
+        if i + 1 < n && chars[i + 1] == '\'' {
+          i = i + 2
+          continue
+        } else {
+          in_str = false
+        }
+      }
+      i = i + 1
+      continue
+    }
+    if c == '\'' {
+      in_str = true
+      i = i + 1
+      continue
+    }
+    if i + 1 < n && c == opc[0] && chars[i + 1] == opc[1] {
+      found = i
+      i = i + 2
+      continue
+    }
+    i = i + 1
+  }
+  found
+}
+
+///|
+fn is_falsy_ternary_literal(s : String) -> Bool {
+  s == "''" || s == "\"\"" || s == "false" || s == "null" || s == "0"
+}
+
+///|
+/// `cond && true_value || fallback` is GitHub Actions' idiomatic
+/// pseudo-ternary. It's unsound when `true_value` is itself falsy (`''`,
+/// `false`, `null`, `0`): `cond && ''` is always `''` (falsy), so the `||`
+/// falls through to `fallback` even when `cond` is true, and the intended
+/// true-branch value is unreachable.
+fn check_unsound_ternary(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let seen : Map[String, Bool] = {}
+  walk_strings(ctx.doc, fn(s) {
+    if !s.contains("${{") || !s.contains("&&") || !s.contains("||") {
+      return
+    }
+    for body in extract_expr_bodies(s) {
+      let or_idx = last_top_level_op_index(body, "||")
+      if or_idx < 0 {
+        continue
+      }
+      let left = body[0:or_idx].to_owned()
+      let and_idx = last_top_level_op_index(left, "&&")
+      if and_idx < 0 {
+        continue
+      }
+      let true_value = trim_ws(left[and_idx + 2:].to_owned())
+      let norm = normalize_ws(body)
+      if is_falsy_ternary_literal(true_value) && !seen.contains(norm) {
+        seen[norm] = true
+        add_diag(
+          out,
+          "unsound-ternary",
+          Warning,
+          "pseudo-ternary `\{norm}` has a falsy true-value (`\{true_value}`); the `||` fallback always wins, even when the condition is true",
+        )
+      }
+    }
+  })
 }

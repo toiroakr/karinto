@@ -2805,3 +2805,80 @@ test "concurrency `queue:` key is not flagged (GitHub spec freshness)" {
   })
   inspect(hits.length(), content="0")
 }
+
+///|
+/// `on.image_version` is a recognized event name, but its nested schema
+/// (`names`/`versions`, both required non-empty arrays) needs its own
+/// validation — `check_unexpected_keys_doc`/`check_invalid_mapping_values_doc`
+/// otherwise only look at the top-level workflow map, never descending
+/// per-event. Regression coverage for the two vendored actionlint fixtures
+/// (`err/empty_image_names_and_versions.yaml`,
+/// `err/invalid_image_version_event.yaml`) the upstream-parity check flagged.
+test "unexpected-keys / invalid-mapping-values: on.image_version empty names/versions" {
+  let yaml =
+    #|on:
+    #|  image_version:
+    #|    names: []
+    #|    versions: []
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    (d.rule == "unexpected-keys" || d.rule == "invalid-mapping-values") &&
+    d.message.contains("image_version")
+  })
+  inspect(hits.length(), content="2")
+}
+
+///|
+test "unexpected-keys / invalid-mapping-values: on.image_version wrong type and unknown key" {
+  let yaml =
+    #|on:
+    #|  image_version:
+    #|    names: MyImage
+    #|    versions: [""]
+    #|    entrypoint: run.sh
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    (d.rule == "unexpected-keys" || d.rule == "invalid-mapping-values") &&
+    d.message.contains("image_version")
+  })
+  inspect(hits.length(), content="3")
+}
+
+///|
+test "unexpected-keys / invalid-mapping-values: on.image_version with valid names/versions is silent" {
+  let yaml =
+    #|on:
+    #|  image_version:
+    #|    names: ["my-image"]
+    #|    versions: ["1.0.0"]
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) {
+    (d.rule == "unexpected-keys" || d.rule == "invalid-mapping-values") &&
+    d.message.contains("image_version")
+  })
+  inspect(hits.length(), content="0")
+}

@@ -686,6 +686,90 @@ fn words_are_publish(words : Array[String]) -> Bool {
 }
 
 // ---------------------------------------------------------------------------
+// adhoc-packages: `gem install`/`npm install` (and aliases) fetch a package
+// straight from its registry, bypassing the project's lockfile — the same
+// unpinned-supply-chain risk `unpinned-tools` flags for installer actions,
+// just via a package-manager command instead. Fires on either shell family
+// (like `use-trusted-publishing`, unlike `unpinned-tools`): the install
+// commands here have no shell-specific syntax, so a pwsh runner is just as
+// exposed.
+// ---------------------------------------------------------------------------
+
+///|
+/// The `n`-th word in `words` that isn't a `-`-prefixed flag (0-indexed), or
+/// `None` if there are fewer than `n + 1` such words.
+fn nth_non_flag_word(words : ArrayView[String], n : Int) -> String? {
+  let mut count = 0
+  for w in words {
+    if !w.has_prefix("-") {
+      if count == n {
+        return Some(w.to_lower())
+      }
+      count = count + 1
+    }
+  }
+  None
+}
+
+///|
+/// `gem install`/`gem i` or `npm`/`pnpm`/`yarn`'s `install`/`i`/`add`, each
+/// followed by at least one non-flag argument (the package name) — a bare
+/// `gem install --help` or `npm install` (no args) is lockfile/help usage,
+/// not an ad-hoc install, and isn't flagged (matches zizmor).
+fn words_are_adhoc_install(words : Array[String]) -> Bool {
+  if words.length() == 0 {
+    return false
+  }
+  let head = words[0].to_lower()
+  let rest = words[1:]
+  let subcommand = nth_non_flag_word(rest, 0)
+  let has_package = nth_non_flag_word(rest, 1) is Some(_)
+  if head == "gem" {
+    return (subcommand == Some("install") || subcommand == Some("i")) &&
+      has_package
+  }
+  if head == "npm" || head == "pnpm" || head == "yarn" {
+    return (
+        subcommand == Some("install") ||
+        subcommand == Some("i") ||
+        subcommand == Some("add")
+      ) &&
+      has_package
+  }
+  false
+}
+
+///|
+fn command_is_adhoc_install(cmd : ShellNode) -> Bool {
+  words_are_adhoc_install(command_words(cmd))
+}
+
+///|
+/// Tree-sitter-bash based detection, mirroring `analyze_trusted_publishing`.
+fn analyze_adhoc_packages(root : ShellNode) -> Bool {
+  for cmd in shell_node_find_all(root, "command") {
+    if command_is_adhoc_install(cmd) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Non-bash fallback, mirroring `text_has_publish_cmd`.
+fn text_has_adhoc_install(run : String) -> Bool {
+  for v in collapse_shell_continuations(run).split("\n") {
+    let line = v.to_owned()
+    for segment in split_command_segments(line) {
+      if words_are_adhoc_install(naive_tokenize(segment)) {
+        return true
+      }
+    }
+  }
+  false
+}
+
+// ---------------------------------------------------------------------------
 // shell-quote-safety (karinto-original, #113): unquoted expansion of an
 // env var whose value derives from `${{ … }}` — the injection-amplification
 // neighbour of `template-injection`. A workflow author who writes
