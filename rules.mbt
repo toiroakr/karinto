@@ -7817,11 +7817,19 @@ fn check_typosquat_uses(
         return
       }
       match split_owner_repo(bare) {
-        Some((owner, repo)) =>
+        Some((owner, repo)) => {
+          // GitHub resolves `owner/repo` case-insensitively, so the
+          // comparison must be too — a differently-cased reference to the
+          // real action (`Actions/checkout`) is not a typosquat, and a
+          // differently-cased typosquat (`ACTIONS/CHKOUT`) must still be
+          // caught. The *displayed* message keeps the user's original
+          // casing (`owner`/`repo`, not the lowercased copies).
+          let owner_lo = owner.to_lower()
+          let repo_lo = repo.to_lower()
           for entry in popular_actions {
             let (popular_owner, popular_repo) = entry
-            if repo == popular_repo && owner != popular_owner {
-              match typosquat_kind(owner, popular_owner) {
+            if repo_lo == popular_repo && owner_lo != popular_owner {
+              match typosquat_kind(owner_lo, popular_owner) {
                 Some(kind) => {
                   add_diag_step_field(
                     out,
@@ -7838,6 +7846,7 @@ fn check_typosquat_uses(
               }
             }
           }
+        }
         None => ()
       }
     }

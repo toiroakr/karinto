@@ -2465,6 +2465,40 @@ test "typosquat-uses: same owner as the popular action is never flagged" {
 }
 
 ///|
+/// GitHub resolves `owner/repo` case-insensitively — a differently-cased
+/// reference to the real action is not a typosquat.
+test "typosquat-uses: comparison is case-insensitive, so differently-cased real action is not flagged" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: Actions/Checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+/// A real typosquat with a differently-cased owner must still be caught.
+test "typosquat-uses: a typosquat is still caught regardless of case" {
+  let yaml =
+    #|on: push
+    #|permissions: {}
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - uses: CATIONS/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+  inspect(hits.length(), content="1")
+  assert_true(hits[0].message.contains("CATIONS/checkout"))
+}
+
+///|
 test "unsound-ternary: pseudo-ternary with a falsy true-value" {
   let yaml =
     #|on: push
