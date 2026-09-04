@@ -172,6 +172,6 @@ jobs:
       - name: Check package-lock.json is in sync with package.json
         run: |
           if ! git diff --exit-code package-lock.json; then
-            echo "::error::package-lock.json is out of sync with package.json (see diff above). Run 'npm install --package-lock-only' and commit the result."
+            echo "::error::package-lock.json is out of sync with package.json (see diff above). Run 'npm install --package-lock-only --ignore-scripts' and commit the result."
             exit 1
           fi
