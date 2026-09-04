@@ -14,12 +14,19 @@ name: lint
 #     rule contract is written against the diff shapes in scripts/lib, and both
 #     replay.mjs and rebaseline-captures.mjs read them — a regression there
 #     changes which rules are considered to match, which fails silently.
+#   * package-lock.json staying in sync with package.json (`lockfile-drift`
+#     job). `version-packages` (the changesets release script) regenerates the
+#     lockfile itself, but a manual edit to package.json outside that script
+#     can leave it stale with no other check catching it — `npm ci` accepts a
+#     lockfile whose recorded top-level name/version disagrees with
+#     package.json, it only enforces the dependency graph.
 #
 # `lint` is a required status check, so the workflow must report a check run
 # on every PR — a trigger-level `paths:` filter would leave non-matching PRs
 # without a check run and permanently unmergeable. Instead the `changes` job
 # detects relevant paths and `lint` skips (= passes the requirement) when
-# nothing relevant changed.
+# nothing relevant changed. `lockfile-drift` is not a required check, so it
+# uses the same `changes` job but its own path filter instead.
 on:
   pull_request:
   push:
@@ -36,6 +43,8 @@ on:
       # must trigger them too. Naming files one by one is how a shared module
       # ends up silently unchecked.
       - scripts/lib/**
+      - package.json
+      - package-lock.json
 
 # Default to no privileges; each job opts into exactly what it needs.
 permissions: {}
@@ -49,6 +58,7 @@ jobs:
       pull-requests: read
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      lockfile: ${{ steps.filter.outputs.lockfile }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -64,6 +74,9 @@ jobs:
               # Keep in step with the trigger `paths:` above — see the comment
               # there for why this is a glob.
               - 'scripts/lib/**'
+            lockfile:
+              - 'package.json'
+              - 'package-lock.json'
 
   lint:
     needs: changes
@@ -126,3 +139,43 @@ jobs:
       # added later is picked up without editing this line.
       - name: diff-logic tests
         run: node --test "scripts/**/*.test.mjs"
+
+  lockfile-drift:
+    needs: changes
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name != 'pull_request'
+          || needs.changes.outputs.lockfile != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No package manager cache: --package-lock-only never touches
+      # node_modules, so there's no install to speed up, and any cache key
+      # would be computed from the pre-regeneration lockfile — the file this
+      # job exists to rewrite.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      # --package-lock-only skips node_modules entirely, so this only ever
+      # rewrites package-lock.json's own recorded fields (root name/version,
+      # dependency graph) to match package.json — it can't be fooled by a
+      # stale node_modules the way `npm ci` diffing afterwards could be.
+      # --ignore-scripts: --package-lock-only alone does not skip lifecycle
+      # scripts (preinstall/postinstall still run on npm 7+), which would let
+      # a PR's own package.json execute arbitrary code during this check.
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Check package-lock.json is in sync with package.json
+        run: |
+          if ! git diff --exit-code package-lock.json; then
+            echo "::error::package-lock.json is out of sync with package.json (see diff above). Run 'npm install --package-lock-only --ignore-scripts' and commit the result."
+            exit 1
+          fi
