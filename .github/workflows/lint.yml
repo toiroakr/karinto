@@ -164,7 +164,10 @@ jobs:
       # rewrites package-lock.json's own recorded fields (root name/version,
       # dependency graph) to match package.json — it can't be fooled by a
       # stale node_modules the way `npm ci` diffing afterwards could be.
-      - run: npm install --package-lock-only
+      # --ignore-scripts: --package-lock-only alone does not skip lifecycle
+      # scripts (preinstall/postinstall still run on npm 7+), which would let
+      # a PR's own package.json execute arbitrary code during this check.
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Check package-lock.json is in sync with package.json
         run: |
