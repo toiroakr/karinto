@@ -1,5 +1,34 @@
 # karinto
 
+## 0.10.0
+
+### Minor Changes
+
+- [#135](https://github.com/toiroakr/karinto/pull/135) [`45216f4`](https://github.com/toiroakr/karinto/commit/45216f41c5c3ef268b77778d438beae3a0234d46) Thanks [@github-actions](https://github.com/apps/github-actions)! - Fix the `upstream-parity` check's rule-catalog mapping (it silently matched zero entries — see below) and close out every real divergence it then revealed against zizmor 1.30.0 / actionlint 1.7.12.
+  
+  **New rules** (zizmor parity):
+  - **`self-repository`**: flags a `uses:` value that starts with `./` — both a step-level local-action reference and a job-level reusable-workflow call — recommending GitHub's dedicated `$/...` self-repository syntax instead. `../`-prefixed paths are not covered, matching upstream zizmor.
+  - **`typosquat-uses`**: flags a `uses:` `owner/repo` whose repo name matches a bundled popular-action entry (`actions/*`, `docker/*`) exactly but whose owner is a one-character-omission/repetition/transposition/typo away from the real owner.
+  - **`unsound-ternary`**: flags a `${{ cond && true_value || fallback }}` pseudo-ternary whose `true_value` is itself falsy (`''`, `""`, `false`, `null`, `0`) — `cond && ''` is always `''`, so the `||` fallback wins even when `cond` is true.
+  - **`adhoc-packages`**: flags `gem install`/`npm install` (and their `gem i` / `npm i` / `npm add` / `yarn add` / `pnpm add` aliases) with a package-name argument, which bypass the project's lockfile. Fires on bash and pwsh `run:` steps alike.
+  
+  **Bug fixes**:
+  - **`github-app`**: `owner` set without `repositories` is no longer flagged when every requested `permission-*` is an org-scoped permission with no repository-level meaning (mirrors zizmor's fix for GitHub issue [#2219](https://github.com/toiroakr/karinto/issues/2219)).
+  - **`artipacked`**: a step whose `with:` is itself a computed expression (`with: ${{ fromJson(...) }}`) is no longer flagged — confirmed against zizmor v1.30.0 that this case is no longer an audit finding upstream.
+  - **`unpinned-tools`**: now also covers `extractions/setup-just` (its `with.just-version`, including the `"*"` wildcard, not just `with.version`).
+  - **`unexpected-keys` / `invalid-mapping-values`**: now validate `on.image_version`'s nested schema (`names`/`versions` must each be a non-empty array of non-empty strings; no other keys allowed) — previously only the top-level workflow map was checked, never descending into a per-event config.
+  - **`insecure-url-scheme`**: catalogued as `NotPlanned` — this zizmor audit targets `.pre-commit-config.yaml`, a document schema karinto has no parser for.
+  
+  **Upstream-parity harness fixes** (no user-facing rule change, but why the above surfaced now): `scripts/upstream-parity/lib/mapping.mjs`'s `rules_catalog.mbt` parser was reading `status` from the wrong positional argument (`applies_to_workflow` instead, ever since those two trailing booleans were added to `spec(...)`) — the catalog mapping was silently empty, so every upstream-fired rule read back as `unmapped`. `scripts/upstream-parity/compare.mjs` also treated `unmapped` as a soft, non-blocking divergence, so this stayed invisible; it's now hard, since the only correct resolution is to register the rule (`Implemented`/`Planned`/`NotPlanned`). Separately, `scripts/upstream-parity/lib/run-karinto.mjs` never awaited `shell-ts-adapter`'s `ensureInitNode()`, so every tree-sitter-bash-based rule (`github-env`, `use-trusted-publishing`, `unpinned-tools`'s pipe-to-shell detection, …) silently produced zero findings under the parity check the entire time.
+
+### Patch Changes
+
+- [#118](https://github.com/toiroakr/karinto/pull/118) [`88fe286`](https://github.com/toiroakr/karinto/commit/88fe286bd531b33a43c0c09aac2abd8462df3bf3) Thanks [@toiroakr](https://github.com/toiroakr)! - Honours `.github/actionlint.yaml`'s `paths.<glob>.ignore` ([#50](https://github.com/toiroakr/karinto/issues/50)), wired through the CLI's `--actionlint-config` and the Worker's `actionlint` parameter (64 KiB cap, same as `ghalint`/`zizmor`/`config`).
+  
+  actionlint suppresses findings by running each `ignore` regex against *its own* diagnostic message text — a mechanism karinto can't replay verbatim, since karinto's messages don't share actionlint's wording. Instead, each pattern is compiled and executed (via the new `moonbitlang/regexp` dependency) against a curated table of actionlint's own canonical message text, transcribed from its vendored test fixtures, to identify which actionlint check it targets; that check's karinto rule(s) — resolved via the catalogue's `origins`, the same way ghalint's `policy_name` already is — are suppressed under the matching `<glob>` (`path_glob_match`, the same `/`-segment-aware matcher `ignore-paths` uses).
+  
+  This is rule-grained, not message-grained: unlike real actionlint, a pattern that in principle only ignores one specific dynamic value (e.g. one runner label) suppresses every finding of the matching rule under the glob instead. A pattern that fails to compile, or matches none of the curated checks, is a silent no-op — the same best-effort posture as `ghalint_config` / `zizmor_config`. For exact, guaranteed control, karinto's own `ignore-paths` (added alongside `karinto.yaml` in a previous release) remains the precise alternative.
+
 ## 0.9.6
 
 ### Patch Changes

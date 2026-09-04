@@ -1,6 +1,6 @@
 {
   "name": "karinto",
-  "version": "0.9.6",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Tooling host for karinto release automation (changesets). The runtime lives under cf/ and the MoonBit library at the repo root.",
@@ -15,7 +15,7 @@
   "scripts": {
     "changeset": "changeset",
     "sync-version": "node scripts/sync-moon-version.mjs",
-    "version-packages": "changeset version && npm run sync-version && moon info",
+    "version-packages": "changeset version && npm run sync-version && npm install --package-lock-only && moon info",
     "postinstall": "patch-package",
     "test:shell-rules": "moon build --target js --release && node scripts/test-shell-rules.mjs"
   },
