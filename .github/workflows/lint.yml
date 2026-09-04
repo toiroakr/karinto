@@ -155,10 +155,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # No package manager cache: --package-lock-only never touches
+      # node_modules, so there's no install to speed up, and any cache key
+      # would be computed from the pre-regeneration lockfile — the file this
+      # job exists to rewrite.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-          cache: npm
+          package-manager-cache: false
 
       # --package-lock-only skips node_modules entirely, so this only ever
       # rewrites package-lock.json's own recorded fields (root name/version,
