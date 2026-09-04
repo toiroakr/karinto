@@ -38,6 +38,8 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
+      - run: moon update
+
       - name: Create Release PR or publish
         id: changesets
         uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
