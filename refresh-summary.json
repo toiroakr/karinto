@@ -4,12 +4,12 @@
     {
       "name": "zizmor",
       "repo": "zizmorcore/zizmor",
-      "from": "1.29.0",
-      "to": "1.30.0",
-      "tag": "v1.30.0",
-      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.30.0",
-      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.29.0...v1.30.0",
-      "notes": "[Sponsorship is appreciated!](https://github.com/sponsors/woodruffw/)\r\n\r\n## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-features)\r\n\r\n- New audit: [self-repository](https://docs.zizmor.sh/audits/#self-repository) detects usages of the old \"workspace-relative\" form for local reusable workflows and actions and recommends the new \"self-repository\" form instead ([#2271](https://github.com/zizmorcore/zizmor/issues/2271))\r\nEnhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)\r\n\r\n- The [impostor-commit](https://docs.zizmor.sh/audits/#impostor-commit) audit now supports pre-commit config inputs ([#2256](https://github.com/zizmorcore/zizmor/issues/2256))\r\n\r\n- The [forbidden-uses](https://docs.zizmor.sh/audits/#forbidden-uses) audit now supports pre-commit config inputs ([#2263](https://github.com/zizmorcore/zizmor/issues/2263))\r\n\r\n- The [adhoc-packages](https://docs.zizmor.sh/audits/#adhoc-packages) audit now detects more ad-hoc package management patterns, including bundle add and yarn add\r\n\r\n    Many thanks to [@connorshea](https://github.com/connorshea) for proposing and implementing this enhancement!\r\n\r\n- The [archived-uses](https://docs.zizmor.sh/audits/#archived-uses) audit now supports pre-commit config inputs ([#2272](https://github.com/zizmorcore/zizmor/issues/2272))\r\n\r\n- The [ref-confusion](https://docs.zizmor.sh/audits/#ref-confusion) audit now supports pre-commit config inputs ([#2274](https://github.com/zizmorcore/zizmor/issues/2274))\n\n…(truncated — see release link)"
+      "from": "1.30.0",
+      "to": "1.30.1",
+      "tag": "v1.30.1",
+      "url": "https://github.com/zizmorcore/zizmor/releases/tag/v1.30.1",
+      "compareUrl": "https://github.com/zizmorcore/zizmor/compare/v1.30.0...v1.30.1",
+      "notes": "[Sponsorship is appreciated!](https://github.com/sponsors/woodruffw/)\r\n\r\n## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)\r\n\r\n- Fixed a bug where zizmor would crash on pre-commit inputs that reference a GitHub URL with an explicit .git suffix ([#2363](https://github.com/zizmorcore/zizmor/issues/2363))\r\n\r\n- Fixed a bug where [self-repository](https://docs.zizmor.sh/audits/#self-repository) auto-fixes were incorrectly marked as \"safe\" instead of \"unsafe\" ([#2373](https://github.com/zizmorcore/zizmor/issues/2373))"
     }
   ]
 }
