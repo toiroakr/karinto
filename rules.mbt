@@ -6236,6 +6236,7 @@ fn check_permissions_syntax_job(
 fn workflow_top_keys() -> Array[String] {
   [
     "name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs",
+    "cache-mode",
   ]
 }
 
@@ -6249,7 +6250,7 @@ fn job_keys() -> Array[String] {
   [
     "name", "needs", "if", "runs-on", "environment", "concurrency", "outputs", "env",
     "defaults", "steps", "strategy", "container", "services", "secrets", "uses",
-    "with", "permissions", "continue-on-error", "timeout-minutes", "snapshot",
+    "with", "permissions", "continue-on-error", "timeout-minutes", "snapshot", "cache-mode",
   ]
 }
 
@@ -6753,6 +6754,41 @@ fn expect_if(
 }
 
 ///|
+/// `cache-mode` (workflow top level or per-job) accepts exactly one of
+/// `read`/`write`/`write-only`/`none` — see
+/// https://docs.github.com/actions/reference/workflows-and-actions/workflow-syntax#cache-mode.
+/// Unlike `if`/`continue-on-error` this key has no documented `${{ }}`
+/// expression form (confirmed against every mention of `cache-mode` across
+/// github/docs), so (like `permissions`) any other string is an error.
+fn expect_cache_mode(
+  m : Map[String, @yaml.Yaml],
+  location : String,
+  out : Array[Diagnostic],
+) -> Unit {
+  match m.get("cache-mode") {
+    Some(String("read")) => ()
+    Some(String("write")) => ()
+    Some(String("write-only")) => ()
+    Some(String("none")) => ()
+    Some(String(s)) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got `\{s}`)",
+      )
+    Some(other) =>
+      add_diag(
+        out,
+        "invalid-mapping-values",
+        Error,
+        "\{location}: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got \{type_name(other)})",
+      )
+    None => ()
+  }
+}
+
+///|
 fn check_invalid_mapping_values_doc(
   ctx : WalkCtx,
   out : Array[Diagnostic],
@@ -6764,6 +6800,20 @@ fn check_invalid_mapping_values_doc(
       expect_mapping_or_string(m, "concurrency", "workflow", out)
       expect_permissions(m, "workflow", out)
       expect_mapping(m, "jobs", "workflow", out)
+      // `ctx.workflow_map` is populated for any top-level YAML mapping,
+      // action.yml included — `cache-mode` is workflow/job-only (not an
+      // action.yml key at all), so an unrelated top-level `cache-mode:` on
+      // an action.yml would otherwise get a second, misleadingly
+      // "workflow"-labelled diagnostic on top of the unknown-key one
+      // check_unexpected_keys_doc already emits for it.
+      let is_action = match ctx.kind {
+        Action => true
+        Workflow => false
+        _ => m.contains("runs")
+      }
+      if !is_action {
+        expect_cache_mode(m, "workflow", out)
+      }
     }
     None => ()
   }
@@ -6819,7 +6869,7 @@ fn check_image_version_arrays(
 
 ///|
 fn check_invalid_mapping_values_job(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
@@ -6836,6 +6886,13 @@ fn check_invalid_mapping_values_job(
   expect_bool_or_string_bool(m, "continue-on-error", loc, out)
   expect_string(m, "uses", loc, out)
   expect_if(m, loc, out)
+  // `prewalk` collects `jobs:` regardless of file kind, so a malformed
+  // action.yml with a stray top-level `jobs:` mapping (itself already
+  // flagged elsewhere as an unknown key) would otherwise still run this
+  // workflow-only check against whatever `cache-mode:` sits inside it.
+  if ctx.kind != Action {
+    expect_cache_mode(m, loc, out)
+  }
 }
 
 ///|

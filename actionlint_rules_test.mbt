@@ -166,6 +166,54 @@ test "unexpected-keys: `snapshot` job key and async step keys are known (GitHub 
 }
 
 ///|
+test "unexpected-keys: `cache-mode` is known at workflow and job level (GitHub spec freshness)" {
+  // `cache-mode` (Actions cache access control: read/write/write-only/none)
+  // is a current GitHub Actions workflow-syntax key, valid both at the
+  // workflow top level and per-job, that actionlint v1.7.12 (frozen
+  // 2026-04-19) never learned.
+  let yaml =
+    #|on: push
+    #|cache-mode: read
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: write
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 11 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 4, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
 test "missing-required-keys: workflow missing `on`" {
   let yaml =
     #|jobs:
@@ -286,6 +334,189 @@ test "invalid-mapping-values: runs-on must be string or array" {
       },
     ],
   })
+}
+
+///|
+test "invalid-mapping-values: `cache-mode` must be one of read/write/write-only/none (GitHub spec freshness)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: typo
+    #|    steps:
+    #|      - run: echo hi
+  json_inspect(lint_json(yaml), content={
+    "kind": "workflow",
+    "stats": { "jobs": 1, "steps": 1, "lines": 10 },
+    "diagnostics": [
+      {
+        "rule": "excessive-permissions",
+        "severity": "warning",
+        "message": "default permissions used due to no permissions: block",
+      },
+      {
+        "rule": "concurrency-limits",
+        "severity": "info",
+        "message": "workflow has no `concurrency:` block",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "workflow has no `name:`",
+      },
+      {
+        "rule": "anonymous-definition",
+        "severity": "info",
+        "message": "job `build` has no `name:`",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+      {
+        "rule": "invalid-mapping-values",
+        "severity": "error",
+        "message": "job `build`: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got `typo`)",
+        "pos": { "line": 3, "col": 3 },
+        "job": "build",
+      },
+    ],
+  })
+}
+
+///|
+test "invalid-mapping-values: workflow-level `cache-mode` value is validated too" {
+  let yaml =
+    #|on: push
+    #|cache-mode: typo
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="workflow: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got `typo`)",
+  )
+}
+
+///|
+test "invalid-mapping-values: `cache-mode: write`/`read` at workflow and job level is silent" {
+  let yaml =
+    #|on: push
+    #|cache-mode: write
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: read
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "invalid-mapping-values: `cache-mode: write-only`/`none` at workflow and job level is silent" {
+  let yaml =
+    #|on: push
+    #|cache-mode: write-only
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: none
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "invalid-mapping-values: a non-string `cache-mode` is rejected by type, not just by enum" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: 5
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="job `build`: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got number)",
+  )
+}
+
+///|
+test "invalid-mapping-values: `cache-mode` is not checked on action.yml (not an action key)" {
+  // `cache-mode` doesn't exist on action.yml at all, so an unrelated
+  // top-level `cache-mode: typo` should only ever produce the expected
+  // `unexpected-keys` finding — not also a misleadingly "workflow"-labelled
+  // invalid-mapping-values one, since ctx.workflow_map is populated for any
+  // top-level YAML mapping (action.yml included), not just workflows.
+  let yaml =
+    #|name: example
+    #|description: example
+    #|cache-mode: typo
+    #|runs:
+    #|  using: node20
+    #|  main: index.js
+  let res = @karinto.lint(yaml, kind=Action)
+  inspect(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "invalid-mapping-values" })
+    .length(),
+    content="0",
+  )
+  let unexpected = res.diagnostics.filter(fn(d) { d.rule == "unexpected-keys" })
+  inspect(unexpected.length(), content="1")
+  inspect(unexpected[0].message, content="action: unknown key `cache-mode`")
+}
+
+///|
+test "invalid-mapping-values: job-level `cache-mode` inside a stray action.yml `jobs:` block is not checked either" {
+  // action.yml has no `jobs:` concept at all — `prewalk` still collects any
+  // top-level `jobs:` mapping regardless of file kind, so without the
+  // ctx.kind guard in check_invalid_mapping_values_job, a job-scoped
+  // `cache-mode:` nested inside this already-invalid structure would get a
+  // spurious job-level invalid-mapping-values finding too.
+  let yaml =
+    #|name: example
+    #|description: example
+    #|runs:
+    #|  using: node20
+    #|  main: index.js
+    #|jobs:
+    #|  build:
+    #|    cache-mode: typo
+  let res = @karinto.lint(yaml, kind=Action)
+  inspect(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "invalid-mapping-values" })
+    .length(),
+    content="0",
+  )
 }
 
 ///|
