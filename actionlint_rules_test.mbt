@@ -409,7 +409,7 @@ test "invalid-mapping-values: workflow-level `cache-mode` value is validated too
 }
 
 ///|
-test "invalid-mapping-values: `cache-mode: write` at workflow and job level is silent" {
+test "invalid-mapping-values: `cache-mode: write`/`read` at workflow and job level is silent" {
   let yaml =
     #|on: push
     #|cache-mode: write
@@ -425,6 +425,47 @@ test "invalid-mapping-values: `cache-mode: write` at workflow and job level is s
   let res = @karinto.lint(yaml)
   let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
   inspect(hits.length(), content="0")
+}
+
+///|
+test "invalid-mapping-values: `cache-mode: write-only`/`none` at workflow and job level is silent" {
+  let yaml =
+    #|on: push
+    #|cache-mode: write-only
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: none
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "invalid-mapping-values: a non-string `cache-mode` is rejected by type, not just by enum" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  build:
+    #|    runs-on: ubuntu-latest
+    #|    timeout-minutes: 5
+    #|    permissions:
+    #|      contents: read
+    #|    cache-mode: 5
+    #|    steps:
+    #|      - run: echo hi
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "invalid-mapping-values" })
+  inspect(hits.length(), content="1")
+  inspect(
+    hits[0].message,
+    content="job `build`: `cache-mode` must be one of `read`/`write`/`write-only`/`none` (got number)",
+  )
 }
 
 ///|
@@ -451,6 +492,31 @@ test "invalid-mapping-values: `cache-mode` is not checked on action.yml (not an 
   let unexpected = res.diagnostics.filter(fn(d) { d.rule == "unexpected-keys" })
   inspect(unexpected.length(), content="1")
   inspect(unexpected[0].message, content="action: unknown key `cache-mode`")
+}
+
+///|
+test "invalid-mapping-values: job-level `cache-mode` inside a stray action.yml `jobs:` block is not checked either" {
+  // action.yml has no `jobs:` concept at all — `prewalk` still collects any
+  // top-level `jobs:` mapping regardless of file kind, so without the
+  // ctx.kind guard in check_invalid_mapping_values_job, a job-scoped
+  // `cache-mode:` nested inside this already-invalid structure would get a
+  // spurious job-level invalid-mapping-values finding too.
+  let yaml =
+    #|name: example
+    #|description: example
+    #|runs:
+    #|  using: node20
+    #|  main: index.js
+    #|jobs:
+    #|  build:
+    #|    cache-mode: typo
+  let res = @karinto.lint(yaml, kind=Action)
+  inspect(
+    res.diagnostics
+    .filter(fn(d) { d.rule == "invalid-mapping-values" })
+    .length(),
+    content="0",
+  )
 }
 
 ///|

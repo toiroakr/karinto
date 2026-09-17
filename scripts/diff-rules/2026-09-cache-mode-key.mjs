@@ -33,5 +33,21 @@ export function matches(_capture, _replayed, diff) {
     if (!(d.onlyInCaptured ?? []).every(isNewlySilent)) return false;
     if (!(d.onlyInReplayed ?? []).every(isNewlyFlagged)) return false;
   }
+  // A newly-appearing invalid-value finding only makes sense as this fix's
+  // doing if it's actually replacing a removed unexpected-keys(cache-mode)
+  // finding — otherwise (e.g. a capture with unexpected-keys disabled via
+  // `disabled=["unexpected-keys"]` or an inline ignore) the per-side
+  // `.every(...)` checks above would pass vacuously on an empty
+  // `onlyInCaptured` and this rule would mask a genuinely new, unrelated
+  // invalid-mapping-values regression.
+  const anyFlagged = diff.some(
+    (d) => d.kind === "diagnostics" && (d.onlyInReplayed ?? []).some(isNewlyFlagged),
+  );
+  if (anyFlagged) {
+    const anySilent = diff.some(
+      (d) => d.kind === "diagnostics" && (d.onlyInCaptured ?? []).some(isNewlySilent),
+    );
+    if (!anySilent) return false;
+  }
   return true;
 }

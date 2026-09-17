@@ -6869,7 +6869,7 @@ fn check_image_version_arrays(
 
 ///|
 fn check_invalid_mapping_values_job(
-  _ctx : WalkCtx,
+  ctx : WalkCtx,
   job : JobInfo,
   out : Array[Diagnostic],
 ) -> Unit {
@@ -6886,7 +6886,13 @@ fn check_invalid_mapping_values_job(
   expect_bool_or_string_bool(m, "continue-on-error", loc, out)
   expect_string(m, "uses", loc, out)
   expect_if(m, loc, out)
-  expect_cache_mode(m, loc, out)
+  // `prewalk` collects `jobs:` regardless of file kind, so a malformed
+  // action.yml with a stray top-level `jobs:` mapping (itself already
+  // flagged elsewhere as an unknown key) would otherwise still run this
+  // workflow-only check against whatever `cache-mode:` sits inside it.
+  if ctx.kind != Action {
+    expect_cache_mode(m, loc, out)
+  }
 }
 
 ///|
