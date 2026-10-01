@@ -2961,19 +2961,20 @@ fn check_dependabot_duplicate_directories(
   }
   groups.each(fn(_, group) {
     let (label, dirs) = group
-    let seen : Array[String] = []
-    let reported : Array[String] = []
+    let reported : Map[String, Bool] = Map::new()
     for d in dirs {
-      if !seen.contains(d) {
-        seen.push(d)
-      } else if !reported.contains(d) {
-        reported.push(d)
-        add_diag(
-          out,
-          "dependabot-duplicate-directories",
-          Error,
-          "directory `\{d}` is declared more than once for \{label}",
-        )
+      match reported.get(d) {
+        None => reported.set(d, false)
+        Some(true) => ()
+        Some(false) => {
+          reported.set(d, true)
+          add_diag(
+            out,
+            "dependabot-duplicate-directories",
+            Error,
+            "directory `\{d}` is declared more than once for \{label}",
+          )
+        }
       }
     }
   })
