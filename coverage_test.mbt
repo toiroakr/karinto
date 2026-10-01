@@ -46,6 +46,8 @@ fn tested_rule_ids() -> Array[String] {
     "checkout-persist-credentials-false",
     // karinto-original family (#113) — fixtures live in shell_rules_wbtest.mbt
      "shell-quote-safety", "shell-undefined-var",
+    // Dependabot family — fixtures live in dependabot_rules_test.mbt
+     "dependabot-version", "dependabot-update-fields", "dependabot-duplicate-directories",
   ]
 }
 

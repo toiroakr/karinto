@@ -12,6 +12,8 @@ distributed under the MIT License; their license texts are reproduced below.
 | actionlint | <https://github.com/rhysd/actionlint> | MIT | Rule taxonomy inspiration |
 | zizmor | <https://github.com/zizmorcore/zizmor> | MIT | Rule taxonomy inspiration |
 | ghalint | <https://github.com/suzuki-shunsuke/ghalint> | MIT | Rule taxonomy inspiration |
+| SchemaStore `dependabot-2.0.json` | <https://github.com/SchemaStore/schemastore> | Apache-2.0 | Required fields of the Dependabot v2 schema used as the specification for the `dependabot-*` schema rules (no code ported) |
+| @bugron/validate-dependabot-yaml | <https://github.com/bugron/validate-dependabot-cli> | MIT | Directory-uniqueness check used as the specification for `dependabot-duplicate-directories` (no code ported) |
 | eemeli/yaml | <https://github.com/eemeli/yaml> | ISC | Parser design ported into the in-tree `yamlpos` package |
 | tree-sitter / web-tree-sitter | <https://github.com/tree-sitter/tree-sitter> | MIT | `run:` shell parsing (#113), bundled as a Worker runtime dependency |
 | tree-sitter-bash | <https://github.com/tree-sitter/tree-sitter-bash> | MIT | Bash grammar for the shell-script rules (#113), bundled as a Worker runtime dependency |
