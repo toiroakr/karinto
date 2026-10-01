@@ -2732,6 +2732,7 @@ fn check_dependabot_version(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
         "`version:` is required and must be `2`",
       )
     Some(Integer(2L)) => ()
+    Some(Real(d, repr=_)) if d == 2.0 => ()
     // The schema types `version` as an integer, so a quoted `"2"` is invalid.
     Some(String(s)) =>
       add_diag(
@@ -2753,16 +2754,37 @@ fn check_dependabot_version(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 }
 
 ///|
+/// `null`, mappings and sequences all read as `""`, so callers treat them the
+/// same as an absent key.
+fn dependabot_value_text(m : Map[String, @yaml.Yaml], key : String) -> String {
+  match m.get(key) {
+    Some(v) => yaml_scalar_text(v)
+    None => ""
+  }
+}
+
+///|
 fn check_dependabot_update_fields(
   ctx : WalkCtx,
   out : Array[Diagnostic],
 ) -> Unit {
   let rule = "dependabot-update-fields"
+  let updates = match ctx.workflow_map {
+    Some(m) => m.get("updates")
+    None => None
+  }
+  match updates {
+    Some(Array(arr)) =>
+      for u in arr {
+        if !(u is Map(_)) {
+          add_diag(out, rule, Error, "update entry must be a mapping")
+        }
+      }
+    _ =>
+      add_diag(out, rule, Error, "`updates:` is required and must be a list")
+  }
   for um in ctx.updates {
-    let ecosystem = match um.get("package-ecosystem") {
-      Some(v) => yaml_scalar_text(v)
-      None => ""
-    }
+    let ecosystem = dependabot_value_text(um, "package-ecosystem")
     if ecosystem == "" {
       add_diag(
         out,
@@ -2787,7 +2809,7 @@ fn check_dependabot_update_fields(
             "\{subject} is missing required `schedule`",
           )
         }
-      Some(Map(s)) if s.contains("interval") => ()
+      Some(Map(s)) if dependabot_value_text(s, "interval") != "" => ()
       Some(_) =>
         add_diag(
           out,
@@ -2796,19 +2818,19 @@ fn check_dependabot_update_fields(
           "\{subject}'s `schedule` is missing required `interval`",
         )
     }
+    let declares_directory = dependabot_value_text(um, "directory") != ""
     let declares_directories = match um.get("directories") {
       Some(Array(a)) => !a.is_empty()
-      Some(_) => true
-      None => false
+      _ => false
     }
-    if um.contains("directory") && um.contains("directories") {
+    if declares_directory && declares_directories {
       add_diag(
         out,
         rule,
         Error,
         "\{subject} must declare only one of `directory` or `directories`",
       )
-    } else if !um.contains("directory") && !declares_directories {
+    } else if !declares_directory && !declares_directories {
       add_diag(
         out,
         rule,
@@ -2832,18 +2854,12 @@ fn check_dependabot_duplicate_directories(
 ) -> Unit {
   let groups : Map[String, (String, Array[String])] = Map::new()
   for um in ctx.updates {
-    let ecosystem = match um.get("package-ecosystem") {
-      Some(v) => yaml_scalar_text(v)
-      None => ""
-    }
+    let ecosystem = dependabot_value_text(um, "package-ecosystem")
     // Reported by `dependabot-update-fields`; there is no group to join.
     if ecosystem == "" {
       continue
     }
-    let branch = match um.get("target-branch") {
-      Some(v) => yaml_scalar_text(v)
-      None => ""
-    }
+    let branch = dependabot_value_text(um, "target-branch")
     let key = "\{ecosystem}\n\{branch}"
     let dirs = match groups.get(key) {
       Some((_, d)) => d
@@ -2858,16 +2874,20 @@ fn check_dependabot_duplicate_directories(
         d
       }
     }
-    match um.get("directory") {
-      Some(v) => dirs.push(yaml_scalar_text(v))
-      None =>
-        match um.get("directories") {
-          Some(Array(a)) =>
-            for d in a {
-              dirs.push(yaml_scalar_text(d))
+    let directory = dependabot_value_text(um, "directory")
+    if directory != "" {
+      dirs.push(directory)
+    } else {
+      match um.get("directories") {
+        Some(Array(a)) =>
+          for d in a {
+            let text = yaml_scalar_text(d)
+            if text != "" {
+              dirs.push(text)
             }
-          _ => ()
-        }
+          }
+        _ => ()
+      }
     }
   }
   groups.each(fn(_, group) {

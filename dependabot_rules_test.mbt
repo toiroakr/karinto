@@ -258,3 +258,97 @@ test "dependabot-duplicate-directories: the message names a shared target-branch
     "directory `/` is declared more than once for `npm` updates targeting `release`",
   ])
 }
+
+///|
+test "dependabot-version: 2.0 is accepted because it equals the integer 2" {
+  let yaml =
+    #|version: 2.0
+    #|updates: []
+  json_inspect(dependabot_messages(yaml, "dependabot-version"), content=[])
+}
+
+///|
+test "dependabot-update-fields: null values count as missing" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: null
+    #|    schedule:
+    #|      interval: null
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry's `schedule` is missing required `interval`",
+    "`npm` update entry must declare `directory` or `directories`",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a directories value that is not a list counts as missing" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directories: /
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry must declare `directory` or `directories`",
+  ])
+}
+
+///|
+test "dependabot-duplicate-directories: null directories are not compared" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: null
+    #|    schedule:
+    #|      interval: daily
+    #|  - package-ecosystem: npm
+    #|    directory: null
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(
+    dependabot_messages(yaml, "dependabot-duplicate-directories"),
+    content=[],
+  )
+}
+
+///|
+test "dependabot-update-fields: a missing updates key is flagged" {
+  let yaml =
+    #|version: 2
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`updates:` is required and must be a list",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a scalar updates value is flagged" {
+  let yaml =
+    #|version: 2
+    #|updates: nope
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`updates:` is required and must be a list",
+  ])
+}
+
+///|
+test "dependabot-update-fields: an empty updates list is silent" {
+  let yaml =
+    #|version: 2
+    #|updates: []
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[])
+}
+
+///|
+test "dependabot-update-fields: an update entry that is not a mapping is flagged" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - npm
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "update entry must be a mapping",
+  ])
+}
