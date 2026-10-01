@@ -40,6 +40,7 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
+import { sendWithRetry, waitUntilReady } from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -256,16 +257,28 @@ async function replayOne(targetUrl, request) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
+  const { status, text } = await sendWithRetry(() => postForm(targetUrl, body));
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: `non-JSON response (status=${status}): ${text.slice(0, 200)}` };
+  }
+}
+
+async function postForm(targetUrl, body) {
   const res = await fetchWithTimeout(targetUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { ok: false, error: `non-JSON response (status=${res.status}): ${text.slice(0, 200)}` };
+  return { status: res.status, text: await res.text() };
+}
+
+async function waitForTarget(targetUrl) {
+  const probe = new URLSearchParams({ content: "on: push\njobs: {}\n", no_capture: "1" });
+  const ready = await waitUntilReady(() => postForm(targetUrl, probe));
+  if (!ready) {
+    console.warn(`WARNING: ${targetUrl} did not answer with JSON consistently; replaying anyway.`);
   }
 }
 
@@ -400,6 +413,8 @@ async function main() {
 
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);
+
+  await waitForTarget(args.target);
 
   const summary = {
     target: args.target,
