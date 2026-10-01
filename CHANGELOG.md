@@ -1,5 +1,15 @@
 # karinto
 
+## 0.10.2
+
+### Patch Changes
+
+- [#150](https://github.com/toiroakr/karinto/pull/150) [`1549993`](https://github.com/toiroakr/karinto/commit/1549993def5793f897ac655bc0b831d589bd8096) Thanks [@toiroakr](https://github.com/toiroakr)! - Stop `shell-undefined-var` from flagging positional parameters (`$0`, `$1`,
+  `${2#x}`, `${10}`, …). tree-sitter-bash parses these as an ordinary
+  `variable_name` whose text is all digits, so a shell function reading its own
+  arguments (`f() { echo "$1"; }`) was reported as having "no declared `env:`
+  source" — a source no `env:` key could ever provide.
+
 ## 0.10.1
 
 ### Patch Changes
