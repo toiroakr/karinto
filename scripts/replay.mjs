@@ -40,6 +40,7 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
+import { createHealthTracker, fetchText, sendTracked, waitUntilReady } from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -130,44 +131,30 @@ function sigv4Headers(method, url, accessKey, secretKey) {
 
 // Per-request network timeout so a stuck DNS/TLS/connection can't leave a
 // CI job hanging until the workflow-level timeout fires. Each fetch site
-// (`r2List`, `r2Get`, `replayOne`) goes through `fetchWithTimeout`.
+// (`r2List`, `r2Get`, `replayOne`) goes through `fetchText`, which keeps the
+// timeout armed until the body has been read.
 const FETCH_TIMEOUT_MS = 30000;
-
-async function fetchWithTimeout(url, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      throw new Error(`request to ${url} timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function r2List(env, prefix, continuationToken) {
   const params = new URLSearchParams({ "list-type": "2", prefix });
   if (continuationToken) params.set("continuation-token", continuationToken);
   const url = `${env.endpoint}/${env.bucket}?${params}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetchWithTimeout(url, { headers });
+  const res = await fetchText(url, { headers }, FETCH_TIMEOUT_MS);
   if (!res.ok) {
-    throw new Error(`R2 list failed (${res.status}): ${await res.text()}`);
+    throw new Error(`R2 list failed (${res.status}): ${res.text}`);
   }
-  return parseListObjects(await res.text());
+  return parseListObjects(res.text);
 }
 
 async function r2Get(env, key) {
   const url = `${env.endpoint}/${env.bucket}/${encodeURI(key)}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetchWithTimeout(url, { headers });
+  const res = await fetchText(url, { headers }, FETCH_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`R2 get ${key} failed (${res.status})`);
   }
-  return res.text();
+  return res.text;
 }
 
 function parseListObjects(xml) {
@@ -237,7 +224,7 @@ async function fetchCaptures(env, limit) {
 // Replay + diff
 // ---------------------------------------------------------------------------
 
-async function replayOne(targetUrl, request) {
+async function replayOne(targetUrl, request, health) {
   const body = new URLSearchParams();
   if (request.type) body.set("type", request.type);
   if (request.disable) body.set("disable", request.disable);
@@ -256,16 +243,34 @@ async function replayOne(targetUrl, request) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
-  const res = await fetchWithTimeout(targetUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  const text = await res.text();
+  const { status, text, error } = await sendTracked(() => postForm(targetUrl, body), health);
+  if (error) return { ok: false, error: `request failed: ${error}` };
   try {
     return JSON.parse(text);
   } catch {
-    return { ok: false, error: `non-JSON response (status=${res.status}): ${text.slice(0, 200)}` };
+    return { ok: false, error: `non-JSON response (status=${status}): ${text.slice(0, 200)}` };
+  }
+}
+
+async function postForm(targetUrl, body) {
+  const { status, text } = await fetchText(
+    targetUrl,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    },
+    FETCH_TIMEOUT_MS,
+  );
+  return { status, text };
+}
+
+async function waitForTarget(targetUrl) {
+  const probe = new URLSearchParams({ content: "on: push\njobs: {}\n", no_capture: "1" });
+  const ready = await waitUntilReady(() => postForm(targetUrl, probe));
+  if (!ready) {
+    console.error(`${targetUrl} did not answer with JSON consistently; not replaying against it.`);
+    process.exit(1);
   }
 }
 
@@ -401,6 +406,8 @@ async function main() {
   const captures = await fetchCaptures(env, args.limit);
   console.log(`fetched ${captures.length} capture(s) from r2://${env.bucket}`);
 
+  await waitForTarget(args.target);
+
   const summary = {
     target: args.target,
     replayed: captures.length,
@@ -414,8 +421,13 @@ async function main() {
     threwByRule: new Map(),
   };
 
+  const health = createHealthTracker();
   for (const cap of captures) {
-    const replayed = await replayOne(args.target, cap.request);
+    const replayed = await replayOne(args.target, cap.request, health);
+    if (health.unhealthy()) {
+      console.error(`${args.target} kept failing after retries; aborting the replay.`);
+      process.exit(1);
+    }
     const diff = computeDiff(normalize(cap.response), normalize(replayed));
 
     if (diff.length === 0) {
