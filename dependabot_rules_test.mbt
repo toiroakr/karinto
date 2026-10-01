@@ -389,3 +389,64 @@ test "dependabot-update-fields: directories with a null, empty or non-string ite
     "`cargo` update entry's `directories` must contain only non-empty strings",
   ])
 }
+
+///|
+test "dependabot-update-fields: a non-string package-ecosystem is flagged as a type error" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: true
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "update entry's `package-ecosystem` must be a string",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a non-string directory is flagged as a type error" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: 1
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry's `directory` must be a string",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a non-string schedule interval is flagged as a type error" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: /
+    #|    schedule:
+    #|      interval: false
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry's `schedule.interval` must be a string",
+  ])
+}
+
+///|
+test "dependabot-duplicate-directories: non-string directories are not compared" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: 1
+    #|    schedule:
+    #|      interval: daily
+    #|  - package-ecosystem: npm
+    #|    directory: 1
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(
+    dependabot_messages(yaml, "dependabot-duplicate-directories"),
+    content=[],
+  )
+}

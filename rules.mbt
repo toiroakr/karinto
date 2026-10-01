@@ -2754,12 +2754,26 @@ fn check_dependabot_version(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
 }
 
 ///|
-/// `null`, mappings and sequences all read as `""`, so callers treat them the
-/// same as an absent key.
-fn dependabot_value_text(m : Map[String, @yaml.Yaml], key : String) -> String {
+priv enum DependabotField {
+  Missing
+  NotString
+  Value(String)
+}
+
+///|
+fn dependabot_field(m : Map[String, @yaml.Yaml], key : String) -> DependabotField {
   match m.get(key) {
-    Some(v) => yaml_scalar_text(v)
-    None => ""
+    None | Some(Null) | Some(String("")) => Missing
+    Some(String(s)) => Value(s)
+    Some(_) => NotString
+  }
+}
+
+///|
+fn dependabot_value_text(m : Map[String, @yaml.Yaml], key : String) -> String {
+  match dependabot_field(m, key) {
+    Value(s) => s
+    _ => ""
   }
 }
 
@@ -2784,14 +2798,26 @@ fn check_dependabot_update_fields(
       add_diag(out, rule, Error, "`updates:` is required and must be a list")
   }
   for um in ctx.updates {
-    let ecosystem = dependabot_value_text(um, "package-ecosystem")
-    if ecosystem == "" {
-      add_diag(
-        out,
-        rule,
-        Error,
-        "update entry is missing required `package-ecosystem`",
-      )
+    let ecosystem = match dependabot_field(um, "package-ecosystem") {
+      Value(s) => s
+      Missing => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "update entry is missing required `package-ecosystem`",
+        )
+        ""
+      }
+      NotString => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "update entry's `package-ecosystem` must be a string",
+        )
+        ""
+      }
     }
     let subject = if ecosystem == "" {
       "update entry"
@@ -2809,7 +2835,24 @@ fn check_dependabot_update_fields(
             "\{subject} is missing required `schedule`",
           )
         }
-      Some(Map(s)) if dependabot_value_text(s, "interval") != "" => ()
+      Some(Map(s)) =>
+        match dependabot_field(s, "interval") {
+          Value(_) => ()
+          Missing =>
+            add_diag(
+              out,
+              rule,
+              Error,
+              "\{subject}'s `schedule` is missing required `interval`",
+            )
+          NotString =>
+            add_diag(
+              out,
+              rule,
+              Error,
+              "\{subject}'s `schedule.interval` must be a string",
+            )
+        }
       Some(_) =>
         add_diag(
           out,
@@ -2818,7 +2861,19 @@ fn check_dependabot_update_fields(
           "\{subject}'s `schedule` is missing required `interval`",
         )
     }
-    let declares_directory = dependabot_value_text(um, "directory") != ""
+    let declares_directory = match dependabot_field(um, "directory") {
+      Value(_) => true
+      Missing => false
+      NotString => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "\{subject}'s `directory` must be a string",
+        )
+        true
+      }
+    }
     let declares_directories = match um.get("directories") {
       Some(Array(a)) => {
         let all_strings = a.iter().all(fn(d) { d is String(s) && s != "" })
@@ -2892,8 +2947,7 @@ fn check_dependabot_duplicate_directories(
       match um.get("directories") {
         Some(Array(a)) =>
           for d in a {
-            let text = yaml_scalar_text(d)
-            if text != "" {
+            if d is String(text) && text != "" {
               dirs.push(text)
             }
           }
