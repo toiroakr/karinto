@@ -268,7 +268,7 @@ test "dependabot-version: 2.0 is accepted because it equals the integer 2" {
 }
 
 ///|
-test "dependabot-update-fields: null values count as missing" {
+test "dependabot-update-fields: null values are flagged as type errors" {
   let yaml =
     #|version: 2
     #|updates:
@@ -277,13 +277,43 @@ test "dependabot-update-fields: null values count as missing" {
     #|    schedule:
     #|      interval: null
   json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
-    "`npm` update entry's `schedule` is missing required `interval`",
-    "`npm` update entry must declare `directory` or `directories`",
+    "`npm` update entry's `schedule.interval` must be a string",
+    "`npm` update entry's `directory` must be a string",
   ])
 }
 
 ///|
-test "dependabot-update-fields: a directories value that is not a list counts as missing" {
+test "dependabot-update-fields: a null package-ecosystem is flagged as a type error" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: null
+    #|    directory: /
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "update entry's `package-ecosystem` must be a string",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a null directory alongside directories is flagged" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: null
+    #|    directories: [/]
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry's `directory` must be a string",
+    "`npm` update entry must declare only one of `directory` or `directories`",
+  ])
+}
+
+///|
+test "dependabot-update-fields: a directories value that is not a list is flagged as a type error" {
   let yaml =
     #|version: 2
     #|updates:
@@ -292,7 +322,7 @@ test "dependabot-update-fields: a directories value that is not a list counts as
     #|    schedule:
     #|      interval: daily
   json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
-    "`npm` update entry must declare `directory` or `directories`",
+    "`npm` update entry's `directories` must be a list",
   ])
 }
 

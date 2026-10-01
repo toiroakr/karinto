@@ -2763,7 +2763,7 @@ priv enum DependabotField {
 ///|
 fn dependabot_field(m : Map[String, @yaml.Yaml], key : String) -> DependabotField {
   match m.get(key) {
-    None | Some(Null) | Some(String("")) => Missing
+    None | Some(String("")) => Missing
     Some(String(s)) => Value(s)
     Some(_) => NotString
   }
@@ -2887,7 +2887,11 @@ fn check_dependabot_update_fields(
         }
         !a.is_empty()
       }
-      _ => false
+      Some(_) => {
+        add_diag(out, rule, Error, "\{subject}'s `directories` must be a list")
+        true
+      }
+      None => false
     }
     if declares_directory && declares_directories {
       add_diag(
