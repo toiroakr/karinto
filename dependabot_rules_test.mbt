@@ -352,3 +352,40 @@ test "dependabot-update-fields: an update entry that is not a mapping is flagged
     "update entry must be a mapping",
   ])
 }
+
+///|
+test "dependabot-update-fields: a null multi-ecosystem-group does not exempt schedule" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directory: /
+    #|    multi-ecosystem-group: null
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry is missing required `schedule`",
+  ])
+}
+
+///|
+test "dependabot-update-fields: directories with a null, empty or non-string item is flagged" {
+  let yaml =
+    #|version: 2
+    #|updates:
+    #|  - package-ecosystem: npm
+    #|    directories: [/, null]
+    #|    schedule:
+    #|      interval: daily
+    #|  - package-ecosystem: pip
+    #|    directories: [""]
+    #|    schedule:
+    #|      interval: daily
+    #|  - package-ecosystem: cargo
+    #|    directories: [1]
+    #|    schedule:
+    #|      interval: daily
+  json_inspect(dependabot_messages(yaml, "dependabot-update-fields"), content=[
+    "`npm` update entry's `directories` must contain only non-empty strings",
+    "`pip` update entry's `directories` must contain only non-empty strings",
+    "`cargo` update entry's `directories` must contain only non-empty strings",
+  ])
+}

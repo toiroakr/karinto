@@ -2801,7 +2801,7 @@ fn check_dependabot_update_fields(
     match um.get("schedule") {
       // A `multi-ecosystem-group` member inherits the group's schedule.
       None =>
-        if !um.contains("multi-ecosystem-group") {
+        if dependabot_value_text(um, "multi-ecosystem-group") == "" {
           add_diag(
             out,
             rule,
@@ -2820,7 +2820,18 @@ fn check_dependabot_update_fields(
     }
     let declares_directory = dependabot_value_text(um, "directory") != ""
     let declares_directories = match um.get("directories") {
-      Some(Array(a)) => !a.is_empty()
+      Some(Array(a)) => {
+        let all_strings = a.iter().all(fn(d) { d is String(s) && s != "" })
+        if !a.is_empty() && !all_strings {
+          add_diag(
+            out,
+            rule,
+            Error,
+            "\{subject}'s `directories` must contain only non-empty strings",
+          )
+        }
+        !a.is_empty()
+      }
       _ => false
     }
     if declares_directory && declares_directories {
