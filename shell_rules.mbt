@@ -860,6 +860,14 @@ fn is_well_known_prefix(name : String) -> Bool {
 }
 
 ///|
+/// `$0`, `$1`, `${10}`, … — tree-sitter-bash parses these as an ordinary
+/// `variable_name` whose text is all digits (unlike `$@`/`$#`/`$?`, which get
+/// their own `special_variable_name` node).
+fn is_positional_param(name : String) -> Bool {
+  !name.is_empty() && name.iter().all(fn(ch) { ch >= '0' && ch <= '9' })
+}
+
+///|
 /// POSIX "special builtins" (plus bash's `.`): unlike an ordinary command, a
 /// prefix assignment on one of these persists in the current shell after it
 /// completes instead of being scoped to just that invocation — e.g. `FOO=bar
@@ -952,6 +960,7 @@ fn analyze_undefined_vars(
   for r in refs {
     let (name, pos) = r
     if declared.contains(name) ||
+      is_positional_param(name) ||
       well_known_shell_vars.contains(name) ||
       is_well_known_prefix(name) {
       continue
