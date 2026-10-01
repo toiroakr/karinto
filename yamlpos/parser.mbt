@@ -24,7 +24,12 @@ priv struct Parser {
 ///|
 /// Maximum nesting depth for the recursive parser. Mirrors a recursion-limit
 /// guard so that untrusted input cannot overflow the stack (DoS safety).
-const MAX_DEPTH : Int = 1000
+///
+/// Not 1000: the native stack ran out first on macOS arm64 — wasm debug
+/// overflowed at 300-400 block / 500-600 flow levels, and the shipped js
+/// release build at 800 block levels — so the guard never tripped. 128 keeps
+/// ~2.3x headroom under the worst case and matches serde_yaml / yaml-rust2.
+const MAX_DEPTH : Int = 128
 
 ///|
 fn Parser::new(src : String, toks : Array[Token]) -> Parser {
