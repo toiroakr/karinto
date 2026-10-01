@@ -536,6 +536,30 @@ pub fn all_rules() -> Array[Rule] {
       on_step: no_step(),
     },
     Rule::{
+      id: "dependabot-version",
+      title: "Dependabot config must declare `version: 2`",
+      applies: dependabot_only,
+      on_doc: Some(check_dependabot_version),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "dependabot-update-fields",
+      title: "Dependabot update entry is missing a required field",
+      applies: dependabot_only,
+      on_doc: Some(check_dependabot_update_fields),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
+      id: "dependabot-duplicate-directories",
+      title: "Dependabot update entries declare the same directory twice",
+      applies: dependabot_only,
+      on_doc: Some(check_dependabot_duplicate_directories),
+      on_job: no_job(),
+      on_step: no_step(),
+    },
+    Rule::{
       id: "workflow-env-no-secrets",
       title: "Workflow env must not reference `secrets`",
       applies: workflow_only,
@@ -2685,6 +2709,275 @@ fn check_dependabot_execution(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       None => ()
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rules: dependabot-version / dependabot-update-fields /
+// dependabot-duplicate-directories — required fields of the Dependabot v2
+// JSON schema (SchemaStore `dependabot-2.0.json`).
+// ---------------------------------------------------------------------------
+
+///|
+fn check_dependabot_version(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let version = match ctx.workflow_map {
+    Some(m) => m.get("version")
+    None => None
+  }
+  match version {
+    None =>
+      add_diag(
+        out,
+        "dependabot-version",
+        Error,
+        "`version:` is required and must be `2`",
+      )
+    Some(Integer(2L)) => ()
+    Some(Real(d, repr=_)) if d == 2.0 => ()
+    // The schema types `version` as an integer, so a quoted `"2"` is invalid.
+    Some(String(s)) =>
+      add_diag(
+        out,
+        "dependabot-version",
+        Error,
+        "`version:` must be `2`, got `\{s}` (a string)",
+      )
+    Some(v) => {
+      let text = yaml_scalar_text(v)
+      let message = if text == "" {
+        "`version:` must be `2`"
+      } else {
+        "`version:` must be `2`, got `\{text}`"
+      }
+      add_diag(out, "dependabot-version", Error, message)
+    }
+  }
+}
+
+///|
+priv enum DependabotField {
+  Missing
+  NotString
+  Value(String)
+}
+
+///|
+fn dependabot_field(m : Map[String, @yaml.Yaml], key : String) -> DependabotField {
+  match m.get(key) {
+    None | Some(String("")) => Missing
+    Some(String(s)) => Value(s)
+    Some(_) => NotString
+  }
+}
+
+///|
+fn dependabot_value_text(m : Map[String, @yaml.Yaml], key : String) -> String {
+  match dependabot_field(m, key) {
+    Value(s) => s
+    _ => ""
+  }
+}
+
+///|
+fn check_dependabot_update_fields(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  let rule = "dependabot-update-fields"
+  let updates = match ctx.workflow_map {
+    Some(m) => m.get("updates")
+    None => None
+  }
+  match updates {
+    Some(Array(arr)) =>
+      for u in arr {
+        if !(u is Map(_)) {
+          add_diag(out, rule, Error, "update entry must be a mapping")
+        }
+      }
+    _ =>
+      add_diag(out, rule, Error, "`updates:` is required and must be a list")
+  }
+  for um in ctx.updates {
+    let ecosystem = match dependabot_field(um, "package-ecosystem") {
+      Value(s) => s
+      Missing => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "update entry is missing required `package-ecosystem`",
+        )
+        ""
+      }
+      NotString => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "update entry's `package-ecosystem` must be a string",
+        )
+        ""
+      }
+    }
+    let subject = if ecosystem == "" {
+      "update entry"
+    } else {
+      "`\{ecosystem}` update entry"
+    }
+    match um.get("schedule") {
+      // A `multi-ecosystem-group` member inherits the group's schedule.
+      None =>
+        if dependabot_value_text(um, "multi-ecosystem-group") == "" {
+          add_diag(
+            out,
+            rule,
+            Error,
+            "\{subject} is missing required `schedule`",
+          )
+        }
+      Some(Map(s)) =>
+        match dependabot_field(s, "interval") {
+          Value(_) => ()
+          Missing =>
+            add_diag(
+              out,
+              rule,
+              Error,
+              "\{subject}'s `schedule` is missing required `interval`",
+            )
+          NotString =>
+            add_diag(
+              out,
+              rule,
+              Error,
+              "\{subject}'s `schedule.interval` must be a string",
+            )
+        }
+      Some(_) =>
+        add_diag(
+          out,
+          rule,
+          Error,
+          "\{subject}'s `schedule` is missing required `interval`",
+        )
+    }
+    let declares_directory = match dependabot_field(um, "directory") {
+      Value(_) => true
+      Missing => false
+      NotString => {
+        add_diag(
+          out,
+          rule,
+          Error,
+          "\{subject}'s `directory` must be a string",
+        )
+        true
+      }
+    }
+    let declares_directories = match um.get("directories") {
+      Some(Array(a)) => {
+        let all_strings = a.iter().all(fn(d) { d is String(s) && s != "" })
+        if !a.is_empty() && !all_strings {
+          add_diag(
+            out,
+            rule,
+            Error,
+            "\{subject}'s `directories` must contain only non-empty strings",
+          )
+        }
+        !a.is_empty()
+      }
+      Some(_) => {
+        add_diag(out, rule, Error, "\{subject}'s `directories` must be a list")
+        true
+      }
+      None => false
+    }
+    if declares_directory && declares_directories {
+      add_diag(
+        out,
+        rule,
+        Error,
+        "\{subject} must declare only one of `directory` or `directories`",
+      )
+    } else if !declares_directory && !declares_directories {
+      add_diag(
+        out,
+        rule,
+        Error,
+        "\{subject} must declare `directory` or `directories`",
+      )
+    }
+  }
+}
+
+///|
+/// Update entries are grouped by `package-ecosystem` + `target-branch` (an
+/// absent `target-branch` is its own group); within a group every
+/// `directory` / `directories` value must be unique, including repeats inside
+/// a single `directories` list. Matches the extra check of
+/// `@bugron/validate-dependabot-yaml`. Values are compared verbatim — glob
+/// overlap (`/apps/*` vs `/apps/web`) is not detected.
+fn check_dependabot_duplicate_directories(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Unit {
+  let groups : Map[String, (String, Array[String])] = Map::new()
+  for um in ctx.updates {
+    let ecosystem = dependabot_value_text(um, "package-ecosystem")
+    // Reported by `dependabot-update-fields`; there is no group to join.
+    if ecosystem == "" {
+      continue
+    }
+    let branch = dependabot_value_text(um, "target-branch")
+    let key = "\{ecosystem}\n\{branch}"
+    let dirs = match groups.get(key) {
+      Some((_, d)) => d
+      None => {
+        let label = if branch == "" {
+          "`\{ecosystem}` updates"
+        } else {
+          "`\{ecosystem}` updates targeting `\{branch}`"
+        }
+        let d : Array[String] = []
+        groups.set(key, (label, d))
+        d
+      }
+    }
+    let directory = dependabot_value_text(um, "directory")
+    if directory != "" {
+      dirs.push(directory)
+    } else {
+      match um.get("directories") {
+        Some(Array(a)) =>
+          for d in a {
+            if d is String(text) && text != "" {
+              dirs.push(text)
+            }
+          }
+        _ => ()
+      }
+    }
+  }
+  groups.each(fn(_, group) {
+    let (label, dirs) = group
+    let reported : Map[String, Bool] = Map::new()
+    for d in dirs {
+      match reported.get(d) {
+        None => reported.set(d, false)
+        Some(true) => ()
+        Some(false) => {
+          reported.set(d, true)
+          add_diag(
+            out,
+            "dependabot-duplicate-directories",
+            Error,
+            "directory `\{d}` is declared more than once for \{label}",
+          )
+        }
+      }
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------

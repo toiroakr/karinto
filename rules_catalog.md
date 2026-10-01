@@ -7,7 +7,7 @@ lint execution lives in `rules.mbt` (`all_rules()`); editing the catalogue
 does not by itself change engine behaviour. Keep both files in sync; see
 [`AGENTS.md`](AGENTS.md) (CLAUDE.md is a symlink to it) for the update rule.
 
-84 catalogued rules: **73 implemented**, **4 planned**, **7 not planned**,
+94 catalogued rules: **82 implemented**, **4 planned**, **8 not planned**,
 plus **4 upstream checks consolidated** into existing karinto rules (see
 below).
 
@@ -35,6 +35,7 @@ below).
 | actionlint | <https://github.com/rhysd/actionlint/blob/main/docs/checks.md> |
 | zizmor | <https://docs.zizmor.sh/audits/> |
 | ghalint | <https://github.com/suzuki-shunsuke/ghalint/tree/main/docs/policies> |
+| dependabot | <https://json.schemastore.org/dependabot-2.0.json> (official v2 schema), <https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference> |
 
 Per-rule deep links below use these roots. Origin strings (e.g.
 `actionlint:unexpected-keys`) are the verbatim tags stored in the catalog's
@@ -177,3 +178,26 @@ karinto doesn't attempt shellcheck-equivalent coverage.
 | --- | --- | --- | --- | --- |
 | `shell-quote-safety` | `karinto:shell-quote-safety` | warning | Implemented | Flags an *unquoted* shell expansion (`$VAR` / `${VAR}`, not `"$VAR"`) of a step-level `env:` key whose value derives from a `${{ … }}` expression — the injection-amplification neighbour of `template-injection`: a workflow author who accepts that `$VAR` carries attacker-controlled text via `env:` additionally exposes it to word-splitting/glob expansion by using it unquoted. Scoped to step-level `env:` only (not job/workflow-level layering) and doesn't special-case assignment RHS (`X=$Y`) — narrower than stock SC2086 by design, to keep noise low. |
 | `shell-undefined-var` | `karinto:shell-undefined-var` | info | Implemented | SC2154-like: flags a `run:` variable reference with no visible source — not declared in `env:` at workflow, job, or step level, not assigned earlier in the same script (`FOO=bar`), not a positional parameter (`$0`, `$1`, `${10}`, …), and not a well-known runner/shell built-in (`PATH`, `GITHUB_*`, `RUNNER_*`, `ACTIONS_*`, `INPUT_*`, …). Scoped to what the syntax tree makes reliable — no modelling of conditionals, functions, or `source`d files — hence `info`, not a harder severity. |
+
+## Dependabot family
+
+Applies to `dependabot.yml` only. Derived from the required fields of the
+official Dependabot v2 JSON schema (SchemaStore `dependabot-2.0.json`, the
+schema [`marocchino/validate-dependabot`](https://github.com/marocchino/validate-dependabot)
+and [`@bugron/validate-dependabot-yaml`](https://www.npmjs.com/package/@bugron/validate-dependabot-yaml)
+validate against), plus the directory-uniqueness check that
+`@bugron/validate-dependabot-yaml` adds on top. No code is ported; the checks
+are reimplemented from the schema and the upstream documentation. Every rule
+is `error`, following the `missing-required-keys` precedent: the official v2
+schema rejects every shape they flag.
+
+Deliberately out of scope: validating `package-ecosystem` against an enum
+(GitHub adds ecosystems such as `bun`, `uv`, `dotnet-sdk` frequently, so a
+hardcoded list would false-positive on new ones) and `schedule.interval`
+against an enum.
+
+| ID | Origin | Severity | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `dependabot-version` | `dependabot:schema-version` | error | Implemented | Top-level `version:` must be present (the schema lists it in `required`) and equal the integer `2` (`2.0` is accepted — JSON Schema treats it as the same integer). A quoted `"2"` is flagged too: the schema types `version` as an integer, and dependabot-core's loader (`Dependabot::Config::File.parse`) raises `invalid version` for any `version` other than the integer `2`. |
+| `dependabot-update-fields` | `dependabot:schema-update-required` | error | Implemented | Top-level `updates:` must be a list (an empty `updates: []` is allowed, as in the schema) whose items are mappings. Every entry must declare `package-ecosystem`; a `schedule` with an `interval` (an entry with a non-empty `multi-ecosystem-group` may omit `schedule`, since it inherits the group's — mirrors the schema's `if`/`then`); and exactly one of `directory` / `directories` (both present is the schema's `oneOf` violation; an empty `directories: []` counts as missing). An absent key or an empty string counts as missing. A present value of the wrong type — including `null` — is reported as a type error instead: `must be a string` for `package-ecosystem`, `directory` and `schedule.interval` (`true`, `1`, `null`, a mapping, …), and `must be a list` for `directories`. Every `directories` item must be a non-empty string (the schema's `items: { type: string, minLength: 1 }`). |
+| `dependabot-duplicate-directories` | `dependabot:unique-directories` | error | Implemented | Groups `updates:` entries by `package-ecosystem` + `target-branch` (an absent `target-branch` is its own group) and flags any `directory` / `directories` value appearing more than once in a group, including repeats inside one `directories` list — the same grouping as `@bugron/validate-dependabot-yaml`'s `uniqueCombination`. Values are compared verbatim: glob overlap (`/apps/*` vs `/apps/web`) is not detected. |

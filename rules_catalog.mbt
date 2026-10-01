@@ -25,6 +25,9 @@ pub(all) enum Source {
   /// tree-sitter-bash shell rules (#113) — see `origins` on each entry for
   /// which specific gap it fills.
   Karinto
+  /// Official Dependabot v2 JSON schema (SchemaStore `dependabot-2.0.json`)
+  /// and the community validators built on it.
+  Dependabot
 } derive(Eq, Debug)
 
 ///|
@@ -60,10 +63,11 @@ pub(all) struct RuleSpec {
 } derive(Eq, Debug)
 
 ///|
-/// The full catalogue: 84 rules spanning actionlint (38), zizmor (36) and
-/// ghalint (10). 4 deliberate consolidations are recorded in `origins`
-/// (zizmor entries that also absorb the matching actionlint or ghalint
-/// check), and 7 rules are marked `NotPlanned` (out of scope, see status
+/// The full catalogue: 94 rules spanning actionlint (38), zizmor (41),
+/// ghalint (10), karinto-original (2) and the Dependabot v2 schema (3). 4
+/// deliberate consolidations are recorded in `origins` (zizmor entries that
+/// also absorb the matching actionlint or ghalint check), and 8 rules are
+/// marked `NotPlanned` (out of scope, see status
 /// comments below — including impostor-commit and ref-version-mismatch, whose
 /// online resolution is delegated to the companion action).
 pub fn all_rule_specs() -> Array[RuleSpec] {
@@ -1139,6 +1143,44 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
       Error,
       Implemented,
       true,
+      false,
+    ),
+    // -----------------------------------------------------------------------
+    // Dependabot family — required fields of the official Dependabot v2
+    // JSON schema (SchemaStore `dependabot-2.0.json`), plus the directory
+    // uniqueness check from `@bugron/validate-dependabot-yaml`.
+    // -----------------------------------------------------------------------
+    spec(
+      "dependabot-version",
+      "Missing or wrong `version:` in dependabot config",
+      Dependabot,
+      ["dependabot:schema-version"],
+      Syntax,
+      Error,
+      Implemented,
+      false,
+      false,
+    ),
+    spec(
+      "dependabot-update-fields",
+      "Missing required field in a dependabot update entry",
+      Dependabot,
+      ["dependabot:schema-update-required"],
+      Syntax,
+      Error,
+      Implemented,
+      false,
+      false,
+    ),
+    spec(
+      "dependabot-duplicate-directories",
+      "Duplicate directory across dependabot update entries",
+      Dependabot,
+      ["dependabot:unique-directories"],
+      Config,
+      Error,
+      Implemented,
+      false,
       false,
     ),
   ]
