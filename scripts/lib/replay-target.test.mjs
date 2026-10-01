@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   createHealthTracker,
   isTransientResponse,
+  sendTracked,
   sendWithRetry,
   waitUntilReady,
 } from "./replay-target.mjs";
@@ -142,5 +143,35 @@ test("createHealthTracker: a good result resets the streak", () => {
   health.record(unavailable);
   health.record(ok);
   health.record(unavailable);
+  assert.equal(health.unhealthy(), false);
+});
+
+// ---------------------------------------------------------------------------
+// sendTracked
+// ---------------------------------------------------------------------------
+
+test("sendTracked: an exhausted network error becomes a failed result instead of throwing", async () => {
+  const { send } = scripted([new Error("timed out"), new Error("timed out")]);
+  const { sleep } = recordingSleep();
+  const health = createHealthTracker({ maxConsecutive: 3 });
+  const res = await sendTracked(send, health, { retries: 1, baseDelayMs: 1, sleep });
+  assert.equal(res.error, "timed out");
+  assert.equal(isTransientResponse(res), true);
+});
+
+test("sendTracked: exhausted network errors count toward the unhealthy threshold", async () => {
+  const { send } = scripted(Array(3).fill(new Error("ECONNRESET")));
+  const { sleep } = recordingSleep();
+  const health = createHealthTracker({ maxConsecutive: 3 });
+  for (let i = 0; i < 3; i++) {
+    await sendTracked(send, health, { retries: 0, sleep });
+  }
+  assert.equal(health.unhealthy(), true);
+});
+
+test("sendTracked: a successful response is returned unchanged and keeps the target healthy", async () => {
+  const { send } = scripted([ok]);
+  const health = createHealthTracker({ maxConsecutive: 1 });
+  assert.deepEqual(await sendTracked(send, health), ok);
   assert.equal(health.unhealthy(), false);
 });

@@ -65,3 +65,14 @@ export function createHealthTracker({ maxConsecutive = 3 } = {}) {
     unhealthy: () => streak >= maxConsecutive,
   };
 }
+
+export async function sendTracked(send, health, retryOptions) {
+  let res;
+  try {
+    res = await sendWithRetry(send, retryOptions);
+  } catch (err) {
+    res = { status: 0, text: "", error: err?.message ?? String(err) };
+  }
+  health.record(res);
+  return res;
+}

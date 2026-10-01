@@ -40,7 +40,7 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
-import { createHealthTracker, sendWithRetry, waitUntilReady } from "./lib/replay-target.mjs";
+import { createHealthTracker, sendTracked, waitUntilReady } from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -257,9 +257,8 @@ async function replayOne(targetUrl, request, health) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
-  const res = await sendWithRetry(() => postForm(targetUrl, body));
-  health.record(res);
-  const { status, text } = res;
+  const { status, text, error } = await sendTracked(() => postForm(targetUrl, body), health);
+  if (error) return { ok: false, error: `request failed: ${error}` };
   try {
     return JSON.parse(text);
   } catch {
