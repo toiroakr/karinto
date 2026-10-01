@@ -6,7 +6,7 @@
 .                             # MoonBit library package — the lint engine
 ├── karinto.mbt               # public API: types, lint(), helpers
 ├── rules.mbt                 # rule registry + implemented rules
-├── rules_catalog.mbt         # full catalogue (83 rules, metadata + origins)
+├── rules_catalog.mbt         # full catalogue (94 rules, metadata + origins)
 ├── karinto_test.mbt          # blackbox tests for implemented rules + engine
 ├── actionlint_rules_test.mbt # fixtures for actionlint-derived rules
 ├── zizmor_rules_test.mbt     # fixtures for zizmor audits
@@ -96,13 +96,14 @@ captured by `wrangler tail`:
 
 `rules_catalog.mbt` is the source of truth for what karinto checks. Each
 entry carries an ID, human-readable title, source family (actionlint /
-zizmor / ghalint), upstream origins, category, severity,
-implementation status, and which file kinds it applies to.
+zizmor / ghalint / karinto-original / Dependabot v2 schema), upstream
+origins, category, severity, implementation status, and which file kinds it
+applies to.
 
-Of 83 catalogued rules, 68 are implemented; 8 are `Planned` — scaffolded as
+Of 94 catalogued rules, 82 are implemented; 4 are `Planned` — scaffolded as
 `#skip(...)`-attributed test cases in the per-source `*_rules_test.mbt`
 files (each ships fixture YAML and expected JSON so the behavioural spec
-is in place, ready to be filled in); 7 are marked `NotPlanned` —
+is in place, ready to be filled in); 8 are marked `NotPlanned` —
 deliberately out of scope and carry no fixture. The full per-rule
 rationale lives in [`rules_catalog.md`](rules_catalog.md).
 

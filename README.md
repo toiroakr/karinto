@@ -13,7 +13,7 @@ Try it in the browser: <https://toiroakr.github.io/karinto/>
 
 ## Coverage
 
-73 of 84 catalogued rules are active. They cover syntax, expression typing
+82 of 94 catalogued rules are active. They cover syntax, expression typing
 and context availability, permissions hygiene, pinned-`uses` requirements,
 taint analysis for template injection, and a range of security policies
 (excessive permissions, self-hosted runners, OIDC migration, dangerous
