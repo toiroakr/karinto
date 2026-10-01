@@ -555,6 +555,46 @@ test "shell-undefined-var: a well-known GITHUB_* context var is not flagged" {
 }
 
 ///|
+let undef_function_positional_args : String = "{\"t\":\"program\",\"s\":0,\"e\":32,\"c\":[{\"t\":\"function_definition\",\"s\":0,\"e\":26,\"c\":[{\"t\":\"word\",\"s\":0,\"e\":1,\"x\":\"f\"},{\"t\":\"compound_statement\",\"s\":4,\"e\":26,\"c\":[{\"t\":\"command\",\"s\":8,\"e\":24,\"c\":[{\"t\":\"command_name\",\"s\":8,\"e\":12,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":8,\"e\":12,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":13,\"e\":17,\"x\":\"\\\"$1\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":14,\"e\":16,\"c\":[{\"t\":\"variable_name\",\"s\":15,\"e\":16,\"x\":\"1\"}]}]},{\"t\":\"expansion\",\"s\":18,\"e\":24,\"c\":[{\"t\":\"variable_name\",\"s\":20,\"e\":21,\"x\":\"2\"},{\"t\":\"regex\",\"s\":22,\"e\":23}]}]}]}]},{\"t\":\"command\",\"s\":27,\"e\":32,\"c\":[{\"t\":\"command_name\",\"s\":27,\"e\":28,\"x\":\"f\",\"c\":[{\"t\":\"word\",\"s\":27,\"e\":28,\"x\":\"f\"}]},{\"t\":\"word\",\"s\":29,\"e\":30,\"x\":\"a\"},{\"t\":\"word\",\"s\":31,\"e\":32,\"x\":\"b\"}]}]}"
+
+///|
+/// `f() { echo "$1" ${2#x} }` then `f a b`: `$1` / `${2#x}` are the
+/// function's own arguments, not variables an `env:` key could supply.
+test "shell-undefined-var: positional parameters inside a function body are not flagged" {
+  let root = parse_shell_ast(undef_function_positional_args).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}
+
+///|
+let undef_multi_digit_positional_arg : String = "{\"t\":\"program\",\"s\":0,\"e\":22,\"c\":[{\"t\":\"function_definition\",\"s\":0,\"e\":22,\"c\":[{\"t\":\"word\",\"s\":0,\"e\":1,\"x\":\"f\"},{\"t\":\"compound_statement\",\"s\":4,\"e\":22,\"c\":[{\"t\":\"command\",\"s\":8,\"e\":20,\"c\":[{\"t\":\"command_name\",\"s\":8,\"e\":12,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":8,\"e\":12,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":13,\"e\":20,\"x\":\"\\\"${10}\\\"\",\"c\":[{\"t\":\"expansion\",\"s\":14,\"e\":19,\"c\":[{\"t\":\"variable_name\",\"s\":16,\"e\":18,\"x\":\"10\"}]}]}]}]}]}]}"
+
+///|
+test "shell-undefined-var: a multi-digit positional parameter (${10}) is not flagged" {
+  let root = parse_shell_ast(undef_multi_digit_positional_arg).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}
+
+///|
+let undef_script_name_param : String = "{\"t\":\"program\",\"s\":0,\"e\":9,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":9,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":4,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":4,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":5,\"e\":9,\"x\":\"\\\"$0\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":6,\"e\":8,\"c\":[{\"t\":\"variable_name\",\"s\":7,\"e\":8,\"x\":\"0\"}]}]}]}]}"
+
+///|
+test "shell-undefined-var: $0 (the script name) is not flagged" {
+  let root = parse_shell_ast(undef_script_name_param).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}
+
+///|
+let undef_top_level_positional_arg : String = "{\"t\":\"program\",\"s\":0,\"e\":18,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":8,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"set\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"set\"}]},{\"t\":\"word\",\"s\":4,\"e\":6,\"x\":\"--\"},{\"t\":\"word\",\"s\":7,\"e\":8,\"x\":\"a\"}]},{\"t\":\"command\",\"s\":9,\"e\":18,\"c\":[{\"t\":\"command_name\",\"s\":9,\"e\":13,\"x\":\"echo\",\"c\":[{\"t\":\"word\",\"s\":9,\"e\":13,\"x\":\"echo\"}]},{\"t\":\"string\",\"s\":14,\"e\":18,\"x\":\"\\\"$1\\\"\",\"c\":[{\"t\":\"simple_expansion\",\"s\":15,\"e\":17,\"c\":[{\"t\":\"variable_name\",\"s\":16,\"e\":17,\"x\":\"1\"}]}]}]}]}"
+
+///|
+/// `set -- a` then `echo "$1"`: positional parameters can be set at the top
+/// level too, and no `env:` key can supply `$1` either way.
+test "shell-undefined-var: a positional parameter at the script top level is not flagged" {
+  let root = parse_shell_ast(undef_top_level_positional_arg).unwrap()
+  assert_eq(analyze_undefined_vars(root, []), [])
+}
+
+///|
 let adhoc_gem_install_rake : String = "{\"t\":\"program\",\"s\":0,\"e\":16,\"c\":[{\"t\":\"command\",\"s\":0,\"e\":16,\"c\":[{\"t\":\"command_name\",\"s\":0,\"e\":3,\"x\":\"gem\",\"c\":[{\"t\":\"word\",\"s\":0,\"e\":3,\"x\":\"gem\"}]},{\"t\":\"word\",\"s\":4,\"e\":11,\"x\":\"install\"},{\"t\":\"word\",\"s\":12,\"e\":16,\"x\":\"rake\"}]}]}"
 
 ///|
