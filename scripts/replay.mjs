@@ -40,7 +40,7 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
-import { createHealthTracker, sendTracked, waitUntilReady } from "./lib/replay-target.mjs";
+import { createHealthTracker, fetchText, sendTracked, waitUntilReady } from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -131,44 +131,30 @@ function sigv4Headers(method, url, accessKey, secretKey) {
 
 // Per-request network timeout so a stuck DNS/TLS/connection can't leave a
 // CI job hanging until the workflow-level timeout fires. Each fetch site
-// (`r2List`, `r2Get`, `replayOne`) goes through `fetchWithTimeout`.
+// (`r2List`, `r2Get`, `replayOne`) goes through `fetchText`, which keeps the
+// timeout armed until the body has been read.
 const FETCH_TIMEOUT_MS = 30000;
-
-async function fetchWithTimeout(url, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      throw new Error(`request to ${url} timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function r2List(env, prefix, continuationToken) {
   const params = new URLSearchParams({ "list-type": "2", prefix });
   if (continuationToken) params.set("continuation-token", continuationToken);
   const url = `${env.endpoint}/${env.bucket}?${params}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetchWithTimeout(url, { headers });
+  const res = await fetchText(url, { headers }, FETCH_TIMEOUT_MS);
   if (!res.ok) {
-    throw new Error(`R2 list failed (${res.status}): ${await res.text()}`);
+    throw new Error(`R2 list failed (${res.status}): ${res.text}`);
   }
-  return parseListObjects(await res.text());
+  return parseListObjects(res.text);
 }
 
 async function r2Get(env, key) {
   const url = `${env.endpoint}/${env.bucket}/${encodeURI(key)}`;
   const headers = sigv4Headers("GET", url, env.accessKey, env.secretKey);
-  const res = await fetchWithTimeout(url, { headers });
+  const res = await fetchText(url, { headers }, FETCH_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`R2 get ${key} failed (${res.status})`);
   }
-  return res.text();
+  return res.text;
 }
 
 function parseListObjects(xml) {
@@ -267,12 +253,16 @@ async function replayOne(targetUrl, request, health) {
 }
 
 async function postForm(targetUrl, body) {
-  const res = await fetchWithTimeout(targetUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  return { status: res.status, text: await res.text() };
+  const { status, text } = await fetchText(
+    targetUrl,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    },
+    FETCH_TIMEOUT_MS,
+  );
+  return { status, text };
 }
 
 async function waitForTarget(targetUrl) {

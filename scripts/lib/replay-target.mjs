@@ -76,3 +76,19 @@ export async function sendTracked(send, health, retryOptions) {
   health.record(res);
   return res;
 }
+
+export async function fetchText(url, init = {}, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    return { ok: res.ok, status: res.status, text: await res.text() };
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`request to ${url} timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}

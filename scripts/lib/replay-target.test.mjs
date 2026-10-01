@@ -2,10 +2,12 @@
 // Run with `node --test scripts/`.
 
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { test } from "node:test";
 
 import {
   createHealthTracker,
+  fetchText,
   isTransientResponse,
   sendTracked,
   sendWithRetry,
@@ -174,4 +176,41 @@ test("sendTracked: a successful response is returned unchanged and keeps the tar
   const health = createHealthTracker({ maxConsecutive: 1 });
   assert.deepEqual(await sendTracked(send, health), ok);
   assert.equal(health.unhealthy(), false);
+});
+
+// ---------------------------------------------------------------------------
+// fetchText
+// ---------------------------------------------------------------------------
+
+async function withServer(handler, fn) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}/`;
+  try {
+    return await fn(url);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("fetchText: returns status and body text", async () => {
+  await withServer(
+    (_req, res) => res.writeHead(201).end("hello"),
+    async (url) => {
+      assert.deepEqual(await fetchText(url, {}, 1000), { ok: true, status: 201, text: "hello" });
+    },
+  );
+});
+
+test("fetchText: times out when headers arrive but the body stalls", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(200);
+      res.write("partial");
+    },
+    async (url) => {
+      await assert.rejects(fetchText(url, {}, 100), /timed out after 100ms/);
+    },
+  );
 });
