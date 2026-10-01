@@ -40,7 +40,7 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
-import { sendWithRetry, waitUntilReady } from "./lib/replay-target.mjs";
+import { createHealthTracker, sendWithRetry, waitUntilReady } from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
@@ -238,7 +238,7 @@ async function fetchCaptures(env, limit) {
 // Replay + diff
 // ---------------------------------------------------------------------------
 
-async function replayOne(targetUrl, request) {
+async function replayOne(targetUrl, request, health) {
   const body = new URLSearchParams();
   if (request.type) body.set("type", request.type);
   if (request.disable) body.set("disable", request.disable);
@@ -257,7 +257,9 @@ async function replayOne(targetUrl, request) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
-  const { status, text } = await sendWithRetry(() => postForm(targetUrl, body));
+  const res = await sendWithRetry(() => postForm(targetUrl, body));
+  health.record(res);
+  const { status, text } = res;
   try {
     return JSON.parse(text);
   } catch {
@@ -278,7 +280,8 @@ async function waitForTarget(targetUrl) {
   const probe = new URLSearchParams({ content: "on: push\njobs: {}\n", no_capture: "1" });
   const ready = await waitUntilReady(() => postForm(targetUrl, probe));
   if (!ready) {
-    console.warn(`WARNING: ${targetUrl} did not answer with JSON consistently; replaying anyway.`);
+    console.error(`${targetUrl} did not answer with JSON consistently; not replaying against it.`);
+    process.exit(1);
   }
 }
 
@@ -429,8 +432,13 @@ async function main() {
     threwByRule: new Map(),
   };
 
+  const health = createHealthTracker();
   for (const cap of captures) {
-    const replayed = await replayOne(args.target, cap.request);
+    const replayed = await replayOne(args.target, cap.request, health);
+    if (health.unhealthy()) {
+      console.error(`${args.target} kept failing after retries; aborting the replay.`);
+      process.exit(1);
+    }
     const diff = computeDiff(normalize(cap.response), normalize(replayed));
 
     if (diff.length === 0) {

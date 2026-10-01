@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isTransientResponse, sendWithRetry, waitUntilReady } from "./replay-target.mjs";
+import {
+  createHealthTracker,
+  isTransientResponse,
+  sendWithRetry,
+  waitUntilReady,
+} from "./replay-target.mjs";
 
 const ok = { status: 200, text: '{"ok":true}' };
 const unavailable = { status: 503, text: "<!DOCTYPE html><title>error</title>" };
@@ -39,6 +44,10 @@ test("isTransientResponse: a 4xx JSON response is not transient", () => {
 
 test("isTransientResponse: a 5xx response is transient", () => {
   assert.equal(isTransientResponse({ status: 503, text: '{"ok":false}' }), true);
+});
+
+test("isTransientResponse: a JSON 429 rate-limit response is transient", () => {
+  assert.equal(isTransientResponse({ status: 429, text: '{"ok":false,"error":"rate limit exceeded"}' }), true);
 });
 
 test("isTransientResponse: a non-JSON body is transient even with status 200", () => {
@@ -113,4 +122,25 @@ test("waitUntilReady: a thrown network error resets the consecutive count instea
   const clock = fakeClock();
   const ready = await waitUntilReady(send, { consecutive: 2, intervalMs: 10, timeoutMs: 1000, ...clock });
   assert.equal(ready, true);
+});
+
+// ---------------------------------------------------------------------------
+// createHealthTracker
+// ---------------------------------------------------------------------------
+
+test("createHealthTracker: reports unhealthy after the configured number of consecutive transient results", () => {
+  const health = createHealthTracker({ maxConsecutive: 3 });
+  health.record(unavailable);
+  health.record(unavailable);
+  assert.equal(health.unhealthy(), false);
+  health.record(unavailable);
+  assert.equal(health.unhealthy(), true);
+});
+
+test("createHealthTracker: a good result resets the streak", () => {
+  const health = createHealthTracker({ maxConsecutive: 2 });
+  health.record(unavailable);
+  health.record(ok);
+  health.record(unavailable);
+  assert.equal(health.unhealthy(), false);
 });

@@ -5,7 +5,7 @@
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function isTransientResponse({ status, text }) {
-  if (status >= 500) return true;
+  if (status >= 500 || status === 429) return true;
   try {
     JSON.parse(text);
     return false;
@@ -54,4 +54,14 @@ export async function waitUntilReady(
     await sleep(intervalMs);
   }
   return false;
+}
+
+export function createHealthTracker({ maxConsecutive = 3 } = {}) {
+  let streak = 0;
+  return {
+    record(res) {
+      streak = isTransientResponse(res) ? streak + 1 : 0;
+    },
+    unhealthy: () => streak >= maxConsecutive,
+  };
 }
