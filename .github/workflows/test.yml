@@ -33,7 +33,7 @@ jobs:
         run: moon test
 
       # js-only packages (worker, cmd/main) are skipped by the default
-      # wasm-gc run above, so cover them explicitly. Pin Node rather than
+      # wasm run above, so cover them explicitly. Pin Node rather than
       # relying on whatever ubuntu-latest preinstalls.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -42,7 +42,7 @@ jobs:
 
       # The js target now resolves `@karinto/shell-ts-adapter` (#113,
       # tree-sitter-bash) via root `node_modules`, so it needs installing
-      # before this pass — the wasm-gc pass above never touches it.
+      # before this pass — the wasm pass above never touches it.
       - run: npm ci
 
       - name: moon test (js)
