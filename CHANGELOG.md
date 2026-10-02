@@ -1,5 +1,28 @@
 # karinto
 
+## 0.11.0
+
+### Minor Changes
+
+- [#154](https://github.com/toiroakr/karinto/pull/154) [`84351bb`](https://github.com/toiroakr/karinto/commit/84351bb6156d7455366fa487721366c539cebcc3) Thanks [@toiroakr](https://github.com/toiroakr)! - Add three `error` rules for `dependabot.yml`, derived from the required fields
+  of the official Dependabot v2 JSON schema:
+  
+  - `dependabot-version` — top-level `version:` must be present and equal `2`.
+  - `dependabot-update-fields` — top-level `updates:` must be a list of
+    mappings, and every entry must declare
+    `package-ecosystem`, a `schedule` with an `interval` (optional for entries in
+    a `multi-ecosystem-group`), and exactly one of `directory` / `directories`.
+  - `dependabot-duplicate-directories` — a directory may appear only once across
+    update entries that share the same `package-ecosystem` and `target-branch`.
+
+### Patch Changes
+
+- [#156](https://github.com/toiroakr/karinto/pull/156) [`c11117b`](https://github.com/toiroakr/karinto/commit/c11117b5a8c1345ac6a80b9347f5c2a368959c0f) Thanks [@toiroakr](https://github.com/toiroakr)! - Deeply nested YAML now fails with a `recursion limit exceeded` parse error
+  instead of crashing the parser with `RangeError: Maximum call stack size
+  exceeded`. The nesting limit drops from 1000 to 128 levels: the old limit was
+  never reached because the stack ran out first (block mappings nested about 800
+  levels deep already overflowed the shipped JS build).
+
 ## 0.10.2
 
 ### Patch Changes
