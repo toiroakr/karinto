@@ -20,6 +20,19 @@
 
 ## Build & test
 
+Install the same toolchain as CI with `bash scripts/install-moon.sh`, then run
+`moon update`. `.moonbit-version` pins the compiler version and revision for all
+build, test, deploy, release and Copilot workflows. Do not install `latest` in
+these workflows: toolchain updates can drop support for dependency manifests
+even when this repository has not changed.
+
+Update the pin in a PR and verify both test targets and the release JS build
+before merging. The upstream download service retains versioned archives for
+60 days; the current pin's archives expire on November 15, 2026. Update it (and
+incompatible dependencies such as `moonbitlang/regexp`) before that date.
+`node --test "scripts/**/*.test.mjs"` checks that workflows use the shared
+installer and that it rejects floating versions.
+
 ```sh
 # Tests (active + #skip fixtures)
 moon test
