@@ -8,9 +8,13 @@ on:
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - .moonbit-version
+      - scripts/install-moon.sh
   pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - .moonbit-version
+      - scripts/install-moon.sh
 
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
@@ -33,9 +37,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+        run: bash scripts/install-moon.sh
 
       - name: Update MoonBit dependencies
         run: |

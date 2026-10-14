@@ -41,6 +41,8 @@ on:
     paths:
       - .github/workflows/**
       - mise.toml
+      - .moonbit-version
+      - scripts/install-moon.sh
       - ghalint.yaml
       - scripts/diff-rules/**
       - scripts/replay.mjs
@@ -78,6 +80,8 @@ jobs:
             relevant:
               - '.github/workflows/**'
               - 'mise.toml'
+              - '.moonbit-version'
+              - 'scripts/install-moon.sh'
               - 'ghalint.yaml'
               - 'scripts/diff-rules/**'
               - 'scripts/replay.mjs'
