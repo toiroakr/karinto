@@ -380,7 +380,10 @@ automatically on first use, so no pre-provisioning is needed for them.
   user-visible release).
 - `minimumReleaseAge: 7 days` — Renovate waits a week after a version is
   published before opening a PR, to dodge insta-broken releases. Security
-  advisories (`vulnerabilityAlerts`) bypass this delay.
+  advisories (`vulnerabilityAlerts`) bypass this delay. `prCreation: not-pending`
+  and `internalChecksFilter: strict` keep pending stability checks out of PRs.
+  `internalChecksAsSuccess: true` lets a passing stability check unblock PR
+  creation when CI only runs after the PR is opened.
 - **Auto-merge** is enabled on every Renovate PR (squash). Once all checks
   pass (`moon-test`, `deploy`, `changeset-check` skipped), GitHub
   auto-merges the PR. The branch is auto-deleted after merge.
