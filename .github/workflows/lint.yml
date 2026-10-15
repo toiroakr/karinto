@@ -140,7 +140,7 @@ jobs:
       # No `cache:` input, and this job builds and publishes nothing — it only
       # imports the rule modules — so there is no runtime cache surface to
       # poison.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 # zizmor: ignore[cache-poisoning]
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: '22'
           package-manager-cache: false
@@ -184,7 +184,7 @@ jobs:
       # npm 11 (Renovate, local dev), and npm 10 (bundled with Node 22) drops
       # the `libc` field npm 11 records on platform-specific packages, which
       # would read as drift on every check.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           package-manager-cache: false
@@ -224,7 +224,7 @@ jobs:
           persist-credentials: false
 
       # Node 24 for npm 11 — see lockfile-drift above.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           package-manager-cache: false
