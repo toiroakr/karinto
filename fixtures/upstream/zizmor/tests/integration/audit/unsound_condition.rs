@@ -1,9 +1,9 @@
-use crate::common::{WorkspaceBuilder, input_under_test, zizmor};
+use zizmor_dev::{WorkspaceBuilder, Zizmor, input_under_test};
 
 #[test]
 fn test_normal_persona() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("unsound-condition.yml"))
             .run()?,
         @r#"
@@ -109,24 +109,27 @@ jobs:
         run: echo "test"
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
-                .output(crate::common::OutputMode::Both)
+            Zizmor::cargo_bin()
+                .output(zizmor_dev::OutputMode::Both)
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
-        @"
-    @@ -8,3 +8,3 @@
+        @r#"
+    @@ -6,6 +6,6 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: simple case
     -        if: |
     +        if: |-
                ${{ github.event_name == 'push' }}
-    "
+             run: echo "test"
+    "#
     );
 
     Ok(())
@@ -147,24 +150,27 @@ jobs:
         run: echo "test"
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
-                .output(crate::common::OutputMode::Both)
+            Zizmor::cargo_bin()
+                .output(zizmor_dev::OutputMode::Both)
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
-        @"
-    @@ -8,3 +8,3 @@
+        @r#"
+    @@ -6,6 +6,6 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: folded case
     -        if: >
     +        if: >-
                ${{ github.actor == 'dependabot[bot]' }}
-    "
+             run: echo "test"
+    "#
     );
 
     Ok(())
@@ -186,24 +192,28 @@ jobs:
         run: echo "test"
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
-                .output(crate::common::OutputMode::Both)
+            Zizmor::cargo_bin()
+                .output(zizmor_dev::OutputMode::Both)
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
-        @"
-    @@ -8,3 +8,3 @@
+        @r#"
+    @@ -6,7 +6,7 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: multiline case
     -        if: |
     +        if: |-
                ${{ github.event_name == 'push'
-    "
+                 && github.ref == 'refs/heads/main' }}
+             run: echo "test"
+    "#
     );
 
     Ok(())
@@ -228,23 +238,27 @@ jobs:
         run: echo "test"
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
-                .output(crate::common::OutputMode::Both)
+            Zizmor::cargo_bin()
+                .output(zizmor_dev::OutputMode::Both)
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -8,3 +8,3 @@
+    @@ -6,7 +6,7 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: complex case
     -        if: |
     +        if: |-
                ${{
+                 github.event_name == 'push' &&
+                 (github.ref == 'refs/heads/main' ||
     "
     );
 
@@ -263,23 +277,26 @@ jobs:
     uses: $/.github/workflows/reusable.yml
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
-                .output(crate::common::OutputMode::Both)
+            Zizmor::cargo_bin()
+                .output(zizmor_dev::OutputMode::Both)
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -5,3 +5,3 @@
+    @@ -3,6 +3,6 @@
+     on: push
+     jobs:
        reusable-job:
     -    if: |
     +    if: |-
            ${{ github.event_name == 'pull_request' }}
+         uses: $/.github/workflows/reusable.yml
     "
     );
 
