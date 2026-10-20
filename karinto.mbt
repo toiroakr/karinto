@@ -9,6 +9,7 @@ pub(all) enum FileKind {
   Workflow
   Action
   Dependabot
+  PreCommit
   Unknown
 } derive(Eq, Debug)
 
@@ -162,6 +163,7 @@ pub impl ToJson for FileKind with fn to_json(self) {
     Workflow => "workflow"
     Action => "action"
     Dependabot => "dependabot"
+    PreCommit => "pre-commit"
     Unknown => "unknown"
   }
 }
@@ -710,6 +712,10 @@ fn detect_kind(doc : @yaml.Yaml) -> FileKind {
         // Dependabot config (`.github/dependabot.yml`): `updates:` is unique to
         // it — workflows/actions never carry a top-level `updates` key.
         Dependabot
+      } else if m.contains("repos") {
+        // `.pre-commit-config.yaml`: a top-level `repos:` list is unique to it
+        // among the kinds above.
+        PreCommit
       } else {
         Unknown
       }

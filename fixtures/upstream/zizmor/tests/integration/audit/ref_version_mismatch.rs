@@ -1,13 +1,13 @@
-use crate::common::{NetworkMode, input_under_test, zizmor};
 use anyhow::Result;
+use zizmor_dev::{NetworkMode, Zizmor, input_under_test};
 
 #[cfg_attr(not(feature = "gh-token-tests"), ignore)]
 #[test]
 fn test_ref_version_mismatch() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
-            .output(crate::common::OutputMode::Both)
+            .output(zizmor_dev::OutputMode::Both)
             .input(input_under_test("ref-version-mismatch.yml"))
             .run()?,
         @"
@@ -56,7 +56,7 @@ fn test_ref_version_mismatch() -> Result<()> {
 #[test]
 fn test_missing_version_comment_pedantic() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .args(["--persona=pedantic"])
             .input(input_under_test("ref-version-mismatch.yml"))
@@ -135,7 +135,7 @@ fn test_missing_version_comment_pedantic() -> Result<()> {
 #[test]
 fn test_nested_annotated_tags() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test(
                 "ref-version-mismatch/nested-annotated-tags.yml"
@@ -151,7 +151,7 @@ fn test_nested_annotated_tags() -> Result<()> {
 #[test]
 fn test_issue_1853() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-1853-repro.yml"))
             .run()?,
@@ -178,7 +178,7 @@ fn test_issue_1853() -> Result<()> {
 #[test]
 fn test_issue_1869() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-1869-repro.yml"))
             .run()?,
@@ -193,7 +193,7 @@ fn test_issue_1869() -> Result<()> {
 #[test]
 fn test_issue_1899() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-1899-repro.yml"))
             .run()?,
@@ -208,7 +208,7 @@ fn test_issue_1899() -> Result<()> {
 #[test]
 fn test_issue_1938() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .args(["--persona=pedantic"])
             .input(input_under_test("ref-version-mismatch/issue-1938-repro.yml"))
@@ -222,7 +222,7 @@ fn test_issue_1938() -> Result<()> {
 #[test]
 fn test_issue_2039() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-2039-repro.yml"))
             .run()?,
@@ -237,7 +237,7 @@ fn test_issue_2039() -> Result<()> {
 #[test]
 fn test_issue_2165() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-2165-repro.yml"))
             .run()?,
@@ -255,7 +255,7 @@ fn test_issue_2165() -> Result<()> {
 #[test]
 fn test_issue_2321() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-2321-repro.yml"))
             .run()?,
@@ -285,7 +285,7 @@ fn test_issue_2321() -> Result<()> {
 #[test]
 fn test_issue_2324() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .offline(NetworkMode::AssertOnline)
             .input(input_under_test("ref-version-mismatch/issue-2324-repro.yml"))
             .run()?,
@@ -308,10 +308,41 @@ fn test_issue_2324() -> Result<()> {
     Ok(())
 }
 
+/// Bug #2393: unusual comment placement on a `uses:` clause should not crash zizmor,
+/// and should produce a normal finding.
+///
+/// See: <https://github.com/zizmorcore/zizmor/issues/2393>
+#[cfg_attr(not(feature = "gh-token-tests"), ignore)]
+#[test]
+fn test_issue_2393() -> Result<()> {
+    insta::assert_snapshot!(
+        Zizmor::cargo_bin()
+            .offline(NetworkMode::AssertOnline)
+            .input(input_under_test("ref-version-mismatch/issue-2393-repro.yml"))
+            .run()?,
+        @"
+    warning[ref-version-mismatch]: action's hash pin has mismatched or missing version comment
+      --> @@INPUT@@:18:20
+       |
+    18 |       - uses: |- # v1.2.3
+       |                    ^^^^^^ points to unknown ref
+    19 |           astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+       |           ----------------------------------------------------------- is pointed to by tag v10.0.1
+       |
+       = note: audit confidence → High
+       = note: this finding has an auto-fix
+
+    1 findings (1 unsafe fixes): 0 informational, 0 low, 1 medium, 0 high
+    "
+    );
+
+    Ok(())
+}
+
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_add_version_comment_composite_action() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let action_content = r#"
 name: Test Missing Version Comment
@@ -325,23 +356,26 @@ runs:
         persist-credentials: false
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file("action/action.yml", action_content);
 
     insta::assert_snapshot!(
         &workspace.diff("action/action.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -7,3 +7,3 @@
+    @@ -5,6 +5,6 @@
+       using: composite
+       steps:
          - name: Checkout without version comment
     -      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     +      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
            with:
+             persist-credentials: false
     "
     );
 
@@ -351,7 +385,7 @@ runs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_add_version_comment_workflow() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: Test Missing Version Comment
@@ -367,23 +401,26 @@ jobs:
           persist-credentials: false
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,3 +9,3 @@
+    @@ -7,6 +7,6 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: Checkout without version comment
     -        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     +        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
              with:
+               persist-credentials: false
     "
     );
 
@@ -393,7 +430,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_version_comment_mismatch() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: Test Version Comment Mismatch
@@ -409,23 +446,26 @@ jobs:
           persist-credentials: false
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,3 +9,3 @@
+    @@ -7,6 +7,6 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: Checkout with mismatched version comment
     -        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v3.0.0
     +        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v2.0.0
              with:
+               persist-credentials: false
     "
     );
 
@@ -435,7 +475,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_version_comment_mismatch_crlf() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: Test Version Comment Mismatch
@@ -452,23 +492,26 @@ jobs:
 "#
     .replace('\n', "\r\n");
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", &workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,3 +9,3 @@
+    @@ -7,6 +7,6 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: Checkout with mismatched version comment
     -        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v3.0.0
     +        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v2.0.0
              with:
+               persist-credentials: false
     "
     );
 
@@ -478,7 +521,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_version_comment_mismatch_bizarre_formatting() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: Test Missing Version Comment
@@ -494,23 +537,26 @@ jobs:
           persist-credentials: false
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", &workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,3 +9,3 @@
+    @@ -7,6 +7,6 @@
+         runs-on: ubuntu-latest
+         steps:
            -
     -        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     +        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
              with:
+               persist-credentials: false
     "
     );
 
@@ -520,7 +566,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_version_comment_different_formats() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: Test Different Version Formats
@@ -544,33 +590,36 @@ jobs:
           persist-credentials: false
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", &workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,3 +9,3 @@
+    @@ -7,14 +7,14 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: Tag format
     -        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # tag=v3.0.0
     +        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v2.0.0
              with:
-    @@ -13,3 +13,3 @@
+               persist-credentials: false
            - name: Simple format
     -        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v3.0.0
     +        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v2.0.0
              with:
-    @@ -17,3 +17,3 @@
+               persist-credentials: false
            - name: Version format
     -        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # version: v3.0.0
     +        uses: actions/checkout@722adc63f1aa60a57ec37892e133b1d319cae598 # v2.0.0
              with:
+               persist-credentials: false
     "
     );
 
@@ -580,7 +629,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_version_comment_nonexistent_ref() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: nonexistent
@@ -599,19 +648,21 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v9.9.9
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", &workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -14,2 +14,2 @@
+    @@ -12,4 +12,4 @@
+         runs-on: ubuntu-latest
+         steps:
            - name: Setup Go
     -        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v9.9.9
     +        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -624,7 +675,7 @@ jobs:
 #[cfg(feature = "gh-token-tests")]
 #[test]
 fn test_fix_reusable_workflow() -> anyhow::Result<()> {
-    use crate::common::WorkspaceBuilder;
+    use zizmor_dev::WorkspaceBuilder;
 
     let workflow_content = r#"
 name: reusable
@@ -640,19 +691,21 @@ jobs:
     uses: docker/github-builder/.github/workflows/build.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a # v1.16.0
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/test.yml", &workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/test.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all", "--persona=pedantic"])
                 .offline(NetworkMode::AssertOnline)
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -11,2 +11,2 @@
+    @@ -9,4 +9,4 @@
+     jobs:
+       job1:
          name: job1
     -    uses: docker/github-builder/.github/workflows/build.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a # v1.16.0
     +    uses: docker/github-builder/.github/workflows/build.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a # v1.17.0

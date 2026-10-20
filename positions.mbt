@@ -122,6 +122,19 @@ fn entry_field_pos(
 }
 
 ///|
+/// Resolve the position of a top-level workflow `key` (e.g. `cache-mode:`).
+/// Returns `None` when the positioned parse is unavailable or the key is
+/// absent.
+fn workflow_field_pos(ctx : WalkCtx, key : String) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  match node_get_entry(root, key) {
+    Some((fk, fv)) => Some(entry_field_pos(fk, fv, lc))
+    None => None
+  }
+}
+
+///|
 /// Resolve the position of a job's `key` field, e.g. the `uses:` or
 /// `permissions:` field under `jobs.<job>.<key>`. Returns `None` when the
 /// positioned parse is unavailable or the field is absent — callers fall back

@@ -916,7 +916,7 @@ pub fn all_rule_specs() -> Array[RuleSpec] {
     ),
     spec(
       "typosquat-uses",
-      "`uses:` owner resembles a popular action's owner",
+      "`uses:` / `repo:` owner resembles a popular repository's owner",
       Zizmor,
       ["zizmor:typosquat-uses"],
       SupplyChain,

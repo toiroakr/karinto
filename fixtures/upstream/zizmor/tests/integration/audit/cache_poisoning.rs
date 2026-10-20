@@ -1,9 +1,9 @@
-use crate::common::{WorkspaceBuilder, input_under_test, zizmor};
+use zizmor_dev::{WorkspaceBuilder, Zizmor, input_under_test};
 
 #[test]
 fn test_caching_disabled_by_default() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-disabled-by-default.yml"
             ))
@@ -17,7 +17,7 @@ fn test_caching_disabled_by_default() -> anyhow::Result<()> {
 #[test]
 fn test_caching_enabled_by_default() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-enabled-by-default.yml"
             ))
@@ -45,7 +45,7 @@ fn test_caching_enabled_by_default() -> anyhow::Result<()> {
 #[test]
 fn test_caching_opt_in_boolean_toggle() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-opt-in-boolean-toggle.yml"
             ))
@@ -76,7 +76,7 @@ fn test_caching_opt_in_boolean_toggle() -> anyhow::Result<()> {
 #[test]
 fn test_caching_opt_in_expression() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-opt-in-expression.yml"
             ))
@@ -107,7 +107,7 @@ fn test_caching_opt_in_expression() -> anyhow::Result<()> {
 #[test]
 fn test_caching_opt_in_multi_value_toggle() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-opt-in-multi-value-toggle.yml"
             ))
@@ -137,7 +137,7 @@ fn test_caching_opt_in_multi_value_toggle() -> anyhow::Result<()> {
 #[test]
 fn test_caching_opt_out() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/caching-opt-out.yml"))
             .run()?,
         @"No findings to report. Good job! (1 suppressed)"
@@ -149,7 +149,7 @@ fn test_caching_opt_out() -> anyhow::Result<()> {
 #[test]
 fn test_no_cache_aware_steps() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/no-cache-aware-steps.yml"))
             .run()?,
         @"No findings to report. Good job! (1 ignored, 2 suppressed)"
@@ -161,7 +161,7 @@ fn test_no_cache_aware_steps() -> anyhow::Result<()> {
 #[test]
 fn test_workflow_tag_trigger() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/workflow-tag-trigger.yml"))
             .run()?,
         @r#"
@@ -190,7 +190,7 @@ fn test_workflow_tag_trigger() -> anyhow::Result<()> {
 #[test]
 fn test_caching_opt_in_boolish_toggle() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-opt-in-boolish-toggle.yml"
             ))
@@ -221,7 +221,7 @@ fn test_caching_opt_in_boolish_toggle() -> anyhow::Result<()> {
 #[test]
 fn test_publisher_step() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/publisher-step.yml"))
             .run()?,
         @"
@@ -250,7 +250,7 @@ fn test_publisher_step() -> anyhow::Result<()> {
 #[test]
 fn test_issue_343() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-343-repro.yml"))
             .run()?,
         @r#"
@@ -315,7 +315,7 @@ fn test_issue_343() -> anyhow::Result<()> {
 #[test]
 fn test_caching_not_configurable() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/caching-not-configurable.yml"
             ))
@@ -345,7 +345,7 @@ fn test_caching_not_configurable() -> anyhow::Result<()> {
 #[test]
 fn test_workflow_release_branch_trigger() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/workflow-release-branch-trigger.yml"
             ))
@@ -380,7 +380,7 @@ fn test_workflow_release_branch_trigger() -> anyhow::Result<()> {
 #[test]
 fn test_issue_378() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-378-repro.yml"))
             .run()?,
         @"No findings to report. Good job! (1 suppressed)"
@@ -393,7 +393,7 @@ fn test_issue_378() -> anyhow::Result<()> {
 #[test]
 fn test_issue_642() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-642-repro.yml"))
             .run()?,
         @"
@@ -426,7 +426,7 @@ fn test_issue_642() -> anyhow::Result<()> {
 #[test]
 fn test_issue_1081() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-1081-repro.yml"))
             .run()?,
         @"
@@ -485,7 +485,7 @@ fn test_issue_1081() -> anyhow::Result<()> {
 #[test]
 fn test_issue_1152() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-1152-repro.yml"))
             .run()?,
         @"
@@ -538,7 +538,7 @@ fn test_issue_1152() -> anyhow::Result<()> {
 #[test]
 fn test_issue_1485() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-1485-repro.yml"))
             .run()?,
         @"No findings to report. Good job! (2 suppressed)"
@@ -551,7 +551,7 @@ fn test_issue_1485() -> anyhow::Result<()> {
 #[test]
 fn test_ramsey_composer_install_action() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/ramsey-composer-install.yml"
             ))
@@ -594,7 +594,7 @@ fn test_ramsey_composer_install_action() -> anyhow::Result<()> {
 #[test]
 fn test_workflow_release_trigger_object() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/workflow-release-trigger-object.yml"
             ))
@@ -627,7 +627,7 @@ fn test_workflow_release_trigger_object() -> anyhow::Result<()> {
 #[test]
 fn test_issue_1940() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/issue-1940-repro.yml")).run()?,
         @r#"No findings to report. Good job! (2 suppressed)"#);
 
@@ -640,7 +640,7 @@ fn test_issue_1940() -> anyhow::Result<()> {
 #[test]
 fn test_issue_2320() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-    zizmor()
+    Zizmor::cargo_bin()
         .input(input_under_test("cache-poisoning/issue-2320-repro.yml"))
         .run()?,
     @"
@@ -696,7 +696,7 @@ fn test_issue_2320() -> anyhow::Result<()> {
 #[test]
 fn test_trigger_heuristics_tag_only() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("cache-poisoning/trigger-heuristics/tag-only.yml"))
             .run()?,
         @r#"
@@ -750,7 +750,7 @@ fn test_trigger_heuristics_tag_only() -> anyhow::Result<()> {
 #[test]
 fn test_trigger_heuristics_tag_and_release() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/trigger-heuristics/tag-and-release.yml"
             ))
@@ -764,7 +764,7 @@ fn test_trigger_heuristics_tag_and_release() -> anyhow::Result<()> {
 #[test]
 fn test_trigger_heuristics_tag_and_branch() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test(
                 "cache-poisoning/trigger-heuristics/tag-and-branch.yml"
             ))
@@ -819,6 +819,86 @@ fn test_trigger_heuristics_tag_and_branch() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An effective `cache-mode: none` on either a workflow or a job suppresses
+/// any cache poisoning findings that would occur.
+#[test]
+fn test_effective_cache_mode_none_suppresses_findings() -> anyhow::Result<()> {
+    insta::assert_snapshot!(
+        Zizmor::cargo_bin()
+            .input(input_under_test(
+                "cache-poisoning/workflow-effective-cache-mode-none.yml"
+            ))
+            .run()?,
+        @"No findings to report. Good job!");
+
+    insta::assert_snapshot!(
+        Zizmor::cargo_bin()
+            .input(input_under_test(
+                "cache-poisoning/job-effective-cache-mode-none.yml"
+            ))
+            .run()?,
+        @"No findings to report. Good job!");
+
+    Ok(())
+}
+
+/// We flag the combination of an explicit `cache-mode: write` (or `write-only`)
+/// and a dangerous trigger.
+#[test]
+fn test_dangerous_trigger_cache_write() -> anyhow::Result<()> {
+    // cache-mode: write at the workflow level.
+    insta::assert_snapshot!(
+        Zizmor::cargo_bin()
+            .input(input_under_test(
+                "cache-poisoning/dangerous-trigger-write-cache.yml"
+            ))
+            .run()?,
+        @"
+    error[cache-poisoning]: runtime artifacts potentially vulnerable to a cache poisoning attack
+      --> @@INPUT@@:7:1
+       |
+     1 | on: pull_request_target # zizmor: ignore[dangerous-triggers]
+       | ----------------------- trigger provides elevated access to external actors
+    ...
+     7 | cache-mode: write
+       | ^^^^^^^^^^^^^^^^^ cache writes enabled here
+    ...
+    15 |     name: foo
+       |     --------- this job can write to the cache
+       |
+       = note: audit confidence → High
+       = note: this finding has an auto-fix
+
+    2 findings (1 ignored, 1 safe fixes): 0 informational, 0 low, 0 medium, 1 high
+    ");
+
+    // cache-mode: write at the job level.
+    insta::assert_snapshot!(
+        Zizmor::cargo_bin()
+            .input(input_under_test(
+                "cache-poisoning/dangerous-trigger-write-cache-job.yml"
+            ))
+            .run()?,
+        @"
+    error[cache-poisoning]: runtime artifacts potentially vulnerable to a cache poisoning attack
+      --> @@INPUT@@:16:5
+       |
+     1 | on: pull_request_target # zizmor: ignore[dangerous-triggers]
+       | ----------------------- trigger provides elevated access to external actors
+    ...
+    15 |     name: foo
+       |     --------- this job can write to the cache
+    16 |     cache-mode: write
+       |     ^^^^^^^^^^^^^^^^^ cache writes enabled here
+       |
+       = note: audit confidence → High
+       = note: this finding has an auto-fix
+
+    2 findings (1 ignored, 1 safe fixes): 0 informational, 0 low, 0 medium, 1 high
+    ");
+    Ok(())
+}
+
 #[test]
 fn test_fix_cache_disable_opt_out_boolean() -> anyhow::Result<()> {
     let workflow_content = r#"
@@ -838,18 +918,20 @@ jobs:
       - uses: softprops/action-gh-release@v1
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/cache-poisoning.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/cache-poisoning.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -14,2 +14,3 @@
+    @@ -12,4 +12,5 @@
+                 ~/.cargo/registry
+                 ~/.cargo/git
                key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     +          lookup-only: true
            - uses: softprops/action-gh-release@v1
@@ -876,18 +958,20 @@ jobs:
       - uses: softprops/action-gh-release@v1
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/cache-poisoning.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/cache-poisoning.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -11,3 +11,3 @@
+    @@ -9,5 +9,5 @@
+           - uses: actions/setup-go@v4
+             with:
                go-version: '1.21'
     -          cache: true
     +          cache: false
@@ -920,18 +1004,20 @@ jobs:
           enable-cache: ${{ github.ref == 'refs/heads/main' }}
 "#;
 
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.add_file(".github/workflows/cache-poisoning.yml", workflow_content);
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/cache-poisoning.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -9,10 +9,12 @@
+    @@ -7,12 +7,14 @@
+         runs-on: ubuntu-latest
+         steps:
            - uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
     +        with:
     +          enable-cache: false
@@ -947,6 +1033,107 @@ jobs:
              with:
     -          enable-cache: ${{ github.ref == 'refs/heads/main' }}
     +          enable-cache: false
+    "
+    );
+
+    Ok(())
+}
+
+/// We can replace `cache-mode: write` with `cache-mode: none` at the workflow level.
+#[test]
+fn test_fix_cache_mode_write_workflow_level() -> anyhow::Result<()> {
+    let workflow_content = r#"
+on: pull_request_target # zizmor: ignore[dangerous-triggers]
+
+name: cache-poisoning
+
+permissions: {}
+
+cache-mode: write
+
+concurrency:
+  group: foo
+  cancel-in-progress: true
+
+jobs:
+  foo:
+    name: foo
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo foo
+"#;
+
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
+    workspace.add_file(".github/workflows/cache-poisoning.yml", workflow_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/workflows/cache-poisoning.yml", |workspace| {
+            Zizmor::cargo_bin()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -5,7 +5,7 @@
+     ⏎
+     permissions: {}
+     ⏎
+    -cache-mode: write
+    +cache-mode: none
+     ⏎
+     concurrency:
+       group: foo
+    "
+    );
+
+    Ok(())
+}
+
+/// We can replace `cache-mode: write` with `cache-mode: none` at the job level.
+#[test]
+fn test_fix_cache_mode_write_job_level() -> anyhow::Result<()> {
+    let workflow_content = r#"
+on: pull_request_target # zizmor: ignore[dangerous-triggers]
+
+name: cache-poisoning
+
+permissions: {}
+
+cache-mode: none
+
+concurrency:
+  group: foo
+  cancel-in-progress: true
+
+jobs:
+  foo:
+    name: foo
+    cache-mode: write
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo foo
+"#;
+
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
+    workspace.add_file(".github/workflows/cache-poisoning.yml", workflow_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/workflows/cache-poisoning.yml", |workspace| {
+            Zizmor::cargo_bin()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -14,7 +14,7 @@
+     jobs:
+       foo:
+         name: foo
+    -    cache-mode: write
+    +    cache-mode: none
+         runs-on: ubuntu-latest
+         steps:
+           - run: echo foo
     "
     );
 

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::common::{OutputMode, input_under_test, zizmor};
+use zizmor_dev::{OutputMode, Zizmor, input_under_test};
 
 /// Basic sanity test for parallel steps handling.
 ///
@@ -11,7 +11,7 @@ use crate::common::{OutputMode, input_under_test, zizmor};
 #[test]
 fn test_basic() -> Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .output(OutputMode::Both)
             .input(input_under_test(
                 "parallel-steps/basic.yml"
@@ -19,7 +19,7 @@ fn test_basic() -> Result<()> {
             .run()?,
         @r#"
      INFO zizmor: 🌈 zizmor v@@VERSION@@
-     WARN audit:audit{input=Workflow(file://@@INPUT@@)}: zizmor::models::workflow: one or more inputs contains parallel steps; zizmor's support for these is currently experimental. see https://docs.zizmor.sh/usage/#parallel-step for details
+     WARN audit:audit{ident="artipacked" input=Workflow(file://@@INPUT@@)}: zizmor::models::workflow: one or more inputs contains parallel steps; zizmor's support for these is currently experimental. see https://docs.zizmor.sh/usage/#parallel-step for details
      INFO audit: zizmor: 🌈 completed @@INPUT@@
     error[template-injection]: code injection via template expansion
       --> @@INPUT@@:16:28

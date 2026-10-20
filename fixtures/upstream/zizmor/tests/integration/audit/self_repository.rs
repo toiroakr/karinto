@@ -1,9 +1,9 @@
-use crate::common::{WorkspaceBuilder, input_under_test, zizmor};
+use zizmor_dev::{WorkspaceBuilder, Zizmor, input_under_test};
 
 #[test]
 fn test_basic() -> anyhow::Result<()> {
     insta::assert_snapshot!(
-        zizmor()
+        Zizmor::cargo_bin()
             .input(input_under_test("self-repository.yml"))
             .run()?,
         @"
@@ -38,7 +38,7 @@ fn test_basic() -> anyhow::Result<()> {
 
 #[test]
 fn test_fix() -> anyhow::Result<()> {
-    let workspace = WorkspaceBuilder::new().is_git_repo(true).build()?;
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
     workspace.copy(
         &*input_under_test("self-repository.yml"),
         ".github/workflows/self-repository.yml",
@@ -46,18 +46,21 @@ fn test_fix() -> anyhow::Result<()> {
 
     insta::assert_snapshot!(
         &workspace.diff(".github/workflows/self-repository.yml", |workspace| {
-            zizmor()
+            Zizmor::cargo_bin()
                 .args(["--fix=all"])
                 .input(workspace.path())
                 .run()
         })?,
         @"
-    @@ -17,3 +17,3 @@
+    @@ -15,9 +15,9 @@
+         steps:
+           # NOT OK: should be $/some-action
            - name: uses-local-composite-action
     -        uses: ./some-action
     +        uses: $/some-action
-     
-    @@ -22,2 +22,2 @@
+     ⏎
+       reusable:
+         # NOT OK: should be $/.github/workflows/reuse.yml
          name: uses-reusable-workflow
     -    uses: ./.github/workflows/reuse.yml
     +    uses: $/.github/workflows/reuse.yml
