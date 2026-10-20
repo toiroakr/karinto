@@ -70,6 +70,7 @@ pub fn lint_string(
     "workflow" => @karinto.FileKind::Workflow
     "action" => @karinto.FileKind::Action
     "dependabot" => @karinto.FileKind::Dependabot
+    "pre-commit" => @karinto.FileKind::PreCommit
     _ => @karinto.FileKind::Unknown
   }
   let disabled = split_csv(disable_str)
@@ -125,6 +126,7 @@ pub fn lint_string_sarif(
     "workflow" => @karinto.FileKind::Workflow
     "action" => @karinto.FileKind::Action
     "dependabot" => @karinto.FileKind::Dependabot
+    "pre-commit" => @karinto.FileKind::PreCommit
     _ => @karinto.FileKind::Unknown
   }
   let result = @karinto.lint(
@@ -206,6 +208,7 @@ pub fn lint_files_sarif(
       Some("workflow") => @karinto.FileKind::Workflow
       Some("action") => @karinto.FileKind::Action
       Some("dependabot") => @karinto.FileKind::Dependabot
+      Some("pre-commit") => @karinto.FileKind::PreCommit
       _ => @karinto.FileKind::Unknown
     }
     let vuln_uses = match read_string_field(m, "vuln") {

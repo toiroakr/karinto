@@ -59,7 +59,7 @@ fn run() -> Int {
     Some(k) => k
     None => {
       eprintln(
-        "error: invalid value '\{type_str}' for '--type': expected 'workflow', 'action', or 'dependabot'",
+        "error: invalid value '\{type_str}' for '--type': expected 'workflow', 'action', 'dependabot', or 'pre-commit'",
       )
       return 2
     }
@@ -173,7 +173,7 @@ fn build_command() -> @argparse.Command {
         "type",
         short='t',
         long="type",
-        about="File kind: 'workflow', 'action', or 'dependabot' (auto-detected when omitted)",
+        about="File kind: 'workflow', 'action', 'dependabot', or 'pre-commit' (auto-detected when omitted)",
       ),
       @argparse.OptionArg::new(
         "disable",
@@ -269,6 +269,7 @@ fn parse_kind(s : String) -> @karinto.FileKind? {
     "workflow" => Some(@karinto.FileKind::Workflow)
     "action" => Some(@karinto.FileKind::Action)
     "dependabot" => Some(@karinto.FileKind::Dependabot)
+    "pre-commit" => Some(@karinto.FileKind::PreCommit)
     _ => None
   }
 }
@@ -324,7 +325,8 @@ fn split_csv(s : String) -> Array[String] {
 /// paths are workflows (GitHub runs every YAML there as a workflow,
 /// whatever its basename — even `action.yml`), `action.yml` /
 /// `action.yaml` basenames are actions, `.github/dependabot.yml` /
-/// `.yaml` is a Dependabot config; anything else falls back to the
+/// `.yaml` is a Dependabot config, `.pre-commit-config.yaml` is a pre-commit
+/// config; anything else falls back to the
 /// engine's content-based auto-detection.
 fn kind_from_path(path : String) -> @karinto.FileKind {
   // Windows callers pass `\`-separated paths — normalize so the hints
@@ -346,6 +348,9 @@ fn kind_from_path(path : String) -> @karinto.FileKind {
   }
   if basename == "action.yml" || basename == "action.yaml" {
     return @karinto.FileKind::Action
+  }
+  if basename == ".pre-commit-config.yaml" {
+    return @karinto.FileKind::PreCommit
   }
   @karinto.FileKind::Unknown
 }

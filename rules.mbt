@@ -339,6 +339,11 @@ fn workflow_or_action(kind : FileKind) -> Bool {
 }
 
 ///|
+fn workflow_action_or_pre_commit(kind : FileKind) -> Bool {
+  workflow_or_action(kind) || kind == FileKind::PreCommit
+}
+
+///|
 fn action_only(kind : FileKind) -> Bool {
   kind == FileKind::Action
 }
@@ -1009,9 +1014,9 @@ pub fn all_rules() -> Array[Rule] {
     },
     Rule::{
       id: "typosquat-uses",
-      title: "`uses:` owner resembles a popular action's owner",
-      applies: workflow_or_action,
-      on_doc: no_doc(),
+      title: "`uses:` / `repo:` owner resembles a popular repository's owner",
+      applies: workflow_action_or_pre_commit,
+      on_doc: Some(check_typosquat_pre_commit),
       on_job: no_job(),
       on_step: Some(check_typosquat_uses),
     },
@@ -2103,12 +2108,20 @@ fn check_read_all(
 }
 
 // ---------------------------------------------------------------------------
-// Rule: dangerous-triggers (zizmor) — `pull_request_target`, `workflow_run`
+// Rule: dangerous-triggers (zizmor) — `pull_request_target`, `workflow_run`,
+// `issue_comment`
 // ---------------------------------------------------------------------------
 
 ///|
 fn is_dangerous_trigger(name : String) -> Bool {
   name == "pull_request_target" || name == "workflow_run"
+}
+
+///|
+/// `github-env` keeps the narrower `is_dangerous_trigger` list; the
+/// `dangerous-triggers` audit additionally flags `issue_comment`.
+fn is_dangerous_trigger_audit(name : String) -> Bool {
+  is_dangerous_trigger(name) || name == "issue_comment"
 }
 
 ///|
@@ -2129,14 +2142,14 @@ fn check_dangerous_triggers(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
   }
   match m.get("on") {
     Some(String(s)) =>
-      if is_dangerous_trigger(s) {
+      if is_dangerous_trigger_audit(s) {
         emit_dangerous_trigger(s, out)
       }
     Some(Array(arr)) =>
       for item in arr {
         match item {
           String(s) =>
-            if is_dangerous_trigger(s) {
+            if is_dangerous_trigger_audit(s) {
               emit_dangerous_trigger(s, out)
             }
           _ => ()
@@ -2144,7 +2157,7 @@ fn check_dangerous_triggers(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
       }
     Some(Map(om)) =>
       om.each(fn(name, _) {
-        if is_dangerous_trigger(name) {
+        if is_dangerous_trigger_audit(name) {
           emit_dangerous_trigger(name, out)
         }
       })
@@ -2206,7 +2219,17 @@ fn matrix_key_of_image(image : String) -> String? {
 fn unpinned_matrix_images(matrix : @yaml.Yaml, field : String) -> Array[String] {
   let out : Array[String] = []
   match matrix {
-    Map(m) =>
+    Map(m) => {
+      match m.get(field) {
+        Some(Array(values)) =>
+          for v in values {
+            match v {
+              String(sv) => if !is_pinned_image(sv) { out.push(sv) }
+              _ => ()
+            }
+          }
+        _ => ()
+      }
       match m.get("include") {
         Some(Array(entries)) =>
           for e in entries {
@@ -2221,9 +2244,24 @@ fn unpinned_matrix_images(matrix : @yaml.Yaml, field : String) -> Array[String] 
           }
         _ => ()
       }
+    }
     _ => ()
   }
   out
+}
+
+///|
+/// A matrix (or its `include` / `exclude`) given as a `${{ … }}` expression
+/// adds combinations that cannot be analysed statically.
+fn matrix_is_indirect(matrix : @yaml.Yaml) -> Bool {
+  match matrix {
+    String(s) => s.contains("${{")
+    Map(m) =>
+      ["include", "exclude"].any(fn(k) {
+        m.get(k) is Some(String(s)) && s.contains("${{")
+      })
+    _ => false
+  }
 }
 
 ///|
@@ -2244,7 +2282,15 @@ fn check_unpinned_images(
               match job.raw.get("strategy") {
                 Some(Map(strat)) =>
                   match strat.get("matrix") {
-                    Some(mx) =>
+                    Some(mx) => {
+                      if matrix_is_indirect(mx) {
+                        add_diag(
+                          out,
+                          "unpinned-images",
+                          Warning,
+                          "container image `matrix.\{key}` may be unpinned: the matrix is expanded indirectly",
+                        )
+                      }
                       for v2 in unpinned_matrix_images(mx, key) {
                         add_diag(
                           out,
@@ -2253,6 +2299,7 @@ fn check_unpinned_images(
                           "matrix entry `\{key}: \{v2}` produces an unpinned container image",
                         )
                       }
+                    }
                     None => ()
                   }
                 _ => ()
@@ -4891,15 +4938,97 @@ fn cache_step_should_emit(triggers : CacheTriggers, step : CacheStep) -> Bool {
 }
 
 ///|
+/// A job's `cache-mode:` takes precedence over the workflow-level one.
+fn effective_cache_mode(ctx : WalkCtx, j : JobInfo) -> String? {
+  match j.raw.get("cache-mode") {
+    Some(String(s)) => return Some(s)
+    _ => ()
+  }
+  match ctx.workflow_map {
+    Some(m) =>
+      match m.get("cache-mode") {
+        Some(String(s)) => Some(s)
+        _ => None
+      }
+    None => None
+  }
+}
+
+///|
+fn workflow_has_dangerous_trigger_audit(ctx : WalkCtx) -> Bool {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return false
+  }
+  match m.get("on") {
+    Some(String(s)) => is_dangerous_trigger_audit(s)
+    Some(Array(arr)) =>
+      arr.any(fn(i) { i is String(s) && is_dangerous_trigger_audit(s) })
+    Some(Map(om)) => {
+      let mut hit = false
+      om.each(fn(name, _) { if is_dangerous_trigger_audit(name) { hit = true } })
+      hit
+    }
+    _ => false
+  }
+}
+
+///|
+/// An explicit `cache-mode: write` / `write-only` combined with a dangerous
+/// trigger lets an external actor poison the cache; the finding anchors at the
+/// `cache-mode:` key that enables the write (the job's own when it sets one,
+/// otherwise the workflow's). Returns true when a finding was emitted.
+fn check_cache_write_with_dangerous_trigger(
+  ctx : WalkCtx,
+  out : Array[Diagnostic],
+) -> Bool {
+  if !workflow_has_dangerous_trigger_audit(ctx) {
+    return false
+  }
+  for j in ctx.jobs {
+    let writes = match effective_cache_mode(ctx, j) {
+      Some("write") | Some("write-only") => true
+      _ => false
+    }
+    if !writes {
+      continue
+    }
+    let job_sets = j.raw.contains("cache-mode")
+    let pos = if job_sets {
+      job_field_pos(ctx, j.name, "cache-mode")
+    } else {
+      workflow_field_pos(ctx, "cache-mode")
+    }
+    out.push(Diagnostic::{
+      rule: "cache-poisoning",
+      severity: Error,
+      message: "runtime artifacts potentially vulnerable to a cache poisoning attack",
+      pos,
+      job: Some(j.name),
+      step: None,
+      persona: Regular,
+    })
+    return true
+  }
+  false
+}
+
+///|
 /// Emits at most one finding per workflow, attributed to the first
 /// cache-restoring step that trips it. `classify_cache_aware_step` only ever
 /// matches a `uses:` step, so the finding anchors to that step's `uses:`
 /// line — which is also where an author would naturally place an inline
 /// ignore for it.
 fn check_cache_poisoning(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  if check_cache_write_with_dangerous_trigger(ctx, out) {
+    return
+  }
   let triggers = collect_cache_triggers(ctx)
   let workflow_publishing = !cache_triggers_empty(triggers)
   for j in ctx.jobs {
+    if effective_cache_mode(ctx, j) == Some("none") {
+      continue
+    }
     let job_publishing = workflow_publishing || job_has_publisher_step(j)
     if !job_publishing {
       continue
@@ -8043,6 +8172,11 @@ let popular_actions : Array[(String, String)] = [
   ("docker", "build-push-action"),
   ("docker", "setup-buildx-action"),
   ("docker", "setup-qemu-action"),
+  // `.pre-commit-config.yaml` `repo:` hooks.
+  ("pre-commit", "pre-commit-hooks"),
+  ("astral-sh", "ruff-pre-commit"),
+  ("asottile", "pyupgrade"),
+  ("psf", "black"),
 ]
 
 ///|
@@ -8155,6 +8289,31 @@ fn typosquat_kind(owner : String, popular_owner : String) -> String? {
 }
 
 ///|
+/// The diagnostic message when `owner/repo` is a near-miss of a popular
+/// repository, else `None`.
+fn typosquat_message(owner : String, repo : String) -> String? {
+  // GitHub resolves `owner/repo` case-insensitively, so the comparison must
+  // be too — a differently-cased reference to the real action
+  // (`Actions/checkout`) is not a typosquat, and a differently-cased
+  // typosquat (`ACTIONS/CHKOUT`) must still be caught. The *displayed*
+  // message keeps the user's original casing (`owner`/`repo`, not the
+  // lowercased copies).
+  let owner_lo = owner.to_lower()
+  let repo_lo = repo.to_lower()
+  for entry in popular_actions {
+    let (popular_owner, popular_repo) = entry
+    if repo_lo == popular_repo && owner_lo != popular_owner {
+      match typosquat_kind(owner_lo, popular_owner) {
+        Some(kind) =>
+          return Some("\{owner}/\{repo} \{kind} \{popular_owner}/\{popular_repo}")
+        None => ()
+      }
+    }
+  }
+  None
+}
+
+///|
 fn check_typosquat_uses(
   ctx : WalkCtx,
   step : StepInfo,
@@ -8167,40 +8326,104 @@ fn check_typosquat_uses(
         return
       }
       match split_owner_repo(bare) {
-        Some((owner, repo)) => {
-          // GitHub resolves `owner/repo` case-insensitively, so the
-          // comparison must be too — a differently-cased reference to the
-          // real action (`Actions/checkout`) is not a typosquat, and a
-          // differently-cased typosquat (`ACTIONS/CHKOUT`) must still be
-          // caught. The *displayed* message keeps the user's original
-          // casing (`owner`/`repo`, not the lowercased copies).
-          let owner_lo = owner.to_lower()
-          let repo_lo = repo.to_lower()
-          for entry in popular_actions {
-            let (popular_owner, popular_repo) = entry
-            if repo_lo == popular_repo && owner_lo != popular_owner {
-              match typosquat_kind(owner_lo, popular_owner) {
-                Some(kind) => {
-                  add_diag_step_field(
-                    out,
-                    ctx,
-                    "typosquat-uses",
-                    Error,
-                    "\{owner}/\{repo} \{kind} \{popular_owner}/\{popular_repo}",
-                    step,
-                    "uses",
-                  )
-                  break
-                }
-                None => ()
-              }
-            }
+        Some((owner, repo)) =>
+          match typosquat_message(owner, repo) {
+            Some(msg) =>
+              add_diag_step_field(
+                out,
+                ctx,
+                "typosquat-uses",
+                Error,
+                msg,
+                step,
+                "uses",
+              )
+            None => ()
           }
-        }
         None => ()
       }
     }
     None => ()
+  }
+}
+
+///|
+/// `owner/repo` of a GitHub `repo:` URL from a `.pre-commit-config.yaml`:
+/// `https://github.com/o/r`, `ssh://git@github.com/o/r.git` and the scp form
+/// `git@github.com:o/r`. Other hosts and the `local` / `meta` pseudo-repos
+/// yield `None`.
+fn github_owner_repo_of_url(url : String) -> (String, String)? {
+  let mut rest = url.trim(chars=" \t").to_owned()
+  for scheme in ["https://", "http://", "ssh://", "git://"] {
+    if rest.has_prefix(scheme) {
+      rest = rest[scheme.length():].to_owned()
+      break
+    }
+  }
+  match rest.find("@") {
+    Some(i) => rest = rest[i + 1:].to_owned()
+    None => ()
+  }
+  let host = "github.com"
+  if !rest.has_prefix(host) {
+    return None
+  }
+  rest = rest[host.length():].to_owned()
+  if !(rest.has_prefix("/") || rest.has_prefix(":")) {
+    return None
+  }
+  rest = rest[1:].to_owned()
+  if rest.has_suffix("/") {
+    rest = rest[0:rest.length() - 1].to_owned()
+  }
+  if rest.has_suffix(".git") {
+    rest = rest[0:rest.length() - 4].to_owned()
+  }
+  split_owner_repo(rest)
+}
+
+///|
+/// Position of `repos[index].repo`, pointing at the URL value.
+fn pre_commit_repo_pos(ctx : WalkCtx, index : Int) -> Position? {
+  guard ctx.position_root is Some(root) else { return None }
+  guard ctx.line_counter is Some(lc) else { return None }
+  guard node_get(root, "repos") is Some(Sequence(items, ..)) else { return None }
+  guard index >= 0 && index < items.length() else { return None }
+  match node_get_entry(items[index], "repo") {
+    Some((fk, fv)) => Some(entry_field_pos(fk, fv, lc))
+    None => None
+  }
+}
+
+///|
+/// `typosquat-uses` for `.pre-commit-config.yaml`: each `repos[].repo` URL is
+/// checked against the same popular-repository corpus as workflow `uses:`.
+fn check_typosquat_pre_commit(ctx : WalkCtx, out : Array[Diagnostic]) -> Unit {
+  let m = match ctx.workflow_map {
+    Some(m) => m
+    None => return
+  }
+  if m.contains("jobs") || m.contains("runs") {
+    return
+  }
+  guard m.get("repos") is Some(Array(repos)) else { return }
+  for i, r in repos {
+    guard r is Map(rm) else { continue }
+    guard rm.get("repo") is Some(String(url)) else { continue }
+    guard github_owner_repo_of_url(url) is Some((owner, repo)) else { continue }
+    match typosquat_message(owner, repo) {
+      Some(msg) =>
+        out.push(Diagnostic::{
+          rule: "typosquat-uses",
+          severity: Error,
+          message: msg,
+          pos: pre_commit_repo_pos(ctx, i),
+          job: None,
+          step: None,
+          persona: Regular,
+        })
+      None => ()
+    }
   }
 }
 

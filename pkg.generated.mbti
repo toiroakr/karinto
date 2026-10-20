@@ -52,6 +52,7 @@ pub(all) enum FileKind {
   Workflow
   Action
   Dependabot
+  PreCommit
   Unknown
 } derive(Eq, @debug.Debug)
 pub impl ToJson for FileKind

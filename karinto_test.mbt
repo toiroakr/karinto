@@ -1660,3 +1660,269 @@ test "karinto config: malformed config yields the all-default config" {
   let res = @karinto.lint(yaml, karinto_config="not: [valid")
   assert_true(res.parse_error is None)
 }
+
+///|
+test "dangerous-triggers: issue_comment is flagged" {
+  let yaml =
+    #|on:
+    #|  issue_comment:
+    #|permissions: {}
+    #|jobs:
+    #|  vulnerable:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo hello
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "dangerous-triggers" })
+  assert_eq(hits.length(), 1)
+}
+
+///|
+fn cache_poisoning_hits(yaml : String) -> Array[@karinto.Diagnostic] {
+  @karinto.lint(yaml).diagnostics.filter(fn(d) { d.rule == "cache-poisoning" })
+}
+
+///|
+test "cache-poisoning: workflow-level cache-mode write with a dangerous trigger is flagged at the key" {
+  let hits = cache_poisoning_hits(
+    (
+      #|on: pull_request_target
+      #|permissions: {}
+      #|cache-mode: write
+      #|jobs:
+      #|  foo:
+      #|    runs-on: ubuntu-latest
+      #|    steps:
+      #|      - run: echo foo
+    ),
+  )
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].pos is Some({ line: 3, .. }))
+}
+
+///|
+test "cache-poisoning: job-level cache-mode write with a dangerous trigger is flagged at the key" {
+  let hits = cache_poisoning_hits(
+    (
+      #|on: pull_request_target
+      #|permissions: {}
+      #|cache-mode: none
+      #|jobs:
+      #|  foo:
+      #|    cache-mode: write
+      #|    runs-on: ubuntu-latest
+      #|    steps:
+      #|      - run: echo foo
+    ),
+  )
+  assert_eq(hits.length(), 1)
+  assert_true(hits[0].pos is Some({ line: 6, .. }))
+}
+
+///|
+test "cache-poisoning: cache-mode write without a dangerous trigger is not flagged" {
+  let hits = cache_poisoning_hits(
+    (
+      #|on: push
+      #|permissions: {}
+      #|cache-mode: write
+      #|jobs:
+      #|  foo:
+      #|    runs-on: ubuntu-latest
+      #|    steps:
+      #|      - run: echo foo
+    ),
+  )
+  assert_eq(hits.length(), 0)
+}
+
+///|
+test "cache-poisoning: job cache-mode none overrides workflow cache-mode write" {
+  let hits = cache_poisoning_hits(
+    (
+      #|on: release
+      #|permissions: {}
+      #|cache-mode: write
+      #|jobs:
+      #|  publish:
+      #|    cache-mode: none
+      #|    runs-on: ubuntu-latest
+      #|    permissions:
+      #|      id-token: write
+      #|    steps:
+      #|      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a
+      #|      - run: uv build publish
+    ),
+  )
+  assert_eq(hits.length(), 0)
+}
+
+///|
+test "cache-poisoning: workflow cache-mode none disables the cache-restore heuristic" {
+  let hits = cache_poisoning_hits(
+    (
+      #|on: release
+      #|permissions: {}
+      #|cache-mode: none
+      #|jobs:
+      #|  publish:
+      #|    runs-on: ubuntu-latest
+      #|    permissions:
+      #|      id-token: write
+      #|    steps:
+      #|      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a
+      #|      - run: uv build publish
+    ),
+  )
+  assert_eq(hits.length(), 0)
+}
+
+///|
+fn unpinned_images_hits(yaml : String) -> Array[@karinto.Diagnostic] {
+  @karinto.lint(yaml).diagnostics.filter(fn(d) { d.rule == "unpinned-images" })
+}
+
+///|
+test "unpinned-images: container image from a fully indirect matrix is flagged" {
+  let hits = unpinned_images_hits(
+    (
+      #|on: workflow_call
+      #|permissions: {}
+      #|jobs:
+      #|  full:
+      #|    runs-on: ubuntu-latest
+      #|    container:
+      #|      image: ${{ matrix.image }}
+      #|    strategy:
+      #|      matrix: ${{ fromJSON(vars.CUSTOM_TARGETS) }}
+      #|    steps:
+      #|      - run: "true"
+    ),
+  )
+  assert_eq(hits.length(), 1)
+}
+
+///|
+test "unpinned-images: indirect include or exclude on a matrix is flagged" {
+  for key in ["include", "exclude"] {
+    let hits = unpinned_images_hits(
+      "on: workflow_call\npermissions: {}\njobs:\n  j:\n    runs-on: ubuntu-latest\n    container:\n      image: ${{ matrix.image }}\n    strategy:\n      matrix:\n        image:\n          - ubuntu@sha256:bfadbbcb25fd75c30c295843f1a861414f46c080f0f1d0c5cd93843c88edabcf\n        \{key}: ${{ fromJSON(vars.EXTRA) }}\n    steps:\n      - run: \"true\"\n",
+    )
+    assert_eq(hits.length(), 1)
+  }
+}
+
+///|
+test "unpinned-images: a floating tag in the matrix key list is flagged" {
+  let hits = unpinned_images_hits(
+    (
+      #|on: workflow_call
+      #|permissions: {}
+      #|jobs:
+      #|  j:
+      #|    runs-on: ubuntu-latest
+      #|    container:
+      #|      image: ${{ matrix.image }}
+      #|    strategy:
+      #|      matrix:
+      #|        image:
+      #|          - ubuntu@sha256:bfadbbcb25fd75c30c295843f1a861414f46c080f0f1d0c5cd93843c88edabcf
+      #|          - ubuntu:latest
+      #|    steps:
+      #|      - run: "true"
+    ),
+  )
+  assert_eq(hits.length(), 1)
+}
+
+///|
+test "unpinned-images: a fully pinned literal matrix is not flagged" {
+  let hits = unpinned_images_hits(
+    (
+      #|on: workflow_call
+      #|permissions: {}
+      #|jobs:
+      #|  j:
+      #|    runs-on: ubuntu-latest
+      #|    container:
+      #|      image: ${{ matrix.image }}
+      #|    strategy:
+      #|      matrix:
+      #|        image:
+      #|          - ubuntu@sha256:bfadbbcb25fd75c30c295843f1a861414f46c080f0f1d0c5cd93843c88edabcf
+      #|    steps:
+      #|      - run: "true"
+    ),
+  )
+  assert_eq(hits.length(), 0)
+}
+
+///|
+test "pre-commit config: a top-level `repos:` list is detected as its own kind" {
+  let res = @karinto.lint(
+    #|repos:
+    #|  - repo: https://github.com/pre-commit/pre-commit-hooks
+    #|    rev: v6.0.0
+    #|    hooks:
+    #|      - id: check-yaml
+    ,
+  )
+  assert_true(res.kind is PreCommit)
+  assert_eq(res.diagnostics.length(), 0)
+}
+
+///|
+fn pre_commit_typosquat_hits(repo : String) -> Array[@karinto.Diagnostic] {
+  let src = "repos:\n  - repo: \{repo}\n    rev: v1\n    hooks:\n      - id: x\n"
+  @karinto.lint(src).diagnostics.filter(fn(d) { d.rule == "typosquat-uses" })
+}
+
+///|
+test "typosquat-uses: pre-commit repo omitting characters of a popular owner is flagged at the URL" {
+  let hits = pre_commit_typosquat_hits(
+    "https://github.com/pre-comit/pre-commit-hooks",
+  )
+  assert_eq(hits.length(), 1)
+  assert_eq(
+    hits[0].message,
+    "pre-comit/pre-commit-hooks omits characters in pre-commit/pre-commit-hooks",
+  )
+  assert_true(hits[0].pos is Some({ line: 2, .. }))
+}
+
+///|
+test "typosquat-uses: pre-commit repo swapping characters of a popular owner is flagged" {
+  let hits = pre_commit_typosquat_hits(
+    "https://github.com/astarl-sh/ruff-pre-commit",
+  )
+  assert_eq(hits.length(), 1)
+}
+
+///|
+test "typosquat-uses: pre-commit repo with a one-character typo is flagged" {
+  let hits = pre_commit_typosquat_hits("https://github.com/a5ottile/pyupgrade")
+  assert_eq(hits.length(), 1)
+}
+
+///|
+test "typosquat-uses: pre-commit ssh URL with .git suffix and different case is normalised" {
+  let hits = pre_commit_typosquat_hits("ssh://git@github.com/PSFF/BLACK.git")
+  assert_eq(hits.length(), 1)
+  assert_eq(hits[0].message, "PSFF/BLACK repeats characters in psf/black")
+}
+
+///|
+test "typosquat-uses: pre-commit repo that exactly matches a popular repository is not flagged" {
+  assert_eq(
+    pre_commit_typosquat_hits(
+      "https://github.com/pre-commit/pre-commit-hooks",
+    ).length(),
+    0,
+  )
+}
+
+///|
+test "typosquat-uses: pre-commit local and meta repos are ignored" {
+  assert_eq(pre_commit_typosquat_hits("local").length(), 0)
+  assert_eq(pre_commit_typosquat_hits("meta").length(), 0)
+}
