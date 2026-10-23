@@ -17,7 +17,7 @@
   "internalChecksAsSuccess": true,
   "automerge": true,
   "automergeType": "pr",
-  "automergeStrategy": "merge",
+  "automergeStrategy": "merge-commit",
   "platformAutomerge": true,
   "lockFileMaintenance": {
     "enabled": true,
