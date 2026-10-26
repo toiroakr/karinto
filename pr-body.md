@@ -2,19 +2,42 @@ Refresh upstream linter pins (auto-generated).
 
 | tool | from | to | release | compare |
 | --- | --- | --- | --- | --- |
-| zizmor | 1.30.1 | 1.31.1 | [v1.31.1](https://github.com/zizmorcore/zizmor/releases/tag/v1.31.1) | [`v1.30.1...v1.31.1`](https://github.com/zizmorcore/zizmor/compare/v1.30.1...v1.31.1) |
+| ghalint | 1.5.6 | 1.5.7 | [v1.5.7](https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.5.7) | [`v1.5.6...v1.5.7`](https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7) |
 
 Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.
 
 ## Upstream release notes
 
-<details><summary><b>zizmor</b> v1.31.1</summary>
+<details><summary><b>ghalint</b> v1.5.7</summary>
 
-[Sponsorship is appreciated!](https://github.com/sponsors/woodruffw/)
+https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7
 
-## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release-notes/#bug-fixes)
+## :warning: Security
 
-- Fixed a regression in [1.31.0](https://docs.zizmor.sh/release-notes/#1310) where some ignore comments/configurations would no longer apply to the [dangerous-triggers](https://docs.zizmor.sh/audits/#dangerous-triggers) audit ([#2450](https://github.com/zizmorcore/zizmor/issues/2450))
+#1507 Update Go to v1.27.3
+
+This release is built with Go 1.27.3, which fixes [CVE-2026-111943](https://go.dev/issue/82345) in `crypto/x509`. Go now refuses trust in a small set of intermediate certificates of a specific Certificate Authority, after its CA keys were reported compromised. `Verify` filters out chains containing those intermediates. The Go team highly recommends upgrading immediately.
+
+ghalint relies on `crypto/x509` to verify the TLS certificate of the GitHub API, which `ghalint experiment validate-input` calls. Other commands don't access the network.
+
+ref.
+
+- https://go.dev/doc/devel/release#go1.27.3
+- https://thehackernews.com/2026/10/eight-emudhra-ca-keys-compromised.html
+
+v1.5.6 was built with Go 1.26.2. This release also includes Go 1.26.3 (#1325), 1.26.4 (#1357), 1.26.5 (#1396), 1.26.6 (#1428), and 1.27.2 (#1490), which have security fixes to the `go` command, the `pack` tool, and the `crypto/tls`, `crypto/x509`, `encoding/asn1`, `encoding/xml`, `html/template`, `mime`, `net`, `net/http`, `net/http/httputil`, `net/mail`, `net/textproto`, `net/url`, `os`, and `syscall` packages.
+
+- https://go.dev/doc/devel/release#go1.26.3
+- https://go.dev/doc/devel/release#go1.26.4
+- https://go.dev/doc/devel/release#go1.26.5
+- https://go.dev/doc/devel/release#go1.26.6
+- https://go.dev/doc/devel/release#go1.27.2
+
+## ⚠️ Changes of Release Assets
+
+The ghalint
+
+…(truncated — see release link)
 
 </details>
 

@@ -1,2 +1,2 @@
-suzuki-shunsuke/ghalint@v1.5.6
+suzuki-shunsuke/ghalint@v1.5.7
 vendored: test-workflow.yaml, test-action.yaml
