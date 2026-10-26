@@ -22,13 +22,13 @@ jobs:
       # changesets/action pushes the release commit/tags using the git
       # credentials persisted by checkout, so persist-credentials must stay on
       # here (unlike every other workflow). Scoped exception, not a blanket one.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] # karinto: ignore[checkout-persist-credentials-false] changesets pushes release commits with checkout credentials
         with:
           fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
 
       - run: npm ci
