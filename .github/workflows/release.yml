@@ -22,7 +22,8 @@ jobs:
       # changesets/action pushes the release commit/tags using the git
       # credentials persisted by checkout, so persist-credentials must stay on
       # here (unlike every other workflow). Scoped exception, not a blanket one.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] # karinto: ignore[checkout-persist-credentials-false] changesets pushes release commits with checkout credentials
+      # karinto: ignore[checkout-persist-credentials-false] changesets pushes release commits with checkout credentials
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
 
