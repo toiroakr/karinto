@@ -2,40 +2,37 @@ Refresh upstream linter pins (auto-generated).
 
 | tool | from | to | release | compare |
 | --- | --- | --- | --- | --- |
-| ghalint | 1.5.6 | 1.5.7 | [v1.5.7](https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.5.7) | [`v1.5.6...v1.5.7`](https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7) |
+| ghalint | 1.5.7 | 1.6.0 | [v1.6.0](https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.6.0) | [`v1.5.7...v1.6.0`](https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0) |
 
 Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.
 
 ## Upstream release notes
 
-<details><summary><b>ghalint</b> v1.5.7</summary>
+<details><summary><b>ghalint</b> v1.6.0</summary>
 
-https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7
+https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0
 
-## :warning: Security
+## Features
 
-#1507 Update Go to v1.27.3
+#1529 #1535 Support GitHub Actions workflow lockfiles
 
-This release is built with Go 1.27.3, which fixes [CVE-2026-111943](https://go.dev/issue/82345) in `crypto/x509`. Go now refuses trust in a small set of intermediate certificates of a specific Certificate Authority, after its CA keys were reported compromised. `Verify` filters out chains containing those intermediates. The Go team highly recommends upgrading immediately.
+[GitHub Actions workflow lockfiles are generally available](https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/).
 
-ghalint relies on `crypto/x509` to verify the TLS certificate of the GitHub API, which `ghalint experiment validate-input` calls. Other commands don't access the network.
+The policy [action_ref_should_be_full_length_commit_sha](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/008.md) ignores actions in workflows locked by [the workflow dependency lockfile](https://docs.github.com/en/enterprise-cloud@latest/actions/concepts/security/workflow-dependency-lockfiles) `.github/workflows/actions.lock`, because the lockfile locks them to commits.
+An action is regarded as locked if its `uses` is listed in both `workflows.<workflow file path>` and `dependencies` of the lockfile.
 
-ref.
+If the lockfile doesn't exist, the behavior doesn't change.
 
-- https://go.dev/doc/devel/release#go1.27.3
-- https://thehackernews.com/2026/10/eight-emudhra-ca-keys-compromised.html
+The following still need to be pinned by full length commit SHA even if the lockfile exists:
 
-v1.5.6 was built with Go 1.26.2. This release also includes Go 1.26.3 (#1325), 1.26.4 (#1357), 1.26.5 (#1396), 1.26.6 (#1428), and 1.27.2 (#1490), which have security fixes to the `go` command, the `pack` tool, and the `crypto/tls`, `crypto/x509`, `encoding/asn1`, `encoding/xml`, `html/template`, `mime`, `net`, `net/http`, `net/http/httputil`, `net/mail`, `net/textproto`, `net/url`, `os`, and `syscall` packages.
+- Reusable workflows (`jobs.<job_id>.uses`)
+- Docker images (`docker://`)
+- Actions in workflows that the lockfile doesn't lock
+- Actions in action files (`action.yaml`), because callers of the action don't necessarily use the lockfile
 
-- https://go.dev/doc/devel/release#go1.26.3
-- https://go.dev/doc/devel/release#go1.26.4
-- https://go.dev/doc/devel/release#go1.26.5
-- https://go.dev/doc/devel/release#go1.26.6
-- https://go.dev/doc/devel/release#go1.27.2
-
-## ⚠️ Changes of Release Assets
-
-The ghalint
+> [!WARNING]
+> If ghalint fails to read the lockfile, for instance because the lockfile is invalid or its schema version is newer than ghalint supports, ghalint can't validate versions of actions properly.
+> Then ghalint outputs an error and skips action_ref_sh
 
 …(truncated — see release link)
 
