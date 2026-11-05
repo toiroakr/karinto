@@ -4,12 +4,12 @@
     {
       "name": "ghalint",
       "repo": "suzuki-shunsuke/ghalint",
-      "from": "1.5.6",
-      "to": "1.5.7",
-      "tag": "v1.5.7",
-      "url": "https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.5.7",
-      "compareUrl": "https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7",
-      "notes": "https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.6...v1.5.7\r\n\r\n## :warning: Security\r\n\r\n#1507 Update Go to v1.27.3\r\n\r\nThis release is built with Go 1.27.3, which fixes [CVE-2026-111943](https://go.dev/issue/82345) in `crypto/x509`. Go now refuses trust in a small set of intermediate certificates of a specific Certificate Authority, after its CA keys were reported compromised. `Verify` filters out chains containing those intermediates. The Go team highly recommends upgrading immediately.\r\n\r\nghalint relies on `crypto/x509` to verify the TLS certificate of the GitHub API, which `ghalint experiment validate-input` calls. Other commands don't access the network.\r\n\r\nref.\r\n\r\n- https://go.dev/doc/devel/release#go1.27.3\r\n- https://thehackernews.com/2026/10/eight-emudhra-ca-keys-compromised.html\r\n\r\nv1.5.6 was built with Go 1.26.2. This release also includes Go 1.26.3 (#1325), 1.26.4 (#1357), 1.26.5 (#1396), 1.26.6 (#1428), and 1.27.2 (#1490), which have security fixes to the `go` command, the `pack` tool, and the `crypto/tls`, `crypto/x509`, `encoding/asn1`, `encoding/xml`, `html/template`, `mime`, `net`, `net/http`, `net/http/httputil`, `net/mail`, `net/textproto`, `net/url`, `os`, and `syscall` packages.\r\n\r\n- https://go.dev/doc/devel/release#go1.26.3\r\n- https://go.dev/doc/devel/release#go1.26.4\r\n- https://go.dev/doc/devel/release#go1.26.5\r\n- https://go.dev/doc/devel/release#go1.26.6\r\n- https://go.dev/doc/devel/release#go1.27.2\r\n\r\n## ⚠️ Changes of Release Assets\r\n\r\nThe ghalint\n\n…(truncated — see release link)"
+      "from": "1.5.7",
+      "to": "1.6.0",
+      "tag": "v1.6.0",
+      "url": "https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.6.0",
+      "compareUrl": "https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0",
+      "notes": "https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0\r\n\r\n## Features\r\n\r\n#1529 #1535 Support GitHub Actions workflow lockfiles\r\n\r\n[GitHub Actions workflow lockfiles are generally available](https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/).\r\n\r\nThe policy [action_ref_should_be_full_length_commit_sha](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/008.md) ignores actions in workflows locked by [the workflow dependency lockfile](https://docs.github.com/en/enterprise-cloud@latest/actions/concepts/security/workflow-dependency-lockfiles) `.github/workflows/actions.lock`, because the lockfile locks them to commits.\r\nAn action is regarded as locked if its `uses` is listed in both `workflows.<workflow file path>` and `dependencies` of the lockfile.\r\n\r\nIf the lockfile doesn't exist, the behavior doesn't change.\r\n\r\nThe following still need to be pinned by full length commit SHA even if the lockfile exists:\r\n\r\n- Reusable workflows (`jobs.<job_id>.uses`)\r\n- Docker images (`docker://`)\r\n- Actions in workflows that the lockfile doesn't lock\r\n- Actions in action files (`action.yaml`), because callers of the action don't necessarily use the lockfile\r\n\r\n> [!WARNING]\r\n> If ghalint fails to read the lockfile, for instance because the lockfile is invalid or its schema version is newer than ghalint supports, ghalint can't validate versions of actions properly.\r\n> Then ghalint outputs an error and skips action_ref_sh\n\n…(truncated — see release link)"
     }
   ]
 }
