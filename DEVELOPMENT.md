@@ -388,9 +388,9 @@ automatically on first use, so no pre-provisioning is needed for them.
   (`minimumReleaseAgeBehaviour: timestamp-optional`); known timestamps still
   have to satisfy the seven-day delay.
 - **Auto-merge** is enabled by default (merge commit), except for GitHub Actions
-  digest updates, which require manual review and merging. For other updates, all checks
-  pass (`moon-test`, `deploy`, `changeset-check` skipped), GitHub
-  auto-merges the PR. The branch is auto-deleted after merge.
+  digest updates, which require manual review and merging. For other updates,
+  GitHub auto-merges the PR once all checks pass (`moon-test`, `deploy`,
+  `changeset-check` skipped). The branch is auto-deleted after merge.
 
 Enable Renovate by installing the [GitHub App](https://github.com/apps/renovate)
 on the repo. The bot's first run will open a "Configure Renovate" PR — merge
