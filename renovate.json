@@ -40,6 +40,13 @@
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["major"],
       "groupName": "npm major"
+    },
+    {
+      "description": "GitHub Actions digest updates can lack release timestamps; require manual review.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
+      "automerge": false
     }
   ],
   "vulnerabilityAlerts": {

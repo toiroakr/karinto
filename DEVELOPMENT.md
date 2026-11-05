@@ -384,9 +384,13 @@ automatically on first use, so no pre-provisioning is needed for them.
   and `internalChecksFilter: strict` keep pending stability checks out of PRs.
   `internalChecksAsSuccess: true` lets a passing stability check unblock PR
   creation when CI only runs after the PR is opened.
-- **Auto-merge** is enabled on every Renovate PR (squash). Once all checks
-  pass (`moon-test`, `deploy`, `changeset-check` skipped), GitHub
-  auto-merges the PR. The branch is auto-deleted after merge.
+  GitHub Actions digest updates alone allow a missing release timestamp
+  (`minimumReleaseAgeBehaviour: timestamp-optional`); known timestamps still
+  have to satisfy the seven-day delay.
+- **Auto-merge** is enabled by default (merge commit), except for GitHub Actions
+  digest updates, which require manual review and merging. For other updates,
+  GitHub auto-merges the PR once all checks pass (`moon-test`, `deploy`,
+  `changeset-check` skipped). The branch is auto-deleted after merge.
 
 Enable Renovate by installing the [GitHub App](https://github.com/apps/renovate)
 on the repo. The bot's first run will open a "Configure Renovate" PR — merge
