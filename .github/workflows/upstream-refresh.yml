@@ -43,8 +43,10 @@ jobs:
           node -e '
             const fs = require("fs");
             const s = JSON.parse(fs.readFileSync("refresh-summary.json", "utf8"));
-            const body = s.updates.map(u => `Track ${u.name} ${u.to} (was ${u.from}).`).join("\n\n");
-            fs.writeFileSync(".changeset/upstream-refresh.md", `---\n"karinto": patch\n---\n\n${body}\n`);
+            for (const u of s.updates) {
+              const line = u.bootstrap ? `Vendor ${u.name} ${u.to} fixtures.` : `Track ${u.name} ${u.to} (was ${u.from}).`;
+              fs.writeFileSync(`.changeset/upstream-refresh-${u.name}-${u.to}.md`, `---\n"karinto": patch\n---\n\n${line}\n`);
+            }
           '
 
       - name: Build PR body
@@ -85,7 +87,7 @@ jobs:
             echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
             echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
             echo '- [ ] `moon test` + local parity pass.'
-            echo '- [ ] If a rule behaviour changed to match the new upstream, rewrite `.changeset/upstream-refresh.md` to describe it (the generated text only says which version is tracked), and raise the bump level if the change is breaking.'
+            echo '- [ ] If a rule behaviour changed to match the new upstream, rewrite the matching `.changeset/upstream-refresh-<tool>-<version>.md` to describe it (the generated text only says which version is tracked), and raise the bump level if the change is breaking.'
           } > pr-body.md
           # Pass the body to create-pull-request via `body-path` (below) rather
           # than round-tripping through $GITHUB_ENV: upstream release notes are

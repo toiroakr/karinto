@@ -254,10 +254,11 @@ GitHub Actions wiring:
 - `.github/workflows/upstream-refresh.yml` — weekly cron (Monday 00:00 UTC)
   that checks GitHub for newer actionlint / zizmor / ghalint releases. When
   found, bumps `mise.toml` and re-vendors `fixtures/upstream/<tool>/` from
-  the matching tag, writes `.changeset/upstream-refresh.md` (a `patch` entry
-  saying which version is now tracked), then opens a PR labelled
-  `dependencies`. It is not `skip-changeset`: a refresh often carries rule
-  fixes, and without a changeset on `main` the release PR is never opened.
+  the matching tag, writes one `.changeset/upstream-refresh-<tool>-<version>.md`
+  per bump (a `patch` entry saying which version is now tracked), then opens a
+  PR labelled `dependencies`. It is not `skip-changeset`: a refresh often
+  carries rule fixes, and without a changeset on `main` the release PR is
+  never opened.
 - `.github/workflows/spec-freshness.yml` — weekly cron (Wednesday 07:30 UTC)
   that runs `scripts/spec-freshness/check.mjs` to diff karinto's hardcoded
   GitHub Actions spec tables (permission scopes, runner labels, webhook
@@ -706,10 +707,12 @@ by file alone, so the allowlist degrades gracefully as fixtures change.
 3. For tools with a newer release: bumps `mise.toml`, shallow-clones the
    new tag, and replaces `fixtures/upstream/<tool>/` with the vendored
    testdata subdirs (see `TOOLS[].vendor` in `refresh.mjs`).
-4. Writes `.changeset/upstream-refresh.md` (`karinto: patch`, one
-   `Track <tool> <version> (was <old>).` line per bump), then opens a PR via
-   `peter-evans/create-pull-request` labelled `dependencies`. Rewrite the
-   changeset text when the PR also changes rule behaviour. Auto-merge is intentionally not
+4. Writes one `.changeset/upstream-refresh-<tool>-<version>.md` per bump
+   (`karinto: patch`, `Track <tool> <version> (was <old>).`), then opens a PR
+   via `peter-evans/create-pull-request` labelled `dependencies`. The file
+   name includes the version so an earlier refresh's changeset that is still
+   waiting for its release is not overwritten. Rewrite the changeset text when
+   the PR also changes rule behaviour. Auto-merge is intentionally not
    enabled — a refresh is exactly when `upstream-parity.yml` is most
    likely to surface real regressions, so a human should look.
 
