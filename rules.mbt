@@ -3395,6 +3395,8 @@ fn expression_is_constant_only(inner : String) -> Bool {
   }
   let n = chars.length()
   let mut i = 0
+  let mut has_dollar = false
+  let mut open_braces = 0
   while i < n {
     let c = chars[i]
     // Skip single-quoted string literals (GitHub Actions syntax uses
@@ -3409,6 +3411,12 @@ fn expression_is_constant_only(inner : String) -> Bool {
           }
           i = i + 1
           break
+        }
+        if chars[i] == '$' {
+          has_dollar = true
+        }
+        if chars[i] == '{' && !(i + 1 < n && chars[i + 1] >= '0' && chars[i + 1] <= '9') {
+          open_braces = open_braces + 1
         }
         i = i + 1
       }
@@ -3467,7 +3475,12 @@ fn expression_is_constant_only(inner : String) -> Bool {
     }
     i = i + 1
   }
-  true
+  // Why not reduce: when the literals hold a `$` and two `{` (format
+  // placeholders like `{0}` aside), the value can join into `${{`, so
+  // replacing it would create another expression (zizmor 1.32.0, #2464).
+  // Why not evaluate: karinto has no constant evaluator, so this is an
+  // approximation of zizmor's "evaluated string contains `${{`" check.
+  !(has_dollar && open_braces >= 2)
 }
 
 ///|

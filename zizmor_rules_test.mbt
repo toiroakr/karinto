@@ -2550,3 +2550,88 @@ test "adhoc-packages: run-based detection fires on a real gem install" {
   let hits = res.diagnostics.filter(fn(d) { d.rule == "adhoc-packages" })
   inspect(hits.length(), content="0")
 }
+
+///|
+test "obfuscation: expressions that expand to other expressions are not flagged (zizmor 1.32.0, issue 2464)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: |
+    #|          echo 'some text with ${{ '${{' }} in it'
+    #|          echo 'some text with ${{ format('{0}{1}', '$', '{{') }} in it'
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "obfuscation: a plain constant expression is still flagged" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ '' }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="1")
+}
+
+///|
+fn obfuscation_hits(yaml : String) -> Int {
+  @karinto.lint(yaml).diagnostics.filter(fn(d) { d.rule == "obfuscation" }).length()
+}
+
+///|
+test "obfuscation: literals that cannot form an expression fence are still flagged (matches zizmor 1.32.0)" {
+  let lone_dollar =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ '$' }}
+  let closing_braces =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ 'a}}b' }}
+  let opening_braces =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ 'x{{y' }}
+  let format_placeholders =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ format('{0}{1}', 'a', 'b') }}
+  inspect(obfuscation_hits(lone_dollar), content="1")
+  inspect(obfuscation_hits(closing_braces), content="1")
+  inspect(obfuscation_hits(opening_braces), content="1")
+  inspect(obfuscation_hits(format_placeholders), content="1")
+}
+
+///|
+test "obfuscation: pieces that join into an expression fence are not flagged (matches zizmor 1.32.0)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ format('{0}{1}{2}', '$', '{', '{') }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="0")
+}
