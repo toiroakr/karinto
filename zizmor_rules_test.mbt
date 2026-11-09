@@ -2580,3 +2580,33 @@ test "obfuscation: a plain constant expression is still flagged" {
   let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
   inspect(hits.length(), content="1")
 }
+
+///|
+test "obfuscation: literals that cannot form an expression fence are still flagged (matches zizmor 1.32.0)" {
+  let cases = ["'$'", "'a}}b'", "'x{{y'", "format('{0}{1}', 'a', 'b')"]
+  for c in cases {
+    let yaml =
+      #|on: push
+      #|jobs:
+      #|  repro:
+      #|    runs-on: ubuntu-latest
+      #|    steps:
+    let res = @karinto.lint(yaml + "\n      - run: echo ${{ " + c + " }}")
+    let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+    inspect((c, hits.length()), content="(\{c}, 1)")
+  }
+}
+
+///|
+test "obfuscation: pieces that join into an expression fence are not flagged (matches zizmor 1.32.0)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ format('{0}{1}{2}', '$', '{', '{') }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="0")
+}
