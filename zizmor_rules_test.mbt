@@ -2550,3 +2550,33 @@ test "adhoc-packages: run-based detection fires on a real gem install" {
   let hits = res.diagnostics.filter(fn(d) { d.rule == "adhoc-packages" })
   inspect(hits.length(), content="0")
 }
+
+///|
+test "obfuscation: expressions that expand to other expressions are not flagged (zizmor 1.32.0, issue 2464)" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: |
+    #|          echo 'some text with ${{ '${{' }} in it'
+    #|          echo 'some text with ${{ format('{0}{1}', '$', '{{') }} in it'
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="0")
+}
+
+///|
+test "obfuscation: a plain constant expression is still flagged" {
+  let yaml =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ '' }}
+  let res = @karinto.lint(yaml)
+  let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
+  inspect(hits.length(), content="1")
+}

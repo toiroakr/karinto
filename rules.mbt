@@ -3410,6 +3410,15 @@ fn expression_is_constant_only(inner : String) -> Bool {
           i = i + 1
           break
         }
+        // Why not reduce: a literal holding `$` or `{{` / `}}` can expand
+        // into another expression (or a fragment of one), so replacing it
+        // by its value is not a plain simplification (zizmor 1.32.0, #2464).
+        if chars[i] == '$' ||
+          (i + 1 < n &&
+          chars[i] == chars[i + 1] &&
+          (chars[i] == '{' || chars[i] == '}')) {
+          return false
+        }
         i = i + 1
       }
       continue
