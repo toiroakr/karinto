@@ -2582,19 +2582,44 @@ test "obfuscation: a plain constant expression is still flagged" {
 }
 
 ///|
+fn obfuscation_hits(yaml : String) -> Int {
+  @karinto.lint(yaml).diagnostics.filter(fn(d) { d.rule == "obfuscation" }).length()
+}
+
+///|
 test "obfuscation: literals that cannot form an expression fence are still flagged (matches zizmor 1.32.0)" {
-  let cases = ["'$'", "'a}}b'", "'x{{y'", "format('{0}{1}', 'a', 'b')"]
-  for c in cases {
-    let yaml =
-      #|on: push
-      #|jobs:
-      #|  repro:
-      #|    runs-on: ubuntu-latest
-      #|    steps:
-    let res = @karinto.lint(yaml + "\n      - run: echo ${{ " + c + " }}")
-    let hits = res.diagnostics.filter(fn(d) { d.rule == "obfuscation" })
-    inspect((c, hits.length()), content="(\{c}, 1)")
-  }
+  let lone_dollar =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ '$' }}
+  let closing_braces =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ 'a}}b' }}
+  let opening_braces =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ 'x{{y' }}
+  let format_placeholders =
+    #|on: push
+    #|jobs:
+    #|  repro:
+    #|    runs-on: ubuntu-latest
+    #|    steps:
+    #|      - run: echo ${{ format('{0}{1}', 'a', 'b') }}
+  inspect(obfuscation_hits(lone_dollar), content="1")
+  inspect(obfuscation_hits(closing_braces), content="1")
+  inspect(obfuscation_hits(opening_braces), content="1")
+  inspect(obfuscation_hits(format_placeholders), content="1")
 }
 
 ///|
