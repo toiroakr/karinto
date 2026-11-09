@@ -2,37 +2,33 @@ Refresh upstream linter pins (auto-generated).
 
 | tool | from | to | release | compare |
 | --- | --- | --- | --- | --- |
-| ghalint | 1.5.7 | 1.6.0 | [v1.6.0](https://github.com/suzuki-shunsuke/ghalint/releases/tag/v1.6.0) | [`v1.5.7...v1.6.0`](https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0) |
+| zizmor | 1.31.1 | 1.32.0 | [v1.32.0](https://github.com/zizmorcore/zizmor/releases/tag/v1.32.0) | [`v1.31.1...v1.32.0`](https://github.com/zizmorcore/zizmor/compare/v1.31.1...v1.32.0) |
 
 Fixtures under `fixtures/upstream/<tool>/` were re-vendored from the new tag. This PR is opened with `GITHUB_TOKEN`, so `upstream-parity` does **not** run automatically — add the `run-parity` label to trigger it. Its step summary then lists any divergences (`unmapped` / soft) that point at newly-added upstream checks.
 
 ## Upstream release notes
 
-<details><summary><b>ghalint</b> v1.6.0</summary>
+<details><summary><b>zizmor</b> v1.32.0</summary>
 
-https://github.com/suzuki-shunsuke/ghalint/compare/v1.5.7...v1.6.0
+[Sponsorship is appreciated!](https://github.com/sponsors/woodruffw/)
 
-## Features
+## New Features 🌈[🔗](https://docs.zizmor.sh/release-notes/#new-features)
 
-#1529 #1535 Support GitHub Actions workflow lockfiles
+- zizmor now has experimental support for GitHub Actions workflow lockfiles. Please see [the limitations documentation](https://docs.zizmor.sh/usage/#workflow-lockfiles) for more information about the current implementation and its limitations ([#2463](https://github.com/zizmorcore/zizmor/issues/2463))
 
-[GitHub Actions workflow lockfiles are generally available](https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/).
+## Enhancements 🌱[🔗](https://docs.zizmor.sh/release-notes/#enhancements)
 
-The policy [action_ref_should_be_full_length_commit_sha](https://github.com/suzuki-shunsuke/ghalint/blob/main/docs/policies/008.md) ignores actions in workflows locked by [the workflow dependency lockfile](https://docs.github.com/en/enterprise-cloud@latest/actions/concepts/security/workflow-dependency-lockfiles) `.github/workflows/actions.lock`, because the lockfile locks them to commits.
-An action is regarded as locked if its `uses` is listed in both `workflows.<workflow file path>` and `dependencies` of the lockfile.
+- zizmor's input collection is now "root-aware" by default, meaning that invocations like zizmor . will no longer collect inputs unless they would actually be used by GitHub Actions, etc. This should eliminate spurious findings from (e.g.) workflow definitions in vendored directories. See the [input collection](https://docs.zizmor.sh/usage/#input-collection) documentation for more information. ([#2454](https://github.com/zizmorcore/zizmor/issues/2454))
 
-If the lockfile doesn't exist, the behavior doesn't change.
+- zizmor's LSP now honors the didChangeWorkspaceFolders event ([#2461](https://github.com/zizmorcore/zizmor/issues/2461))
 
-The following still need to be pinned by full length commit SHA even if the lockfile exists:
+- zizmor's LSP now audits pre-commit inputs ([#2485](https://github.com/zizmorcore/zizmor/issues/2485))
 
-- Reusable workflows (`jobs.<job_id>.uses`)
-- Docker images (`docker://`)
-- Actions in workflows that the lockfile doesn't lock
-- Actions in action files (`action.yaml`), because callers of the action don't necessarily use the lockfile
+- zizmor now provides Windows ARM64 wheels on PyPI ([#2424](https://github.com/zizmorcore/zizmor/issues/2424))
 
-> [!WARNING]
-> If ghalint fails to read the lockfile, for instance because the lockfile is invalid or its schema version is newer than ghalint supports, ghalint can't validate versions of actions properly.
-> Then ghalint outputs an error and skips action_ref_sh
+    Many thanks to [@ndabas](https://github.com/ndabas) for proposing and implementing this improvement!
+
+## Bug Fixes 🐛[🔗](https://docs.zizmor.sh/release
 
 …(truncated — see release link)
 
