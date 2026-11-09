@@ -255,7 +255,8 @@ GitHub Actions wiring:
   that checks GitHub for newer actionlint / zizmor / ghalint releases. When
   found, bumps `mise.toml` and re-vendors `fixtures/upstream/<tool>/` from
   the matching tag, writes one `.changeset/upstream-refresh-<tool>-<version>.md`
-  per bump (a `patch` entry saying which version is now tracked), then opens a
+  per bump (a `patch` entry saying which version is now tracked, or that the
+  fixtures were vendored when they were empty), then opens a
   PR labelled `dependencies`. It is not `skip-changeset`: a refresh often
   carries rule fixes, and without a changeset on `main` the release PR is
   never opened.
@@ -708,13 +709,18 @@ by file alone, so the allowlist degrades gracefully as fixtures change.
    new tag, and replaces `fixtures/upstream/<tool>/` with the vendored
    testdata subdirs (see `TOOLS[].vendor` in `refresh.mjs`).
 4. Writes one `.changeset/upstream-refresh-<tool>-<version>.md` per bump
-   (`karinto: patch`, `Track <tool> <version> (was <old>).`), then opens a PR
-   via `peter-evans/create-pull-request` labelled `dependencies`. The file
-   name includes the version so an earlier refresh's changeset that is still
-   waiting for its release is not overwritten. Rewrite the changeset text when
-   the PR also changes rule behaviour. Auto-merge is intentionally not
-   enabled — a refresh is exactly when `upstream-parity.yml` is most
-   likely to surface real regressions, so a human should look.
+   (`karinto: patch`, `Track <tool> <version> (was <old>).`; when the tool's
+   fixtures were empty and are vendored at the pinned version, `Vendor <tool>
+   <version> fixtures.`), then opens a PR via `peter-evans/create-pull-request`
+   labelled `dependencies`. The file name includes the version so an earlier
+   refresh's changeset that is still waiting for its release is not
+   overwritten. Rewrite the changeset text when the PR also changes rule
+   behaviour, and merge the PR before the next weekly run: while the PR is
+   open, each run rebuilds `chore/upstream-refresh` from `main`, which drops
+   commits pushed to that branch, the rewritten changeset included.
+   Auto-merge is intentionally not enabled — a refresh is exactly when
+   `upstream-parity.yml` is most likely to surface real regressions, so a
+   human should look.
 
 The PR body carries, per bump: a `compare/v<from>...<to>` link, a
 release-notes excerpt, and an incorporation checklist (added by

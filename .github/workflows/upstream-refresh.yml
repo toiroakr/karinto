@@ -87,7 +87,7 @@ jobs:
             echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
             echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
             echo '- [ ] `moon test` + local parity pass.'
-            echo '- [ ] If a rule behaviour changed to match the new upstream, rewrite the matching `.changeset/upstream-refresh-<tool>-<version>.md` to describe it (the generated text only says which version is tracked), and raise the bump level if the change is breaking.'
+            echo '- [ ] If a rule behaviour changed to match the new upstream, rewrite the matching `.changeset/upstream-refresh-<tool>-<version>.md` to describe it (the generated text only says which version is tracked), and raise the bump level if the change is breaking. Commits pushed to this branch are dropped when the next weekly or manual run rebuilds it from `main`, so merge or re-check before then.'
           } > pr-body.md
           # Pass the body to create-pull-request via `body-path` (below) rather
           # than round-tripping through $GITHUB_ENV: upstream release notes are
