@@ -36,6 +36,19 @@ jobs:
           changed=$(node -e "console.log(JSON.parse(require('fs').readFileSync('refresh-summary.json','utf8')).changed)")
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
+      - name: Write changeset
+        if: steps.refresh.outputs.changed == 'true'
+        run: |
+          # shellcheck disable=SC2016  # `${...}` below are JS template literals, not shell.
+          node -e '
+            const fs = require("fs");
+            const s = JSON.parse(fs.readFileSync("refresh-summary.json", "utf8"));
+            for (const u of s.updates) {
+              const line = u.bootstrap ? `Vendor ${u.name} ${u.to} fixtures.` : `Track ${u.name} ${u.to} (was ${u.from}).`;
+              fs.writeFileSync(`.changeset/upstream-refresh-${u.name}-${u.to}.md`, `---\n"karinto": patch\n---\n\n${line}\n`);
+            }
+          '
+
       - name: Build PR body
         if: steps.refresh.outputs.changed == 'true'
         id: body
@@ -74,6 +87,7 @@ jobs:
             echo '- [ ] Added the `run-parity` label and checked the `upstream-parity` step summary for `unmapped` rule IDs / Kinds.'
             echo '- [ ] For each new check: registered it in `rules_catalog.mbt` (+ mirrored `rules_catalog.md`) with a status, or recorded the intentional divergence in `scripts/upstream-parity/allowlist.json`.'
             echo '- [ ] `moon test` + local parity pass.'
+            echo '- [ ] If a rule behaviour changed to match the new upstream, rewrite the matching `.changeset/upstream-refresh-<tool>-<version>.md` to describe it (the generated text only says which version is tracked), and raise the bump level if the change is breaking. Commits pushed to this branch are dropped when the next weekly or manual run rebuilds it from `main`, so merge or re-check before then.'
           } > pr-body.md
           # Pass the body to create-pull-request via `body-path` (below) rather
           # than round-tripping through $GITHUB_ENV: upstream release notes are
@@ -103,6 +117,5 @@ jobs:
           delete-branch: true
           labels: |
             dependencies
-            skip-changeset
           # Don't enable auto-merge — a refresh PR may surface real parity
           # breaks that require human review.
