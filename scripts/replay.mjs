@@ -40,12 +40,27 @@ import {
   matchRules,
   normalize,
 } from "./lib/replay-diff.mjs";
-import { createHealthTracker, fetchText, sendTracked, waitUntilReady } from "./lib/replay-target.mjs";
+import {
+  createHealthTracker,
+  describeNonJson,
+  fetchText,
+  isTransientResponse,
+  sendTracked,
+  waitUntilReady,
+} from "./lib/replay-target.mjs";
 
 const DEFAULT_BUCKET = "karinto-captures";
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
 
 const DEFAULT_LIMIT = 200;
+
+// Pause before re-replaying captures whose first replay still ended in a
+// platform failure after `sendWithRetry`'s ~30s budget. A Cloudflare edge
+// error (e.g. a 503 page) can outlast that budget for one request while the
+// Worker serves every other capture fine; trying once more after the rest of
+// the run plus this cooldown separates such a blip from a real regression,
+// which still fails the second attempt and is reported as a diff.
+const DEFERRED_RETRY_DELAY_MS = 30000;
 
 function parseArgs(argv) {
   const args = { limit: DEFAULT_LIMIT };
@@ -243,12 +258,17 @@ async function replayOne(targetUrl, request, health) {
   // pollute the bucket (defense-in-depth — PR Workers also lack the binding).
   body.set("no_capture", "1");
 
-  const { status, text, error } = await sendTracked(() => postForm(targetUrl, body), health);
-  if (error) return { ok: false, error: `request failed: ${error}` };
+  const res = await sendTracked(() => postForm(targetUrl, body), health);
+  // `transient` marks a failure of the target rather than a verdict: the
+  // caller gives such a capture one more attempt before diffing it.
+  if (res.error) {
+    return { replayed: { ok: false, error: `request failed: ${res.error}` }, transient: true };
+  }
+  const transient = isTransientResponse(res);
   try {
-    return JSON.parse(text);
+    return { replayed: JSON.parse(res.text), transient };
   } catch {
-    return { ok: false, error: `non-JSON response (status=${status}): ${text.slice(0, 200)}` };
+    return { replayed: { ok: false, error: describeNonJson(res) }, transient };
   }
 }
 
@@ -422,12 +442,37 @@ async function main() {
   };
 
   const health = createHealthTracker();
-  for (const cap of captures) {
-    const replayed = await replayOne(args.target, cap.request, health);
+  const replayChecked = async (cap) => {
+    const res = await replayOne(args.target, cap.request, health);
     if (health.unhealthy()) {
       console.error(`${args.target} kept failing after retries; aborting the replay.`);
       process.exit(1);
     }
+    return res;
+  };
+
+  const results = [];
+  const deferred = [];
+  for (const cap of captures) {
+    const { replayed, transient } = await replayChecked(cap);
+    if (transient) {
+      console.log(`  defer   ${cap.hash.slice(0, 12)}  (${replayed.error ?? "target failure"})`);
+      deferred.push(results.length);
+    }
+    results.push({ cap, replayed });
+  }
+  if (deferred.length > 0) {
+    console.log(
+      `retrying ${deferred.length} capture(s) whose replay hit a target failure, ` +
+        `after ${DEFERRED_RETRY_DELAY_MS / 1000}s`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, DEFERRED_RETRY_DELAY_MS));
+    for (const idx of deferred) {
+      results[idx].replayed = (await replayChecked(results[idx].cap)).replayed;
+    }
+  }
+
+  for (const { cap, replayed } of results) {
     const diff = computeDiff(normalize(cap.response), normalize(replayed));
 
     if (diff.length === 0) {

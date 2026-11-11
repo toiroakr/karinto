@@ -14,6 +14,15 @@ export function isTransientResponse({ status, text }) {
   }
 }
 
+// One-line description of a response that is not the linter's JSON — usually
+// a Cloudflare edge error page (e.g. "Worker exceeded resource limits"). The
+// page's <title> names the failure; the first bytes are only a doctype.
+export function describeNonJson({ status, text }) {
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text ?? "")?.[1];
+  const detail = title ? title.replace(/\s+/g, " ").trim() : (text ?? "").slice(0, 200);
+  return `non-JSON response (status=${status}): ${detail}`;
+}
+
 export async function sendWithRetry(
   send,
   { retries = 4, baseDelayMs = 2000, sleep = defaultSleep } = {},

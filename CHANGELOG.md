@@ -1,5 +1,11 @@
 # karinto
 
+## 0.12.1
+
+### Patch Changes
+
+- [#180](https://github.com/toiroakr/karinto/pull/180) [`63ecd50`](https://github.com/toiroakr/karinto/commit/63ecd50fb384395c8211e03433ee0cd21dd2d209) Thanks [@toiroakr](https://github.com/toiroakr)! - Track zizmor 1.32.0: `obfuscation` no longer flags a constant expression whose string literals can join into `${{` (for example `${{ '${{' }}` or `${{ format('{0}{1}', '$', '{{') }}`), since replacing it by its value would create another expression. Literals such as `'$'` or `'a}}b'` are still flagged.
+
 ## 0.12.0
 
 ### Minor Changes

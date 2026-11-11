@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import {
   createHealthTracker,
+  describeNonJson,
   fetchText,
   isTransientResponse,
   sendTracked,
@@ -212,5 +213,26 @@ test("fetchText: times out when headers arrive but the body stalls", async () =>
     async (url) => {
       await assert.rejects(fetchText(url, {}, 100), /timed out after 100ms/);
     },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// describeNonJson
+// ---------------------------------------------------------------------------
+
+test("describeNonJson: names an HTML error page by its <title>", () => {
+  const text =
+    '<!DOCTYPE html>\n<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->\n' +
+    "<head><title>Worker exceeded resource limits |\n  example.workers.dev | Cloudflare</title></head>";
+  assert.equal(
+    describeNonJson({ status: 503, text }),
+    "non-JSON response (status=503): Worker exceeded resource limits | example.workers.dev | Cloudflare",
+  );
+});
+
+test("describeNonJson: falls back to the body prefix when there is no <title>", () => {
+  assert.equal(
+    describeNonJson({ status: 502, text: "x".repeat(300) }),
+    `non-JSON response (status=502): ${"x".repeat(200)}`,
   );
 });
