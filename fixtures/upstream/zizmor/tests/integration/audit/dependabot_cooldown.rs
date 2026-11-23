@@ -89,9 +89,9 @@ fn test_config_not_number() -> anyhow::Result<()> {
      INFO zizmor: 🌈 zizmor v@@VERSION@@
     fatal: no audit was performed
     error: configuration error in @@CONFIG@@
-      |
-      = help: check the configuration for the 'dependabot-cooldown' rule
-      = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
+     |
+     = help: check the configuration for the 'dependabot-cooldown' rule
+     = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
 
     Caused by:
         0: configuration error in @@CONFIG@@
@@ -116,9 +116,9 @@ fn test_invalid_config_zero_days() -> anyhow::Result<()> {
      INFO zizmor: 🌈 zizmor v@@VERSION@@
     fatal: no audit was performed
     error: configuration error in @@CONFIG@@
-      |
-      = help: check the configuration for the 'dependabot-cooldown' rule
-      = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
+     |
+     = help: check the configuration for the 'dependabot-cooldown' rule
+     = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
 
     Caused by:
         0: configuration error in @@CONFIG@@
@@ -143,9 +143,9 @@ fn test_invalid_config_negative_days() -> anyhow::Result<()> {
      INFO zizmor: 🌈 zizmor v@@VERSION@@
     fatal: no audit was performed
     error: configuration error in @@CONFIG@@
-      |
-      = help: check the configuration for the 'dependabot-cooldown' rule
-      = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
+     |
+     = help: check the configuration for the 'dependabot-cooldown' rule
+     = help: see: https://docs.zizmor.sh/audits/#dependabot-cooldown-configuration
 
     Caused by:
         0: configuration error in @@CONFIG@@
@@ -318,6 +318,91 @@ updates:
          schedule:
            interval: daily
          insecure-external-code-execution: deny
+    "
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fix_insufficient_semver_days() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    cooldown:
+      default-days: 1
+      semver-major-days: 2
+      semver-minor-days: 3
+      semver-patch-days: 4
+    schedule:
+      interval: daily
+"#;
+
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            Zizmor::cargo_bin()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -6,8 +6,8 @@
+         directory: /
+         cooldown:
+           default-days: 1
+    -      semver-major-days: 2
+    -      semver-minor-days: 3
+    -      semver-patch-days: 4
+    +      semver-major-days: 7
+    +      semver-minor-days: 7
+    +      semver-patch-days: 7
+         schedule:
+           interval: daily
+    "
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fix_missing_default_days_with_semver() -> anyhow::Result<()> {
+    let dependabot_content = r#"
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    cooldown:
+      semver-major-days: 14
+      semver-minor-days: 2
+    schedule:
+      interval: daily
+"#;
+
+    let workspace = WorkspaceBuilder::default().is_git_repo(true).build()?;
+    workspace.add_file(".github/dependabot.yml", dependabot_content);
+
+    insta::assert_snapshot!(
+        &workspace.diff(".github/dependabot.yml", |workspace| {
+            Zizmor::cargo_bin()
+                .args(["--fix=all"])
+                .input(workspace.path())
+                .run()
+        })?,
+        @"
+    @@ -6,6 +6,7 @@
+         directory: /
+         cooldown:
+           semver-major-days: 14
+    -      semver-minor-days: 2
+    +      semver-minor-days: 7
+    +      default-days: 7
+         schedule:
+           interval: daily
     "
     );
     Ok(())
